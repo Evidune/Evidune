@@ -190,7 +190,15 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         gateways_list.append(create_gateway("cli"))
     else:
         for gw_config in config.gateways:
-            gateways_list.append(create_gateway(gw_config.type, **gw_config.config))
+            gw = create_gateway(gw_config.type, **gw_config.config)
+            gateways_list.append(gw)
+
+    # Initialize web gateways with skill metadata
+    from gateway.web import WebGateway
+    skills_meta = [{"name": s.name, "description": s.description} for s in skill_registry.all()]
+    for gw in gateways_list:
+        if isinstance(gw, WebGateway):
+            gw.set_skills(skills_meta)
 
     router = Router(agent=agent, gateways=gateways_list)
 

@@ -7,3 +7,5 @@ build/
 *.db
 .env
 .claude/
+web/node_modules/
+web/dist/

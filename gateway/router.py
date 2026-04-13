@@ -9,6 +9,7 @@ from agent.core import AgentCore
 from gateway.base import Gateway, InboundMessage, OutboundMessage
 from gateway.cli import CLIGateway
 from gateway.feishu_bot import FeishuBotGateway
+from gateway.web import WebGateway
 
 
 def create_gateway(gateway_type: str, **config: Any) -> Gateway:
@@ -17,6 +18,8 @@ def create_gateway(gateway_type: str, **config: Any) -> Gateway:
         return CLIGateway(**{k: v for k, v in config.items() if k in ("user_id",)})
     elif gateway_type == "feishu_bot":
         return FeishuBotGateway(**config)
+    elif gateway_type == "web":
+        return WebGateway(**{k: v for k, v in config.items() if k in ("port", "host")})
     else:
         raise ValueError(f"Unknown gateway type: {gateway_type}")
 
