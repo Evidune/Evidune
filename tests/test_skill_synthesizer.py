@@ -4,22 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern
 from agent.skill_synthesizer import SkillSynthesizer, _strip_code_fence
-
-
-class MockJudge(LLMClient):
-    def __init__(self, response: str):
-        self.response = response
-        self.last_messages = None
-        self.last_kwargs: dict = {}
-
-    async def complete(self, messages, **kwargs):
-        self.last_messages = messages
-        self.last_kwargs = kwargs
-        return self.response
-
+from tests.conftest import MockJudge
 
 SAMPLE_SKILL_MD = """---
 name: explain-topic

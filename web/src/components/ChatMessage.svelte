@@ -104,14 +104,9 @@
     align-self: flex-start;
   }
 
-  .msg-label {
-    font-size: 11px;
-    color: var(--text2);
-    margin-bottom: 4px;
-    padding: 0 4px;
-  }
-
-  .msg.user .msg-label {
+  /* .msg-label base styles live in app.css; only the user-side
+     alignment override stays here */
+  .msg.user :global(.msg-label) {
     text-align: right;
   }
 

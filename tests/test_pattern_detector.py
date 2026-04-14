@@ -2,20 +2,8 @@
 
 import pytest
 
-from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern, PatternDetector, _parse_response, _slugify
-
-
-class MockJudge(LLMClient):
-    def __init__(self, response: str):
-        self.response = response
-        self.last_messages = None
-        self.last_kwargs: dict = {}
-
-    async def complete(self, messages, **kwargs):
-        self.last_messages = messages
-        self.last_kwargs = kwargs
-        return self.response
+from tests.conftest import MockJudge
 
 
 class TestParseResponse:

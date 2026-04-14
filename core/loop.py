@@ -7,9 +7,10 @@ import sys
 from pathlib import Path
 
 from channels.base import IterationReport, create_channel
-from core.analyzer import AnalysisResult, analyze
+from core.analyzer import analyze
 from core.config import AiflayConfig, load_config
 from core.git_ops import commit_changes
+from core.iteration_helpers import build_reference_content, update_outcome_skills
 from core.metrics import get_adapter
 from core.updater import update_reference
 
@@ -53,7 +54,7 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
         ref_path = base_dir / ref.path
 
         # Build new content from analysis
-        new_content = _build_reference_content(ref.update_strategy, ref.section, result)
+        new_content = build_reference_content(ref.update_strategy, ref.section, result)
 
         update = update_reference(
             path=ref_path,
@@ -65,7 +66,7 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
 
     # 3b. Self-iterate outcome skills (Aiflay's unique differentiator)
     if config.skills.auto_update:
-        updates.extend(_update_outcome_skills(config, base_dir, result))
+        updates.extend(update_outcome_skills(config, base_dir, result))
 
     # 4. Git commit
     commit_sha = None
@@ -99,110 +100,6 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
         channel.send_report(report)
 
     return report
-
-
-def _update_outcome_skills(
-    config: AiflayConfig,
-    base_dir: Path,
-    result: AnalysisResult,
-) -> list:
-    """Update SKILL.md files for skills with outcome_metrics: true.
-
-    For each such skill, replaces the skill's update_section (default
-    "## Reference Data") with Top Performers + Patterns derived from
-    the current analysis.
-
-    Returns a list of UpdateResult objects appended to the main updates list.
-    """
-    from skills.registry import SkillRegistry
-
-    registry = SkillRegistry()
-    for skill_dir in config.skills.directories:
-        registry.load_directory(base_dir / skill_dir)
-
-    skill_updates = []
-    for skill in registry.get_outcome_skills():
-        section = skill.update_section
-        new_content = _build_skill_reference_content(section, result)
-
-        update = update_reference(
-            path=skill.path,
-            strategy="replace_section",
-            new_content=new_content,
-            section=section,
-        )
-        skill_updates.append(update)
-
-    return skill_updates
-
-
-def _build_skill_reference_content(
-    section: str,
-    result: AnalysisResult,
-) -> str:
-    """Build the skill's reference data section from analysis results.
-
-    Output: heading + timestamp + Top Performers + Patterns.
-    Bottom performers are omitted (not useful as positive guidance for skills).
-    """
-    from datetime import datetime, timezone
-
-    lines = [section, ""]
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines.append(f"*Auto-updated by aiflay on {timestamp}*")
-    lines.append("")
-
-    if result.top_performers:
-        lines.append("### Top Performers")
-        for i, r in enumerate(result.top_performers, 1):
-            metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
-            lines.append(f"{i}. **{r.title}** — {metrics_str}")
-        lines.append("")
-
-    if result.patterns:
-        lines.append("### Patterns")
-        for p in result.patterns:
-            lines.append(f"- {p}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def _build_reference_content(
-    strategy: str,
-    section: str | None,
-    result: AnalysisResult,
-) -> str:
-    """Build new content for a reference document based on analysis results."""
-
-    lines = []
-
-    if strategy == "replace_section" and section:
-        # Rebuild the section with fresh data
-        lines.append(f"{section}")
-        lines.append("")
-
-    if result.top_performers:
-        lines.append("### Top Performers")
-        for i, r in enumerate(result.top_performers, 1):
-            metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
-            lines.append(f"{i}. **{r.title}** — {metrics_str}")
-        lines.append("")
-
-    if result.bottom_performers:
-        lines.append("### Bottom Performers")
-        for r in result.bottom_performers:
-            metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
-            lines.append(f"- {r.title} — {metrics_str}")
-        lines.append("")
-
-    if result.patterns:
-        lines.append("### Patterns")
-        for p in result.patterns:
-            lines.append(f"- {p}")
-        lines.append("")
-
-    return "\n".join(lines)
 
 
 async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:

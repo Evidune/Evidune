@@ -38,7 +38,16 @@ dev = [
 aiflay = "core.loop:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["core", "adapters", "channels", "memory", "skills", "personas", "agent", "gateway"]
+packages = [
+    "core",
+    "adapters",
+    "channels",
+    "memory",
+    "skills",
+    "personas",
+    "agent",
+    "gateway",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

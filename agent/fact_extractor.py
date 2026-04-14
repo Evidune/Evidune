@@ -18,12 +18,11 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass
 from typing import Any
 
 from agent.llm import LLMClient
+from agent.utils import format_conversation, format_facts_inline, parse_json_response
 from memory.store import Fact
 
 
@@ -72,48 +71,15 @@ Use snake_case dotted keys (user.X, project.Y, preference.Z).
 """
 
 
-def _format_existing(existing: list[Fact]) -> str:
-    if not existing:
-        return "(none)"
-    return "\n".join(f"- {f.key}: {f.value}" for f in existing)
-
-
-def _format_conversation(history: list[dict[str, str]]) -> str:
-    if not history:
-        return "(empty)"
-    lines = []
-    for msg in history:
-        role = msg.get("role", "?")
-        content = msg.get("content", "")
-        # Truncate over-long messages
-        if len(content) > 600:
-            content = content[:600] + "…"
-        lines.append(f"[{role}] {content}")
-    return "\n".join(lines)
-
-
-_JSON_OBJ_RE = re.compile(r"\{[\s\S]*\}", re.MULTILINE)
+# Backwards-compatible alias for tests
+_format_existing = format_facts_inline
+_format_conversation = format_conversation
 
 
 def _parse_response(raw: str) -> list[ExtractedFact]:
     """Parse JSON {facts: [...]} from the LLM response. Tolerant of fences."""
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```[a-zA-Z]*\n", "", cleaned)
-        cleaned = re.sub(r"\n```\s*$", "", cleaned)
-
-    data: dict[str, Any] | None = None
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
-        m = _JSON_OBJ_RE.search(cleaned)
-        if m:
-            try:
-                data = json.loads(m.group(0))
-            except json.JSONDecodeError:
-                data = None
-
-    if not isinstance(data, dict):
+    data = parse_json_response(raw)
+    if data is None:
         return []
 
     items = data.get("facts", [])

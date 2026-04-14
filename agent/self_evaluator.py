@@ -12,12 +12,12 @@ reasoning. Scores are persisted to memory.store.skill_executions.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from agent.llm import LLMClient
+from agent.utils import parse_json_response
 from skills.loader import Skill
 
 
@@ -86,7 +86,7 @@ def _build_prompt(skill: Skill, user_input: str, assistant_output: str) -> str:
     )
 
 
-_JSON_RE = re.compile(r"\{[^{}]*\"score\"[^{}]*\}", re.DOTALL)
+_SCORE_BLOB_RE = re.compile(r"\{[^{}]*\"score\"[^{}]*\}", re.DOTALL)
 
 
 def _parse_response(raw: str) -> tuple[float, str]:
@@ -94,27 +94,11 @@ def _parse_response(raw: str) -> tuple[float, str]:
 
     Tolerant of surrounding text or markdown code fences.
     """
-    # Strip code fences
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```[a-zA-Z]*\n", "", cleaned)
-        cleaned = re.sub(r"\n```\s*$", "", cleaned)
-
-    # Try whole-string parse first
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
-        # Fall back: extract first JSON-looking blob
-        m = _JSON_RE.search(cleaned)
-        if not m:
-            return 0.0, f"Unparseable evaluator response: {raw[:200]}"
-        try:
-            data = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return 0.0, f"Unparseable evaluator response: {raw[:200]}"
-
+    data = parse_json_response(raw, hint_pattern=_SCORE_BLOB_RE)
+    if data is None:
+        return 0.0, f"Unparseable evaluator response: {raw[:200]}"
     score = float(data.get("score", 0.0))
-    score = max(0.0, min(1.0, score))  # clamp to [0, 1]
+    score = max(0.0, min(1.0, score))
     reasoning = str(data.get("reasoning", "")).strip()
     return score, reasoning
 

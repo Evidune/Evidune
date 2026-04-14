@@ -15,13 +15,13 @@ before promoting to "active".
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern
+from agent.utils import format_conversation, strip_code_fence
 
 DEFAULT_OUTPUT_DIR = Path.home() / ".aiflay" / "emerged_skills"
 
@@ -65,25 +65,12 @@ Be concrete and useful. Do not include placeholder text like "TODO" or "fill thi
 
 
 def _format_conversation(history: list[dict[str, str]]) -> str:
-    if not history:
-        return "(empty)"
-    lines = []
-    for msg in history:
-        role = msg.get("role", "?")
-        content = msg.get("content", "")
-        if len(content) > 1200:
-            content = content[:1200] + "…"
-        lines.append(f"[{role}] {content}")
-    return "\n".join(lines)
+    return format_conversation(history, max_content_length=1200)
 
 
 def _strip_code_fence(raw: str) -> str:
     """If the LLM wraps the output in ```markdown ...```, strip it."""
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```[a-zA-Z]*\n", "", cleaned)
-        cleaned = re.sub(r"\n```\s*$", "", cleaned)
-    return cleaned.strip() + "\n"
+    return strip_code_fence(raw).strip() + "\n"
 
 
 class SkillSynthesizer:

@@ -18,12 +18,7 @@
     to { opacity: 1; }
   }
 
-  .msg-label {
-    font-size: 11px;
-    color: var(--text2);
-    margin-bottom: 4px;
-    padding: 0 4px;
-  }
+  /* .msg-label styles live in app.css */
 
   .typing {
     display: flex;

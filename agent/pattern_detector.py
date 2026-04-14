@@ -15,12 +15,12 @@ Keeping detection separate from synthesis lets us:
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from agent.llm import LLMClient
+from agent.utils import format_conversation, format_skill_names, parse_json_response
 
 
 @dataclass
@@ -76,45 +76,16 @@ prefer false negative over false positive — only propose skills you are
 """
 
 
-def _format_skills(skill_names: list[str]) -> str:
-    if not skill_names:
-        return "(none)"
-    return "\n".join(f"- {n}" for n in skill_names)
+# Backwards-compatible aliases (larger max_content for detection)
+_format_skills = format_skill_names
 
 
 def _format_conversation(history: list[dict[str, str]]) -> str:
-    if not history:
-        return "(empty)"
-    lines = []
-    for msg in history:
-        role = msg.get("role", "?")
-        content = msg.get("content", "")
-        if len(content) > 800:
-            content = content[:800] + "…"
-        lines.append(f"[{role}] {content}")
-    return "\n".join(lines)
-
-
-_JSON_OBJ_RE = re.compile(r"\{[\s\S]*\}", re.MULTILINE)
+    return format_conversation(history, max_content_length=800)
 
 
 def _parse_response(raw: str) -> DetectedPattern:
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```[a-zA-Z]*\n", "", cleaned)
-        cleaned = re.sub(r"\n```\s*$", "", cleaned)
-
-    data: dict[str, Any] | None = None
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
-        m = _JSON_OBJ_RE.search(cleaned)
-        if m:
-            try:
-                data = json.loads(m.group(0))
-            except json.JSONDecodeError:
-                pass
-
+    data = parse_json_response(raw)
     if not isinstance(data, dict):
         return DetectedPattern(is_skill=False, rationale="Unparseable response")
 

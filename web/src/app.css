@@ -37,3 +37,11 @@ html, body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Shared chat primitives used by multiple components */
+.msg-label {
+  font-size: 11px;
+  color: var(--text2);
+  margin-bottom: 4px;
+  padding: 0 4px;
+}

@@ -9,20 +9,8 @@ from agent.fact_extractor import (
     _format_existing,
     _parse_response,
 )
-from agent.llm import LLMClient
 from memory.store import Fact
-
-
-class MockJudge(LLMClient):
-    def __init__(self, response: str):
-        self.response = response
-        self.last_messages = None
-        self.last_kwargs: dict = {}
-
-    async def complete(self, messages, **kwargs):
-        self.last_messages = messages
-        self.last_kwargs = kwargs
-        return self.response
+from tests.conftest import MockJudge
 
 
 class TestParseResponse:
