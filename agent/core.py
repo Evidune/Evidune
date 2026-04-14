@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent.fact_extractor import FactExtractor
 from agent.llm import LLMClient
 from gateway.base import InboundMessage, OutboundMessage
 from memory.store import MemoryStore
@@ -21,6 +22,9 @@ class AgentCore:
         system_prompt: str = "",
         max_history: int = 20,
         persona_registry: PersonaRegistry | None = None,
+        fact_extractor: FactExtractor | None = None,
+        fact_extraction_every_n_turns: int = 5,
+        fact_extraction_min_confidence: float = 0.7,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -28,6 +32,10 @@ class AgentCore:
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.personas = persona_registry or PersonaRegistry()
+        self.fact_extractor = fact_extractor
+        self.fact_extraction_every_n_turns = fact_extraction_every_n_turns
+        self.fact_extraction_min_confidence = fact_extraction_min_confidence
+        self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
 
     def _resolve_persona(self, message: InboundMessage) -> Persona | None:
         """Pick the persona for this turn.
@@ -91,6 +99,9 @@ class AgentCore:
             )
             execution_ids.append(eid)
 
+        # 9. Auto fact extraction (every N turns, when enabled)
+        extracted_count = await self._maybe_extract_facts(message, persona)
+
         # Trim old history
         self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
 
@@ -101,8 +112,38 @@ class AgentCore:
                 "skills": [s.name for s in relevant_skills],
                 "execution_ids": execution_ids,
                 "persona": persona.name if persona else None,
+                "facts_extracted": extracted_count,
             },
         )
+
+    async def _maybe_extract_facts(self, message: InboundMessage, persona: Persona | None) -> int:
+        """Extract new facts from history every N turns. Returns count saved."""
+        if not self.fact_extractor:
+            return 0
+
+        conv_id = message.conversation_id
+        self._turn_counts[conv_id] = self._turn_counts.get(conv_id, 0) + 1
+        if self._turn_counts[conv_id] % self.fact_extraction_every_n_turns != 0:
+            return 0
+
+        namespace = persona.namespace if persona else ""
+        history = self.memory.get_history(conv_id, self.max_history)
+        existing = self.memory.get_facts(namespace=namespace) + (
+            self.memory.get_facts(namespace="") if namespace else []
+        )
+
+        try:
+            candidates = await self.fact_extractor.extract(history, existing_facts=existing)
+        except Exception:
+            return 0
+
+        saved = 0
+        for c in candidates:
+            if c.confidence < self.fact_extraction_min_confidence:
+                continue
+            self.memory.set_fact(c.key, c.value, source="auto", namespace=namespace)
+            saved += 1
+        return saved
 
     def _build_messages(
         self,

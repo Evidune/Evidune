@@ -56,6 +56,21 @@ class ChannelConfig:
 
 
 @dataclass
+class FactExtractionConfig:
+    """Auto fact extraction from conversation history.
+
+    When enabled, every N turns the agent asks an LLM (the evaluator
+    if configured, otherwise the main LLM) to scan recent messages
+    and extract persistent facts worth remembering.
+    """
+
+    enabled: bool = False
+    every_n_turns: int = 5
+    min_confidence: float = 0.7
+    use_evaluator: bool = True  # If False, use the main agent LLM
+
+
+@dataclass
 class EvaluatorConfig:
     """Cross-model evaluator config.
 
@@ -79,6 +94,7 @@ class AgentConfig:
     temperature: float = 0.7
     system_prompt: str = ""
     evaluator: EvaluatorConfig | None = None
+    fact_extraction: FactExtractionConfig = field(default_factory=FactExtractionConfig)
 
 
 @dataclass
@@ -214,6 +230,13 @@ def load_config(path: str | Path) -> AiflayConfig:
                 llm_base_url=eval_raw.get("llm_base_url"),
                 api_key_env=eval_raw.get("api_key_env", "ANTHROPIC_API_KEY"),
             )
+        fe_raw = agent_raw.get("fact_extraction", {})
+        fact_extraction = FactExtractionConfig(
+            enabled=fe_raw.get("enabled", False),
+            every_n_turns=fe_raw.get("every_n_turns", 5),
+            min_confidence=fe_raw.get("min_confidence", 0.7),
+            use_evaluator=fe_raw.get("use_evaluator", True),
+        )
         agent = AgentConfig(
             llm_provider=agent_raw.get("llm_provider", "openai"),
             llm_model=agent_raw.get("llm_model", "gpt-4o"),
@@ -223,6 +246,7 @@ def load_config(path: str | Path) -> AiflayConfig:
             temperature=agent_raw.get("temperature", 0.7),
             system_prompt=agent_raw.get("system_prompt", ""),
             evaluator=evaluator,
+            fact_extraction=fact_extraction,
         )
 
     # Skills config

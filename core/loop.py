@@ -257,6 +257,24 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
     if config.personas.default and persona_registry.get(config.personas.default):
         persona_registry.set_default(config.personas.default)
 
+    # Optional fact extractor (uses evaluator LLM if configured, else main LLM)
+    fact_extractor = None
+    if config.agent.fact_extraction.enabled:
+        from agent.fact_extractor import FactExtractor
+
+        if config.agent.fact_extraction.use_evaluator and config.agent.evaluator:
+            ev = config.agent.evaluator
+            judge = create_llm_client(
+                provider=ev.llm_provider,
+                model=ev.llm_model,
+                api_key=os.environ.get(ev.api_key_env),
+                base_url=ev.llm_base_url,
+                temperature=0.1,
+            )
+        else:
+            judge = llm
+        fact_extractor = FactExtractor(judge=judge)
+
     agent = AgentCore(
         llm=llm,
         skill_registry=skill_registry,
@@ -264,6 +282,9 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         system_prompt=config.agent.system_prompt,
         max_history=config.agent.max_history,
         persona_registry=persona_registry,
+        fact_extractor=fact_extractor,
+        fact_extraction_every_n_turns=config.agent.fact_extraction.every_n_turns,
+        fact_extraction_min_confidence=config.agent.fact_extraction.min_confidence,
     )
 
     # Create gateways
