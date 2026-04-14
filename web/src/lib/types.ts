@@ -20,6 +20,9 @@ export interface ChatResponse {
   conversation_id: string
   skills?: string[]
   execution_ids?: number[]
+  emerged_skill?: string | null
+  facts_extracted?: number
+  persona?: string | null
   error?: string
 }
 

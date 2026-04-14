@@ -7,15 +7,24 @@
   import ChatInput from './components/ChatInput.svelte'
   import SkillsBar from './components/SkillsBar.svelte'
   import TypingIndicator from './components/TypingIndicator.svelte'
+  import Toast from './components/Toast.svelte'
 
   let messagesEl: HTMLDivElement
   let skillsList: typeof $skills = $state([])
   let loading = $state(false)
   let messageList: Message[] = $state([])
+  let toast: { message: string; kind: 'info' | 'success' | 'error' } | null = $state(null)
 
   messages.subscribe(v => messageList = v)
   skills.subscribe(v => skillsList = v)
   isLoading.subscribe(v => loading = v)
+
+  function showToast(message: string, kind: 'info' | 'success' | 'error' = 'info') {
+    toast = { message, kind }
+    setTimeout(() => {
+      toast = null
+    }, 5000)
+  }
 
   onMount(async () => {
     const loaded = await fetchSkills()
@@ -61,6 +70,22 @@
     if (resp.skills?.length) {
       activeSkills.set(resp.skills)
     }
+
+    // Skill emergence notification — and refresh the skills bar
+    if (resp.emerged_skill) {
+      showToast(`✨ New skill emerged: ${resp.emerged_skill}`, 'success')
+      const updated = await fetchSkills()
+      skills.set(updated)
+    }
+
+    // Fact extraction notification (subtle)
+    if (resp.facts_extracted && resp.facts_extracted > 0) {
+      showToast(
+        `Learned ${resp.facts_extracted} new fact${resp.facts_extracted > 1 ? 's' : ''}`,
+        'info',
+      )
+    }
+
     await scrollToBottom()
   }
 
@@ -75,6 +100,10 @@
     return undefined
   }
 </script>
+
+{#if toast}
+  <Toast message={toast.message} kind={toast.kind} onClose={() => (toast = null)} />
+{/if}
 
 <header>
   <h1><span class="dot">●</span> Aiflay</h1>
