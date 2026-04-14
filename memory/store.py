@@ -93,6 +93,102 @@ class MemoryStore:
         self._conn.commit()
         return to_delete
 
+    def list_conversations(
+        self,
+        limit: int = 50,
+        status: str | None = "active",
+        channel: str | None = None,
+    ) -> list[dict]:
+        """List conversations ordered by most recent activity.
+
+        Defaults to only `active` conversations. Pass status=None for
+        everything (incl. archived), or status='archived' for just archived.
+        Each row is enriched with message_count + last-message preview.
+        """
+        where: list[str] = []
+        params: list = []
+        if status is not None:
+            where.append("c.status = ?")
+            params.append(status)
+        if channel is not None:
+            where.append("c.channel = ?")
+            params.append(channel)
+        where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+
+        params.append(limit)
+        rows = self._conn.execute(
+            f"""SELECT c.id, c.channel, c.title, c.status,
+                       c.created_at, c.updated_at,
+                       (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id)
+                         AS message_count,
+                       (SELECT content FROM messages
+                        WHERE conversation_id = c.id
+                        ORDER BY id DESC LIMIT 1) AS last_message
+               FROM conversations c
+               {where_clause}
+               ORDER BY c.updated_at DESC
+               LIMIT ?""",
+            params,
+        ).fetchall()
+
+        out: list[dict] = []
+        for r in rows:
+            preview = r["last_message"] or ""
+            if len(preview) > 120:
+                preview = preview[:120] + "…"
+            out.append(
+                {
+                    "id": r["id"],
+                    "channel": r["channel"],
+                    "title": r["title"] or "",
+                    "status": r["status"],
+                    "created_at": r["created_at"],
+                    "updated_at": r["updated_at"],
+                    "message_count": r["message_count"],
+                    "preview": preview,
+                }
+            )
+        return out
+
+    def get_conversation(self, conversation_id: str) -> dict | None:
+        """Get a conversation's metadata (without history)."""
+        row = self._conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_conversation_title(self, conversation_id: str, title: str) -> bool:
+        cursor = self._conn.execute(
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
+            (title, self._now(), conversation_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def set_conversation_status(self, conversation_id: str, status: str) -> bool:
+        """Set status to 'active' or 'archived'."""
+        if status not in ("active", "archived"):
+            raise ValueError(f"Invalid status: {status!r}")
+        cursor = self._conn.execute(
+            "UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?",
+            (status, self._now(), conversation_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete a conversation and all its messages + skill executions.
+
+        Returns True if the conversation row existed.
+        """
+        self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        self._conn.execute(
+            "DELETE FROM skill_executions WHERE conversation_id = ?", (conversation_id,)
+        )
+        cursor = self._conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     # --- Facts API (namespaced) ---
     #
     # namespace="" is the global / shared namespace (default).

@@ -12,9 +12,12 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     channel TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 
 CREATE TABLE IF NOT EXISTS skill_executions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,9 +88,10 @@ CREATE INDEX IF NOT EXISTS idx_facts_namespace ON facts(namespace);
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Create tables if missing and migrate old facts schema if needed."""
+    """Create tables if missing and migrate old schemas if needed."""
     conn.executescript(_SCHEMA)
     _migrate_facts_namespace(conn)
+    _migrate_conversations_metadata(conn)
     conn.commit()
 
 
@@ -97,3 +101,13 @@ def _migrate_facts_namespace(conn: sqlite3.Connection) -> None:
     if "namespace" in cols:
         return
     conn.executescript(_MIGRATE_FACTS_NAMESPACE)
+
+
+def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
+    """Older DBs have conversations without title / status; ADD COLUMN them."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+    if "title" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT ''")
+    if "status" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN status TEXT DEFAULT 'active'")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status)")

@@ -1,4 +1,11 @@
-import type { ChatResponse, FeedbackRequest, FeedbackResponse, Skill } from './types'
+import type {
+  ChatResponse,
+  ConversationHistory,
+  ConversationSummary,
+  FeedbackRequest,
+  FeedbackResponse,
+  Skill,
+} from './types'
 
 const BASE = ''
 
@@ -30,4 +37,33 @@ export async function sendFeedback(req: FeedbackRequest): Promise<FeedbackRespon
     return { error: `HTTP ${resp.status}` }
   }
   return resp.json()
+}
+
+export async function fetchConversations(): Promise<ConversationSummary[]> {
+  const resp = await fetch(`${BASE}/api/conversations`)
+  if (!resp.ok) return []
+  return resp.json()
+}
+
+export async function fetchConversationHistory(
+  id: string,
+): Promise<ConversationHistory | null> {
+  const resp = await fetch(`${BASE}/api/conversations/${encodeURIComponent(id)}/history`)
+  if (!resp.ok) return null
+  return resp.json()
+}
+
+export async function deleteConversation(id: string): Promise<boolean> {
+  const resp = await fetch(`${BASE}/api/conversations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+  return resp.ok
+}
+
+export async function archiveConversation(id: string): Promise<boolean> {
+  const resp = await fetch(
+    `${BASE}/api/conversations/${encodeURIComponent(id)}/archive`,
+    { method: 'POST' },
+  )
+  return resp.ok
 }

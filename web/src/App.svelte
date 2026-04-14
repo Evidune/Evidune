@@ -1,10 +1,18 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import { messages, skills, activeSkills, isLoading, conversationId } from './lib/stores'
-  import { fetchSkills, sendMessage } from './lib/api'
-  import type { Message } from './lib/types'
+  import {
+    archiveConversation,
+    deleteConversation,
+    fetchConversationHistory,
+    fetchConversations,
+    fetchSkills,
+    sendMessage,
+  } from './lib/api'
+  import type { ConversationSummary, Message } from './lib/types'
   import ChatMessage from './components/ChatMessage.svelte'
   import ChatInput from './components/ChatInput.svelte'
+  import ConversationList from './components/ConversationList.svelte'
   import SkillsBar from './components/SkillsBar.svelte'
   import TypingIndicator from './components/TypingIndicator.svelte'
   import Toast from './components/Toast.svelte'
@@ -14,10 +22,13 @@
   let loading = $state(false)
   let messageList: Message[] = $state([])
   let toast: { message: string; kind: 'info' | 'success' | 'error' } | null = $state(null)
+  let conversations: ConversationSummary[] = $state([])
+  let activeConvId = $state('')
 
-  messages.subscribe(v => messageList = v)
-  skills.subscribe(v => skillsList = v)
-  isLoading.subscribe(v => loading = v)
+  messages.subscribe(v => (messageList = v))
+  skills.subscribe(v => (skillsList = v))
+  isLoading.subscribe(v => (loading = v))
+  conversationId.subscribe(v => (activeConvId = v))
 
   function showToast(message: string, kind: 'info' | 'success' | 'error' = 'info') {
     toast = { message, kind }
@@ -26,9 +37,75 @@
     }, 5000)
   }
 
+  async function refreshConversations() {
+    conversations = await fetchConversations()
+  }
+
+  function freshConversationId(): string {
+    return `web-${crypto.randomUUID().slice(0, 8)}`
+  }
+
+  function resetWelcome() {
+    messages.set([
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: "Hi! I'm Aiflay. Pick a past chat from the sidebar, or start a new one.",
+        timestamp: Date.now(),
+      },
+    ])
+  }
+
+  async function startNewConversation() {
+    conversationId.set(freshConversationId())
+    resetWelcome()
+    activeSkills.set([])
+    await scrollToBottom()
+  }
+
+  async function selectConversation(id: string) {
+    if (id === activeConvId) return
+    conversationId.set(id)
+    const history = await fetchConversationHistory(id)
+    if (!history) return
+    const mapped: Message[] = history.messages.map((m, idx) => ({
+      id: `${id}-${idx}`,
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+      timestamp: Date.now() + idx,
+    }))
+    messages.set(mapped)
+    activeSkills.set([])
+    await scrollToBottom()
+  }
+
+  async function handleDelete(id: string) {
+    const ok = await deleteConversation(id)
+    if (!ok) {
+      showToast('Failed to delete', 'error')
+      return
+    }
+    await refreshConversations()
+    if (id === activeConvId) {
+      await startNewConversation()
+    }
+  }
+
+  async function handleArchive(id: string) {
+    const ok = await archiveConversation(id)
+    if (!ok) {
+      showToast('Failed to archive', 'error')
+      return
+    }
+    await refreshConversations()
+    if (id === activeConvId) {
+      await startNewConversation()
+    }
+  }
+
   onMount(async () => {
-    const loaded = await fetchSkills()
-    skills.set(loaded)
+    const [loadedSkills] = await Promise.all([fetchSkills(), refreshConversations()])
+    skills.set(loadedSkills)
   })
 
   async function scrollToBottom() {
@@ -51,10 +128,7 @@
     activeSkills.set([])
     await scrollToBottom()
 
-    let convId = ''
-    conversationId.subscribe(v => convId = v)()
-
-    const resp = await sendMessage(text, convId)
+    const resp = await sendMessage(text, activeConvId)
     isLoading.set(false)
 
     const botMsg: Message = {
@@ -71,20 +145,25 @@
       activeSkills.set(resp.skills)
     }
 
-    // Skill emergence notification — and refresh the skills bar
     if (resp.emerged_skill) {
       showToast(`✨ New skill emerged: ${resp.emerged_skill}`, 'success')
       const updated = await fetchSkills()
       skills.set(updated)
     }
 
-    // Fact extraction notification (subtle)
     if (resp.facts_extracted && resp.facts_extracted > 0) {
       showToast(
         `Learned ${resp.facts_extracted} new fact${resp.facts_extracted > 1 ? 's' : ''}`,
         'info',
       )
     }
+
+    if (resp.new_title) {
+      showToast(`Titled: ${resp.new_title}`, 'info')
+    }
+
+    // Refresh sidebar so the just-used conversation bubbles up
+    await refreshConversations()
 
     await scrollToBottom()
   }
@@ -105,32 +184,58 @@
   <Toast message={toast.message} kind={toast.kind} onClose={() => (toast = null)} />
 {/if}
 
-<header>
-  <h1><span class="dot">●</span> Aiflay</h1>
-  <div class="header-meta">
-    <div class="status-dot" class:thinking={loading}></div>
-    <span>{loading ? 'Thinking...' : 'Ready'}</span>
-  </div>
-</header>
+<div class="app-shell">
+  <ConversationList
+    conversations={conversations}
+    activeId={activeConvId}
+    onSelect={selectConversation}
+    onNew={startNewConversation}
+    onDelete={handleDelete}
+    onArchive={handleArchive}
+  />
 
-<SkillsBar skills={skillsList} />
+  <main class="main">
+    <header>
+      <h1><span class="dot">●</span> Aiflay</h1>
+      <div class="header-meta">
+        <div class="status-dot" class:thinking={loading}></div>
+        <span>{loading ? 'Thinking...' : 'Ready'}</span>
+      </div>
+    </header>
 
-<div class="messages" bind:this={messagesEl}>
-  {#each messageList as msg, i (msg.id)}
-    {@const prior = msg.role === 'assistant' ? getPriorUserMessage(i) : undefined}
-    <ChatMessage
-      message={msg}
-      onRegenerate={prior ? () => handleRegenerate(prior) : undefined}
-    />
-  {/each}
-  {#if loading}
-    <TypingIndicator />
-  {/if}
+    <SkillsBar skills={skillsList} />
+
+    <div class="messages" bind:this={messagesEl}>
+      {#each messageList as msg, i (msg.id)}
+        {@const prior = msg.role === 'assistant' ? getPriorUserMessage(i) : undefined}
+        <ChatMessage
+          message={msg}
+          onRegenerate={prior ? () => handleRegenerate(prior) : undefined}
+        />
+      {/each}
+      {#if loading}
+        <TypingIndicator />
+      {/if}
+    </div>
+
+    <ChatInput onSend={handleSend} disabled={loading} />
+  </main>
 </div>
 
-<ChatInput onSend={handleSend} disabled={loading} />
-
 <style>
+  .app-shell {
+    display: flex;
+    height: 100vh;
+    width: 100%;
+  }
+
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
   header {
     display: flex;
     align-items: center;
@@ -147,7 +252,9 @@
     letter-spacing: -0.02em;
   }
 
-  .dot { color: var(--accent2); }
+  .dot {
+    color: var(--accent2);
+  }
 
   .header-meta {
     display: flex;
@@ -171,8 +278,13 @@
   }
 
   @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
   }
 
   .messages {
@@ -182,5 +294,11 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+  }
+
+  @media (max-width: 640px) {
+    .app-shell {
+      flex-direction: column;
+    }
   }
 </style>

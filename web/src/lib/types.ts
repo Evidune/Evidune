@@ -23,7 +23,24 @@ export interface ChatResponse {
   emerged_skill?: string | null
   facts_extracted?: number
   persona?: string | null
+  new_title?: string | null
   error?: string
+}
+
+export interface ConversationSummary {
+  id: string
+  channel: string
+  title: string
+  status: 'active' | 'archived'
+  created_at: string
+  updated_at: string
+  message_count: number
+  preview: string
+}
+
+export interface ConversationHistory {
+  conversation: ConversationSummary
+  messages: { role: 'user' | 'assistant' | 'system'; content: string }[]
 }
 
 export interface FeedbackRequest {

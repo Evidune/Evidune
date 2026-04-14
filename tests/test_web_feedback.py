@@ -68,3 +68,43 @@ class TestHandleFeedback:
         gw = WebGateway()  # no set_memory_store called
         result = gw._handle_feedback({"execution_id": 1, "signal": "thumbs_up", "value": True})
         assert "error" in result
+
+
+class TestConversationEndpoints:
+    def test_list_conversations_empty(self, gateway: WebGateway):
+        assert gateway._list_conversations() == []
+
+    def test_list_conversations_filters_channel(self, gateway: WebGateway, store: MemoryStore):
+        # Seed one web + one cli conversation
+        store.ensure_conversation("c-web", channel="web")
+        store.add_message("c-web", "user", "hi")
+        store.ensure_conversation("c-cli", channel="cli")
+        store.add_message("c-cli", "user", "hi")
+
+        result = gateway._list_conversations()
+        ids = {c["id"] for c in result}
+        assert ids == {"c-web"}  # scoped to channel=web
+
+    def test_conversation_history_found(self, gateway: WebGateway, store: MemoryStore):
+        store.ensure_conversation("c1", channel="web")
+        store.add_message("c1", "user", "hello")
+        store.add_message("c1", "assistant", "world")
+        result = gateway._conversation_history("c1")
+        assert result["conversation"]["id"] == "c1"
+        assert [m["role"] for m in result["messages"]] == ["user", "assistant"]
+
+    def test_conversation_history_missing(self, gateway: WebGateway):
+        result = gateway._conversation_history("nope")
+        assert "error" in result
+
+    def test_archive_sets_status(self, gateway: WebGateway, store: MemoryStore):
+        store.add_message("c1", "user", "hi")
+        result = gateway._set_status("c1", "archived")
+        assert result["ok"] is True
+        assert store.get_conversation("c1")["status"] == "archived"
+
+    def test_delete_removes_row(self, gateway: WebGateway, store: MemoryStore):
+        store.add_message("c1", "user", "hi")
+        result = gateway._delete_conversation("c1")
+        assert result["ok"] is True
+        assert store.get_conversation("c1") is None

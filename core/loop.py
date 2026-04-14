@@ -188,6 +188,11 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
             judge=emerge_judge, output_dir=config.agent.emergence.output_dir
         )
 
+    # Title generator (always on when agent is configured — cheap, high value)
+    from agent.title_generator import TitleGenerator
+
+    title_generator = TitleGenerator(llm=llm)
+
     agent = AgentCore(
         llm=llm,
         skill_registry=skill_registry,
@@ -202,6 +207,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         skill_synthesizer=skill_synthesizer,
         emergence_every_n_turns=config.agent.emergence.every_n_turns,
         emergence_min_confidence=config.agent.emergence.min_confidence,
+        title_generator=title_generator,
     )
 
     # Create gateways

@@ -6,6 +6,7 @@ from agent.fact_extractor import FactExtractor
 from agent.llm import LLMClient
 from agent.pattern_detector import PatternDetector
 from agent.skill_synthesizer import SkillSynthesizer
+from agent.title_generator import TitleGenerator
 from gateway.base import InboundMessage, OutboundMessage
 from memory.store import MemoryStore
 from personas.loader import Persona
@@ -32,6 +33,8 @@ class AgentCore:
         skill_synthesizer: SkillSynthesizer | None = None,
         emergence_every_n_turns: int = 10,
         emergence_min_confidence: float = 0.7,
+        title_generator: TitleGenerator | None = None,
+        title_after_turns: int = 3,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -46,6 +49,8 @@ class AgentCore:
         self.skill_synthesizer = skill_synthesizer
         self.emergence_every_n_turns = emergence_every_n_turns
         self.emergence_min_confidence = emergence_min_confidence
+        self.title_generator = title_generator
+        self.title_after_turns = title_after_turns
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
 
@@ -117,6 +122,9 @@ class AgentCore:
         # 10. Skill emergence (every N turns, when enabled)
         emerged_skill = await self._maybe_emerge_skill(message)
 
+        # 11. Auto-title the conversation once it has enough content
+        new_title = await self._maybe_generate_title(message.conversation_id)
+
         # Trim old history
         self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
 
@@ -129,6 +137,7 @@ class AgentCore:
                 "persona": persona.name if persona else None,
                 "facts_extracted": extracted_count,
                 "emerged_skill": emerged_skill,
+                "new_title": new_title,
             },
         )
 
@@ -214,6 +223,37 @@ class AgentCore:
             pass  # Synthesis succeeded but parsing failed — still recorded
 
         return result.name
+
+    async def _maybe_generate_title(self, conversation_id: str) -> str | None:
+        """Generate a title once the conversation has enough content.
+
+        Skipped when:
+        - no TitleGenerator is configured
+        - the conversation already has a non-empty title
+        - the conversation has fewer than `title_after_turns * 2` messages
+          (counting both roles; so the default 3 means 6+ messages)
+
+        Returns the new title on success, else None.
+        """
+        if not self.title_generator:
+            return None
+
+        meta = self.memory.get_conversation(conversation_id)
+        if not meta or (meta.get("title") or "").strip():
+            return None
+
+        history = self.memory.get_history(conversation_id, limit=20)
+        if len(history) < self.title_after_turns * 2:
+            return None
+
+        try:
+            title = await self.title_generator.generate(history)
+        except Exception:
+            return None
+        if not title:
+            return None
+        self.memory.set_conversation_title(conversation_id, title)
+        return title
 
     def _build_messages(
         self,

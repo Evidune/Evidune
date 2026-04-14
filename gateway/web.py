@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import re
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -60,11 +61,46 @@ class WebGateway(Gateway):
                     self._json_resp(200, json.loads(gateway._skills_json))
                     return
 
+                if path == "/api/conversations":
+                    self._json_resp(200, gateway._list_conversations())
+                    return
+
+                # /api/conversations/<id>/history
+                m = re.match(r"^/api/conversations/([^/]+)/history$", path)
+                if m:
+                    self._json_resp(200, gateway._conversation_history(m.group(1)))
+                    return
+
+                # /api/conversations/<id>  (metadata only)
+                m = re.match(r"^/api/conversations/([^/]+)$", path)
+                if m:
+                    result = gateway._get_conversation(m.group(1))
+                    code = 200 if "error" not in result else 404
+                    self._json_resp(code, result)
+                    return
+
                 # Static file serving from web/dist/
                 self._serve_static(path)
 
             def do_POST(self):
                 path = urlparse(self.path).path
+
+                # /api/conversations/<id>/archive
+                m = re.match(r"^/api/conversations/([^/]+)/archive$", path)
+                if m:
+                    result = gateway._set_status(m.group(1), "archived")
+                    code = 200 if "error" not in result else 404
+                    self._json_resp(code, result)
+                    return
+
+                # /api/conversations/<id>/unarchive
+                m = re.match(r"^/api/conversations/([^/]+)/unarchive$", path)
+                if m:
+                    result = gateway._set_status(m.group(1), "active")
+                    code = 200 if "error" not in result else 404
+                    self._json_resp(code, result)
+                    return
+
                 if path == "/api/chat":
                     body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                     try:
@@ -103,6 +139,17 @@ class WebGateway(Gateway):
                 else:
                     self.send_response(404)
                     self.end_headers()
+
+            def do_DELETE(self):
+                path = urlparse(self.path).path
+                m = re.match(r"^/api/conversations/([^/]+)$", path)
+                if m:
+                    result = gateway._delete_conversation(m.group(1))
+                    code = 200 if "error" not in result else 404
+                    self._json_resp(code, result)
+                    return
+                self.send_response(404)
+                self.end_headers()
 
             def _json_resp(self, code: int, data: Any):
                 body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -228,3 +275,43 @@ class WebGateway(Gateway):
         existing[signal_type] = value
         ok = self._memory_store.update_execution_signals(execution_id, existing)
         return {"ok": ok, "execution_id": execution_id, "signals": existing}
+
+    # --- Conversation management ---
+
+    def _list_conversations(self) -> list[dict[str, Any]]:
+        if not self._memory_store:
+            return []
+        return self._memory_store.list_conversations(channel="web")
+
+    def _conversation_history(self, conv_id: str) -> dict[str, Any]:
+        if not self._memory_store:
+            return {"error": "Memory store not configured"}
+        meta = self._memory_store.get_conversation(conv_id)
+        if not meta:
+            return {"error": f"Conversation {conv_id} not found"}
+        history = self._memory_store.get_history(conv_id, limit=200)
+        return {"conversation": dict(meta), "messages": history}
+
+    def _get_conversation(self, conv_id: str) -> dict[str, Any]:
+        if not self._memory_store:
+            return {"error": "Memory store not configured"}
+        meta = self._memory_store.get_conversation(conv_id)
+        if not meta:
+            return {"error": f"Conversation {conv_id} not found"}
+        return dict(meta)
+
+    def _set_status(self, conv_id: str, status: str) -> dict[str, Any]:
+        if not self._memory_store:
+            return {"error": "Memory store not configured"}
+        ok = self._memory_store.set_conversation_status(conv_id, status)
+        if not ok:
+            return {"error": f"Conversation {conv_id} not found"}
+        return {"ok": True, "id": conv_id, "status": status}
+
+    def _delete_conversation(self, conv_id: str) -> dict[str, Any]:
+        if not self._memory_store:
+            return {"error": "Memory store not configured"}
+        ok = self._memory_store.delete_conversation(conv_id)
+        if not ok:
+            return {"error": f"Conversation {conv_id} not found"}
+        return {"ok": True, "id": conv_id}

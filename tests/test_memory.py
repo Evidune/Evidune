@@ -155,6 +155,67 @@ class TestSkillExecutions:
         assert len(execs) == 5
 
 
+class TestConversationManagement:
+    def test_list_empty(self, store: MemoryStore):
+        assert store.list_conversations() == []
+
+    def test_list_after_add(self, store: MemoryStore):
+        store.add_message("c1", "user", "hi")
+        store.add_message("c2", "user", "hello")
+        items = store.list_conversations()
+        assert len(items) == 2
+        ids = {i["id"] for i in items}
+        assert ids == {"c1", "c2"}
+
+    def test_list_includes_preview(self, store: MemoryStore):
+        store.add_message("c1", "user", "first")
+        store.add_message("c1", "assistant", "second reply")
+        items = store.list_conversations()
+        assert items[0]["preview"] == "second reply"
+        assert items[0]["message_count"] == 2
+
+    def test_list_orders_by_updated(self, store: MemoryStore):
+        store.add_message("c1", "user", "old")
+        store.add_message("c2", "user", "newer")
+        items = store.list_conversations()
+        assert items[0]["id"] == "c2"
+
+    def test_list_filters_by_status(self, store: MemoryStore):
+        store.add_message("c1", "user", "x")
+        store.add_message("c2", "user", "y")
+        store.set_conversation_status("c2", "archived")
+        active = store.list_conversations()
+        assert [i["id"] for i in active] == ["c1"]
+        archived = store.list_conversations(status="archived")
+        assert [i["id"] for i in archived] == ["c2"]
+        all_ = store.list_conversations(status=None)
+        assert len(all_) == 2
+
+    def test_set_title(self, store: MemoryStore):
+        store.add_message("c1", "user", "x")
+        assert store.set_conversation_title("c1", "My Chat") is True
+        meta = store.get_conversation("c1")
+        assert meta["title"] == "My Chat"
+
+    def test_set_status_invalid_raises(self, store: MemoryStore):
+        store.add_message("c1", "user", "x")
+        with pytest.raises(ValueError):
+            store.set_conversation_status("c1", "bogus")
+
+    def test_delete_cascades(self, store: MemoryStore):
+        store.add_message("c1", "user", "hi")
+        store.record_execution(
+            skill_name="s", user_input="i", assistant_output="o", conversation_id="c1"
+        )
+        assert store.delete_conversation("c1") is True
+        assert store.get_conversation("c1") is None
+        assert store.get_history("c1") == []
+        assert store.get_skill_executions("s") == []
+
+    def test_delete_missing_returns_false(self, store: MemoryStore):
+        assert store.delete_conversation("nonexistent") is False
+
+
 class TestEmergedSkills:
     def test_register_and_get(self, store: MemoryStore):
         store.register_emerged_skill(
