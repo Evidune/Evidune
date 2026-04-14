@@ -257,23 +257,39 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
     if config.personas.default and persona_registry.get(config.personas.default):
         persona_registry.set_default(config.personas.default)
 
-    # Optional fact extractor (uses evaluator LLM if configured, else main LLM)
-    fact_extractor = None
-    if config.agent.fact_extraction.enabled:
-        from agent.fact_extractor import FactExtractor
-
-        if config.agent.fact_extraction.use_evaluator and config.agent.evaluator:
+    # Helper: build the (optional) evaluator LLM client lazily.
+    def _build_judge():
+        if config.agent.evaluator:
             ev = config.agent.evaluator
-            judge = create_llm_client(
+            return create_llm_client(
                 provider=ev.llm_provider,
                 model=ev.llm_model,
                 api_key=os.environ.get(ev.api_key_env),
                 base_url=ev.llm_base_url,
                 temperature=0.1,
             )
-        else:
-            judge = llm
+        return llm
+
+    # Optional fact extractor
+    fact_extractor = None
+    if config.agent.fact_extraction.enabled:
+        from agent.fact_extractor import FactExtractor
+
+        judge = _build_judge() if config.agent.fact_extraction.use_evaluator else llm
         fact_extractor = FactExtractor(judge=judge)
+
+    # Optional skill emergence (pattern detector + synthesiser)
+    pattern_detector = None
+    skill_synthesizer = None
+    if config.agent.emergence.enabled:
+        from agent.pattern_detector import PatternDetector
+        from agent.skill_synthesizer import SkillSynthesizer
+
+        emerge_judge = _build_judge() if config.agent.emergence.use_evaluator else llm
+        pattern_detector = PatternDetector(judge=emerge_judge)
+        skill_synthesizer = SkillSynthesizer(
+            judge=emerge_judge, output_dir=config.agent.emergence.output_dir
+        )
 
     agent = AgentCore(
         llm=llm,
@@ -285,6 +301,10 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         fact_extractor=fact_extractor,
         fact_extraction_every_n_turns=config.agent.fact_extraction.every_n_turns,
         fact_extraction_min_confidence=config.agent.fact_extraction.min_confidence,
+        pattern_detector=pattern_detector,
+        skill_synthesizer=skill_synthesizer,
+        emergence_every_n_turns=config.agent.emergence.every_n_turns,
+        emergence_min_confidence=config.agent.emergence.min_confidence,
     )
 
     # Create gateways

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from agent.fact_extractor import FactExtractor
 from agent.llm import LLMClient
+from agent.pattern_detector import PatternDetector
+from agent.skill_synthesizer import SkillSynthesizer
 from gateway.base import InboundMessage, OutboundMessage
 from memory.store import MemoryStore
 from personas.loader import Persona
 from personas.registry import PersonaRegistry
+from skills.loader import parse_skill
 from skills.registry import SkillRegistry
 
 
@@ -25,6 +28,10 @@ class AgentCore:
         fact_extractor: FactExtractor | None = None,
         fact_extraction_every_n_turns: int = 5,
         fact_extraction_min_confidence: float = 0.7,
+        pattern_detector: PatternDetector | None = None,
+        skill_synthesizer: SkillSynthesizer | None = None,
+        emergence_every_n_turns: int = 10,
+        emergence_min_confidence: float = 0.7,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -35,7 +42,12 @@ class AgentCore:
         self.fact_extractor = fact_extractor
         self.fact_extraction_every_n_turns = fact_extraction_every_n_turns
         self.fact_extraction_min_confidence = fact_extraction_min_confidence
+        self.pattern_detector = pattern_detector
+        self.skill_synthesizer = skill_synthesizer
+        self.emergence_every_n_turns = emergence_every_n_turns
+        self.emergence_min_confidence = emergence_min_confidence
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
+        self._emergence_counts: dict[str, int] = {}
 
     def _resolve_persona(self, message: InboundMessage) -> Persona | None:
         """Pick the persona for this turn.
@@ -102,6 +114,9 @@ class AgentCore:
         # 9. Auto fact extraction (every N turns, when enabled)
         extracted_count = await self._maybe_extract_facts(message, persona)
 
+        # 10. Skill emergence (every N turns, when enabled)
+        emerged_skill = await self._maybe_emerge_skill(message)
+
         # Trim old history
         self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
 
@@ -113,6 +128,7 @@ class AgentCore:
                 "execution_ids": execution_ids,
                 "persona": persona.name if persona else None,
                 "facts_extracted": extracted_count,
+                "emerged_skill": emerged_skill,
             },
         )
 
@@ -144,6 +160,60 @@ class AgentCore:
             self.memory.set_fact(c.key, c.value, source="auto", namespace=namespace)
             saved += 1
         return saved
+
+    async def _maybe_emerge_skill(self, message: InboundMessage) -> str | None:
+        """Detect and synthesise a new skill from recent conversation.
+
+        Returns the new skill name if one was created, else None.
+        Skips if pattern_detector or skill_synthesizer are not configured,
+        or if the proposed name collides with an existing skill.
+        """
+        if not (self.pattern_detector and self.skill_synthesizer):
+            return None
+
+        conv_id = message.conversation_id
+        self._emergence_counts[conv_id] = self._emergence_counts.get(conv_id, 0) + 1
+        if self._emergence_counts[conv_id] % self.emergence_every_n_turns != 0:
+            return None
+
+        history = self.memory.get_history(conv_id, self.max_history)
+        existing_names = [s.name for s in self.skills.all()]
+
+        try:
+            pattern = await self.pattern_detector.detect(
+                history, existing_skill_names=existing_names
+            )
+        except Exception:
+            return None
+
+        if not pattern.is_skill or pattern.confidence < self.emergence_min_confidence:
+            return None
+        if pattern.suggested_name in existing_names:
+            return None  # Avoid duplicate
+
+        try:
+            result = await self.skill_synthesizer.synthesize(pattern, history)
+        except Exception:
+            return None
+        if result is None:
+            return None
+
+        # Register in emerged_skills table (status=pending_review)
+        self.memory.register_emerged_skill(
+            name=result.name,
+            source_conversation_id=conv_id,
+            evaluation_criteria=pattern.rationale,
+            status="pending_review",
+        )
+
+        # Load into the live registry so it can be used immediately
+        try:
+            skill = parse_skill(result.path)
+            self.skills.register(skill)
+        except Exception:
+            pass  # Synthesis succeeded but parsing failed — still recorded
+
+        return result.name
 
     def _build_messages(
         self,

@@ -56,6 +56,23 @@ class ChannelConfig:
 
 
 @dataclass
+class EmergenceConfig:
+    """Skill emergence: detect reusable patterns and synthesise SKILL.md.
+
+    When enabled, every N turns the agent runs pattern detection on
+    recent conversation; if a reusable pattern is found above
+    min_confidence, a complete SKILL.md is generated and saved to
+    output_dir, then registered with status 'pending_review'.
+    """
+
+    enabled: bool = False
+    every_n_turns: int = 10
+    min_confidence: float = 0.7
+    output_dir: str = "~/.aiflay/emerged_skills"
+    use_evaluator: bool = True  # If False, use main agent LLM
+
+
+@dataclass
 class FactExtractionConfig:
     """Auto fact extraction from conversation history.
 
@@ -95,6 +112,7 @@ class AgentConfig:
     system_prompt: str = ""
     evaluator: EvaluatorConfig | None = None
     fact_extraction: FactExtractionConfig = field(default_factory=FactExtractionConfig)
+    emergence: EmergenceConfig = field(default_factory=EmergenceConfig)
 
 
 @dataclass
@@ -237,6 +255,14 @@ def load_config(path: str | Path) -> AiflayConfig:
             min_confidence=fe_raw.get("min_confidence", 0.7),
             use_evaluator=fe_raw.get("use_evaluator", True),
         )
+        em_raw = agent_raw.get("emergence", {})
+        emergence = EmergenceConfig(
+            enabled=em_raw.get("enabled", False),
+            every_n_turns=em_raw.get("every_n_turns", 10),
+            min_confidence=em_raw.get("min_confidence", 0.7),
+            output_dir=em_raw.get("output_dir", "~/.aiflay/emerged_skills"),
+            use_evaluator=em_raw.get("use_evaluator", True),
+        )
         agent = AgentConfig(
             llm_provider=agent_raw.get("llm_provider", "openai"),
             llm_model=agent_raw.get("llm_model", "gpt-4o"),
@@ -247,6 +273,7 @@ def load_config(path: str | Path) -> AiflayConfig:
             system_prompt=agent_raw.get("system_prompt", ""),
             evaluator=evaluator,
             fact_extraction=fact_extraction,
+            emergence=emergence,
         )
 
     # Skills config
