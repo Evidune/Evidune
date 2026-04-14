@@ -88,6 +88,14 @@ class SkillsConfig:
 
 
 @dataclass
+class PersonasConfig:
+    """Where to look for assistant personas (PERSONA.md files)."""
+
+    directories: list[str] = field(default_factory=lambda: ["personas/"])
+    default: str | None = None  # name of default persona; None → first loaded
+
+
+@dataclass
 class MemoryConfig:
     path: str = "~/.aiflay/memory.db"
     max_messages_per_conversation: int = 100
@@ -111,6 +119,7 @@ class AiflayConfig:
     # Agent framework config (optional — when absent, iteration-only mode)
     agent: AgentConfig | None = None
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    personas: PersonasConfig = field(default_factory=PersonasConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     gateways: list[GatewayConfig] = field(default_factory=list)
 
@@ -223,6 +232,13 @@ def load_config(path: str | Path) -> AiflayConfig:
         auto_update=skills_raw.get("auto_update", True),
     )
 
+    # Personas config
+    personas_raw = raw.get("personas", {})
+    personas_config = PersonasConfig(
+        directories=personas_raw.get("directories", ["personas/"]),
+        default=personas_raw.get("default"),
+    )
+
     # Memory config
     memory_raw = raw.get("memory", {})
     memory_config = MemoryConfig(
@@ -249,6 +265,7 @@ def load_config(path: str | Path) -> AiflayConfig:
         channels=channels,
         agent=agent,
         skills=skills_config,
+        personas=personas_config,
         memory=memory_config,
         gateways=gateways,
     )

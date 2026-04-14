@@ -120,3 +120,78 @@ class TestAgentCore:
         await agent.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "formal tone" in system_content
+
+
+class TestAgentWithPersona:
+    @pytest.fixture
+    def agent_with_persona(self, llm, skill_registry, memory):
+        from pathlib import Path
+
+        from agent.core import AgentCore
+        from personas.loader import Persona
+        from personas.registry import PersonaRegistry
+
+        reg = PersonaRegistry()
+        reg.register(
+            Persona(
+                name="老拐",
+                display_name="老拐",
+                body="你是老拐，知乎写作专家。说话直接，不端着。",
+                default=True,
+                path=Path("/tmp/PERSONA.md"),
+            )
+        )
+        reg.register(
+            Persona(
+                name="formal-helper",
+                display_name="Formal Helper",
+                body="You speak in a polite, formal tone.",
+                path=Path("/tmp/PERSONA.md"),
+            )
+        )
+        return AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            system_prompt="",
+            persona_registry=reg,
+        )
+
+    @pytest.mark.asyncio
+    async def test_default_persona_injected(self, agent_with_persona, llm: MockLLM):
+        msg = InboundMessage(text="hi", sender_id="u", channel="cli", conversation_id="c1")
+        resp = await agent_with_persona.handle(msg)
+        system_content = llm.last_messages[0]["content"]
+        assert "老拐" in system_content
+        assert "知乎写作专家" in system_content
+        assert resp.metadata["persona"] == "老拐"
+
+    @pytest.mark.asyncio
+    async def test_explicit_persona_via_metadata(self, agent_with_persona, llm: MockLLM):
+        msg = InboundMessage(
+            text="hi",
+            sender_id="u",
+            channel="cli",
+            conversation_id="c2",
+            metadata={"persona": "formal-helper"},
+        )
+        resp = await agent_with_persona.handle(msg)
+        system_content = llm.last_messages[0]["content"]
+        assert "polite, formal tone" in system_content
+        assert "知乎写作专家" not in system_content
+        assert resp.metadata["persona"] == "formal-helper"
+
+    @pytest.mark.asyncio
+    async def test_persona_facts_isolated(
+        self, agent_with_persona, llm: MockLLM, memory: MemoryStore
+    ):
+        memory.set_fact("style", "uses 老拐 voice", namespace="persona:老拐")
+        memory.set_fact("style", "polite English", namespace="persona:formal-helper")
+        memory.set_fact("global_fact", "shared across personas")
+
+        msg = InboundMessage(text="hi", sender_id="u", channel="cli", conversation_id="c3")
+        await agent_with_persona.handle(msg)
+        system_content = llm.last_messages[0]["content"]
+        assert "uses 老拐 voice" in system_content
+        assert "polite English" not in system_content  # other persona's fact
+        assert "shared across personas" in system_content  # global fact

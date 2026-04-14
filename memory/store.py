@@ -83,18 +83,53 @@ class MemoryStore:
             );
 
             CREATE TABLE IF NOT EXISTS facts (
-                key TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL DEFAULT '',
+                key TEXT NOT NULL,
                 value TEXT NOT NULL,
                 source TEXT DEFAULT 'agent',
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (namespace, key)
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
             CREATE INDEX IF NOT EXISTS idx_facts_source ON facts(source);
+            CREATE INDEX IF NOT EXISTS idx_facts_namespace ON facts(namespace);
         """
         )
+        self._migrate_facts_namespace()
         self._conn.commit()
+
+    def _migrate_facts_namespace(self) -> None:
+        """Add 'namespace' column to existing facts tables that lack it.
+
+        The CREATE TABLE IF NOT EXISTS above won't alter pre-existing
+        tables, so we explicitly check and migrate older databases
+        that still have facts(key PRIMARY KEY) without namespace.
+        """
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(facts)").fetchall()]
+        if "namespace" in cols:
+            return
+        # Old schema: rebuild table with composite PK and copy data
+        self._conn.executescript(
+            """
+            ALTER TABLE facts RENAME TO facts_old;
+            CREATE TABLE facts (
+                namespace TEXT NOT NULL DEFAULT '',
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                source TEXT DEFAULT 'agent',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (namespace, key)
+            );
+            INSERT INTO facts (namespace, key, value, source, created_at, updated_at)
+                SELECT '', key, value, source, created_at, updated_at FROM facts_old;
+            DROP TABLE facts_old;
+            CREATE INDEX IF NOT EXISTS idx_facts_source ON facts(source);
+            CREATE INDEX IF NOT EXISTS idx_facts_namespace ON facts(namespace);
+            """
+        )
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -154,33 +189,87 @@ class MemoryStore:
         self._conn.commit()
         return to_delete
 
-    # --- Facts API ---
+    # --- Facts API (namespaced) ---
+    #
+    # Facts live in a (namespace, key) composite key space.
+    # - namespace="" is the global / shared namespace (default)
+    # - namespace="persona:<name>" isolates one assistant identity's facts
+    # All read/write helpers default to the global namespace for
+    # backward compatibility.
 
-    def set_fact(self, key: str, value: str, source: str = "agent") -> None:
-        """Set or update a persistent fact."""
+    def set_fact(self, key: str, value: str, source: str = "agent", namespace: str = "") -> None:
+        """Set or update a persistent fact in the given namespace."""
         now = self._now()
         self._conn.execute(
-            """INSERT INTO facts (key, value, source, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(key) DO UPDATE SET value = ?, source = ?, updated_at = ?""",
-            (key, value, source, now, now, value, source, now),
+            """INSERT INTO facts (namespace, key, value, source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(namespace, key) DO UPDATE SET
+                 value = ?, source = ?, updated_at = ?""",
+            (namespace, key, value, source, now, now, value, source, now),
         )
         self._conn.commit()
 
-    def get_fact(self, key: str) -> str | None:
-        """Get a single fact by key."""
-        row = self._conn.execute("SELECT value FROM facts WHERE key = ?", (key,)).fetchone()
+    def get_fact(self, key: str, namespace: str = "") -> str | None:
+        """Get a single fact by key from the given namespace."""
+        row = self._conn.execute(
+            "SELECT value FROM facts WHERE namespace = ? AND key = ?",
+            (namespace, key),
+        ).fetchone()
         return row["value"] if row else None
 
-    def get_facts(self, prefix: str | None = None) -> list[Fact]:
-        """Get all facts, optionally filtered by key prefix."""
-        if prefix:
+    def get_facts(self, prefix: str | None = None, namespace: str = "") -> list[Fact]:
+        """Get all facts in a namespace, optionally filtered by key prefix.
+
+        Pass namespace=None to get facts across ALL namespaces.
+        """
+        if namespace is None:
+            # All namespaces
+            if prefix:
+                rows = self._conn.execute(
+                    "SELECT * FROM facts WHERE key LIKE ? ORDER BY namespace, key",
+                    (f"{prefix}%",),
+                ).fetchall()
+            else:
+                rows = self._conn.execute("SELECT * FROM facts ORDER BY namespace, key").fetchall()
+        else:
+            if prefix:
+                rows = self._conn.execute(
+                    "SELECT * FROM facts WHERE namespace = ? AND key LIKE ? ORDER BY key",
+                    (namespace, f"{prefix}%"),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM facts WHERE namespace = ? ORDER BY key", (namespace,)
+                ).fetchall()
+        return [
+            Fact(
+                key=r["key"],
+                value=r["value"],
+                source=r["source"],
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+            )
+            for r in rows
+        ]
+
+    def search_facts(self, query: str, namespace: str | None = "") -> list[Fact]:
+        """Search facts by value or key (LIKE).
+
+        namespace="" → only the global namespace
+        namespace=None → search across all namespaces
+        namespace="x" → only namespace 'x'
+        """
+        if namespace is None:
             rows = self._conn.execute(
-                "SELECT * FROM facts WHERE key LIKE ? ORDER BY key",
-                (f"{prefix}%",),
+                "SELECT * FROM facts WHERE value LIKE ? OR key LIKE ? ORDER BY updated_at DESC",
+                (f"%{query}%", f"%{query}%"),
             ).fetchall()
         else:
-            rows = self._conn.execute("SELECT * FROM facts ORDER BY key").fetchall()
+            rows = self._conn.execute(
+                "SELECT * FROM facts WHERE namespace = ? AND (value LIKE ? OR key LIKE ?) "
+                "ORDER BY updated_at DESC",
+                (namespace, f"%{query}%", f"%{query}%"),
+            ).fetchall()
         return [
             Fact(
                 key=r["key"],
@@ -192,26 +281,11 @@ class MemoryStore:
             for r in rows
         ]
 
-    def search_facts(self, query: str) -> list[Fact]:
-        """Search facts by value content (simple LIKE search)."""
-        rows = self._conn.execute(
-            "SELECT * FROM facts WHERE value LIKE ? OR key LIKE ? ORDER BY updated_at DESC",
-            (f"%{query}%", f"%{query}%"),
-        ).fetchall()
-        return [
-            Fact(
-                key=r["key"],
-                value=r["value"],
-                source=r["source"],
-                created_at=r["created_at"],
-                updated_at=r["updated_at"],
-            )
-            for r in rows
-        ]
-
-    def delete_fact(self, key: str) -> bool:
+    def delete_fact(self, key: str, namespace: str = "") -> bool:
         """Delete a fact. Returns True if it existed."""
-        cursor = self._conn.execute("DELETE FROM facts WHERE key = ?", (key,))
+        cursor = self._conn.execute(
+            "DELETE FROM facts WHERE namespace = ? AND key = ?", (namespace, key)
+        )
         self._conn.commit()
         return cursor.rowcount > 0
 

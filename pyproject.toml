@@ -38,7 +38,7 @@ dev = [
 aiflay = "core.loop:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["core", "adapters", "channels", "memory", "skills", "agent", "gateway"]
+packages = ["core", "adapters", "channels", "memory", "skills", "personas", "agent", "gateway"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -67,4 +67,13 @@ exclude = '''
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["core", "adapters", "channels", "memory", "skills", "agent", "gateway"]
+known_first_party = [
+    "core",
+    "adapters",
+    "channels",
+    "memory",
+    "skills",
+    "personas",
+    "agent",
+    "gateway",
+]

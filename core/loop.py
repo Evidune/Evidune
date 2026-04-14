@@ -246,12 +246,24 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         if count > 0:
             print(f"Loaded {count} skill(s) from {skill_path}")
 
+    from personas.registry import PersonaRegistry
+
+    persona_registry = PersonaRegistry()
+    for persona_dir in config.personas.directories:
+        persona_path = base_dir / persona_dir
+        count = persona_registry.load_directory(persona_path)
+        if count > 0:
+            print(f"Loaded {count} persona(s) from {persona_path}")
+    if config.personas.default and persona_registry.get(config.personas.default):
+        persona_registry.set_default(config.personas.default)
+
     agent = AgentCore(
         llm=llm,
         skill_registry=skill_registry,
         memory=memory,
         system_prompt=config.agent.system_prompt,
         max_history=config.agent.max_history,
+        persona_registry=persona_registry,
     )
 
     # Create gateways
