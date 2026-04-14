@@ -112,6 +112,56 @@ class LocalClient(LLMClient):
         return await self._inner.complete(messages, **kwargs)
 
 
+class CodexClient(LLMClient):
+    """OpenAI-compatible client authed via the Codex CLI's stored token.
+
+    Reuses `~/.codex/auth.json` (managed by `codex login`) so the user
+    does not need a separate OPENAI_API_KEY in env. On a 401 we re-read
+    the auth file once (Codex CLI may have refreshed the token in the
+    background) and retry the call.
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-5.4",
+        base_url: str | None = None,
+        temperature: float = 0.7,
+        auth_path: str | None = None,
+    ) -> None:
+        from agent.codex_auth import get_access_token
+
+        self.model = model
+        self.temperature = temperature
+        self.base_url = base_url
+        self._auth_path = auth_path
+        self._token = get_access_token(auth_path)
+        self._inner = self._build_inner()
+
+    def _build_inner(self) -> OpenAIClient:
+        return OpenAIClient(
+            model=self.model,
+            api_key=self._token,
+            base_url=self.base_url,
+            temperature=self.temperature,
+        )
+
+    def _refresh_from_disk(self) -> None:
+        from agent.codex_auth import get_access_token
+
+        self._token = get_access_token(self._auth_path)
+        self._inner = self._build_inner()
+
+    async def complete(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+        try:
+            return await self._inner.complete(messages, **kwargs)
+        except Exception as e:
+            msg = str(e).lower()
+            if "401" in msg or "unauthorized" in msg or "invalid_api_key" in msg:
+                self._refresh_from_disk()
+                return await self._inner.complete(messages, **kwargs)
+            raise
+
+
 def create_llm_client(
     provider: str,
     model: str,
@@ -130,6 +180,13 @@ def create_llm_client(
     elif provider == "local":
         return LocalClient(
             model=model, base_url=base_url or "http://localhost:11434/v1", temperature=temperature
+        )
+    elif provider == "codex":
+        return CodexClient(
+            model=model,
+            base_url=base_url,
+            temperature=temperature,
+            auth_path=kwargs.get("auth_path"),
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")

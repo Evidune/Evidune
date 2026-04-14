@@ -3,13 +3,19 @@ description: '知乎内容自动化 — 文章生成 + 数据驱动迭代'
 
 # === Agent 配置 ===
 agent:
-  llm_provider: openai # openai | anthropic | local
+  llm_provider: openai # openai | anthropic | local | codex
   llm_model: gpt-4o
   api_key_env: OPENAI_API_KEY
   temperature: 0.7
   system_prompt: |
     你是 Aiflay 知乎写作助手。根据加载的 Skill 和知识库，
     帮助用户创作高质量的知乎内容。
+  # === 用 Codex CLI 的 OAuth 登录（无需 API key）===
+  # 1. 先 `codex login` 用 ChatGPT 账号登录一次
+  # 2. 把上面 llm_provider 改成 codex，模型改成 Codex 支持的型号
+  # llm_provider: codex
+  # llm_model: gpt-5.4
+  # api_key_env 在 codex 模式下被忽略，token 自动从 ~/.codex/auth.json 读取
 
 # === Skill 配置 ===
 skills:
