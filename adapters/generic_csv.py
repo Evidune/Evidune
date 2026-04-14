@@ -82,7 +82,9 @@ class GenericCsvAdapter(MetricsAdapter):
             data = data.get("records", data.get("data", data.get("items", [])))
 
         if not isinstance(data, list):
-            raise ValueError("JSON file must contain a list of records (or a dict with 'records'/'data'/'items' key)")
+            raise ValueError(
+                "JSON file must contain a list of records (or a dict with 'records'/'data'/'items' key)"
+            )
 
         records = []
         for item in data:

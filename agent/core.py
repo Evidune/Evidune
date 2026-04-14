@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from agent.llm import LLMClient
 from gateway.base import InboundMessage, OutboundMessage
 from memory.store import MemoryStore

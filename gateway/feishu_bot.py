@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from typing import Any
 
 import httpx
 
-from gateway.base import Gateway, InboundMessage, MessageHandler, OutboundMessage
+from gateway.base import Gateway, InboundMessage, MessageHandler
 
 
 class FeishuBotGateway(Gateway):

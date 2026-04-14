@@ -1,13 +1,12 @@
 """Tests for channels."""
 
-import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from channels.base import IterationReport
-from channels.stdout import StdoutChannel
 from channels.feishu import FeishuChannel
+from channels.stdout import StdoutChannel
 from core.analyzer import AnalysisResult
 from core.metrics import MetricRecord
 from core.updater import UpdateResult
@@ -27,8 +26,20 @@ def _make_report() -> IterationReport:
         summary="test: 10 items, total reads=15000, avg=1500.",
     )
     updates = [
-        UpdateResult(path="refs/case-studies.md", strategy="replace_section", has_changes=True, old_content="old", new_content="new"),
-        UpdateResult(path="refs/hot.md", strategy="full_replace", has_changes=False, old_content="same", new_content="same"),
+        UpdateResult(
+            path="refs/case-studies.md",
+            strategy="replace_section",
+            has_changes=True,
+            old_content="old",
+            new_content="new",
+        ),
+        UpdateResult(
+            path="refs/hot.md",
+            strategy="full_replace",
+            has_changes=False,
+            old_content="same",
+            new_content="same",
+        ),
     ]
     return IterationReport(
         domain="test",
@@ -82,6 +93,7 @@ class TestFeishuChannel:
     @patch("channels.feishu.httpx.post")
     def test_send_report_failure(self, mock_post):
         import httpx
+
         mock_post.side_effect = httpx.HTTPError("connection failed")
 
         channel = FeishuChannel(webhook="https://example.com/hook")

@@ -1,0 +1,22 @@
+# Build artefacts
+web/dist/
+web/node_modules/
+dist/
+build/
+*.egg-info/
+
+# Locks
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Generated / cache
+.pytest_cache/
+__pycache__/
+*.db
+.claude/
+
+# Symlinked AI docs (mirrors of AGENTS.md)
+CLAUDE.md
+GEMINI.md
+.cursorrules

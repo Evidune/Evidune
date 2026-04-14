@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from skills.loader import parse_skill, load_skills_from_dir
+from skills.loader import load_skills_from_dir, parse_skill
 from skills.registry import SkillRegistry
 
 
@@ -78,8 +78,10 @@ class TestSkillRegistry:
     @pytest.fixture
     def registry(self, tmp_path: Path) -> SkillRegistry:
         _write_skill(tmp_path / "writing" / "SKILL.md", SAMPLE_SKILL)
-        _write_skill(tmp_path / "review" / "SKILL.md",
-                      "---\nname: review-data\ndescription: Review analytics data\ntags: [analytics, review]\n---\nReview instructions")
+        _write_skill(
+            tmp_path / "review" / "SKILL.md",
+            "---\nname: review-data\ndescription: Review analytics data\ntags: [analytics, review]\n---\nReview instructions",
+        )
         reg = SkillRegistry()
         reg.load_directory(tmp_path)
         return reg

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from gateway.base import Gateway, InboundMessage, MessageHandler, OutboundMessage
+from gateway.base import Gateway, InboundMessage, MessageHandler
 
 
 class CLIGateway(Gateway):
@@ -25,9 +25,7 @@ class CLIGateway(Gateway):
         while self._running:
             try:
                 # Read input (run in executor to not block event loop)
-                line = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: input("\n> ")
-                )
+                line = await asyncio.get_event_loop().run_in_executor(None, lambda: input("\n> "))
             except (EOFError, KeyboardInterrupt):
                 print("\nBye!")
                 break

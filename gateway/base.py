@@ -11,6 +11,7 @@ from typing import Any
 @dataclass
 class InboundMessage:
     """A message received from a channel."""
+
     text: str
     sender_id: str
     channel: str  # "cli", "feishu", "telegram", "discord"
@@ -21,6 +22,7 @@ class InboundMessage:
 @dataclass
 class OutboundMessage:
     """A response to send back through the channel."""
+
     text: str
     conversation_id: str
     metadata: dict[str, Any] = field(default_factory=dict)

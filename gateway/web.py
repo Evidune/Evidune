@@ -6,13 +6,13 @@ import asyncio
 import json
 import mimetypes
 import uuid
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import Any
 from urllib.parse import urlparse
 
-from gateway.base import Gateway, InboundMessage, MessageHandler, OutboundMessage
+from gateway.base import Gateway, InboundMessage, MessageHandler
 
 # Locate the built Svelte frontend
 _WEB_DIST = Path(__file__).parent.parent / "web" / "dist"
@@ -146,7 +146,11 @@ class WebGateway(Gateway):
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
-        built = "ready" if (_WEB_DIST / "index.html").exists() else "not built (run: cd web && npm run build)"
+        built = (
+            "ready"
+            if (_WEB_DIST / "index.html").exists()
+            else "not built (run: cd web && npm run build)"
+        )
         print(f"Aiflay Web UI: http://localhost:{self.port}  [{built}]")
 
         try:

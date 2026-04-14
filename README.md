@@ -2,7 +2,7 @@
 
 Outcome-driven skill self-iteration framework for AI agents.
 
-Hermes optimizes what the agent *thinks* worked. Aiflay optimizes what *actually* worked.
+Hermes optimizes what the agent _thinks_ worked. Aiflay optimizes what _actually_ worked.
 
 ## Install
 

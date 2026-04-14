@@ -20,7 +20,9 @@ class ReferenceConfig:
     def __post_init__(self) -> None:
         valid = {"append_only", "replace_section", "full_replace"}
         if self.update_strategy not in valid:
-            raise ValueError(f"Invalid update_strategy '{self.update_strategy}', must be one of {valid}")
+            raise ValueError(
+                f"Invalid update_strategy '{self.update_strategy}', must be one of {valid}"
+            )
         if self.update_strategy == "replace_section" and not self.section:
             raise ValueError("replace_section strategy requires a 'section' field")
 
@@ -103,12 +105,14 @@ _ENV_PATTERN = re.compile(r"\$\{([^}]+)}")
 
 def _expand_env(value: str) -> str:
     """Replace ${VAR_NAME} with environment variable values."""
+
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
         env_val = os.environ.get(var_name)
         if env_val is None:
             raise ValueError(f"Environment variable '{var_name}' not set")
         return env_val
+
     return _ENV_PATTERN.sub(replacer, value)
 
 
@@ -141,9 +145,7 @@ def load_config(path: str | Path) -> AiflayConfig:
     if not domain:
         raise ValueError("Config must specify a 'domain'")
 
-    references = [
-        ReferenceConfig(**ref) for ref in raw.get("references", [])
-    ]
+    references = [ReferenceConfig(**ref) for ref in raw.get("references", [])]
 
     channels = [
         ChannelConfig(

@@ -13,6 +13,7 @@ import yaml
 @dataclass
 class Skill:
     """A loaded skill definition."""
+
     name: str
     description: str
     instructions: str  # The markdown body (after frontmatter)
@@ -53,7 +54,7 @@ def parse_skill(path: str | Path) -> Skill:
         )
 
     frontmatter = yaml.safe_load(match.group(1)) or {}
-    body = content[match.end():].strip()
+    body = content[match.end() :].strip()
 
     return Skill(
         name=frontmatter.get("name", path.stem),
@@ -62,8 +63,11 @@ def parse_skill(path: str | Path) -> Skill:
         path=path,
         tags=frontmatter.get("tags", []),
         outcome_metrics=frontmatter.get("outcome_metrics", False),
-        meta={k: v for k, v in frontmatter.items()
-              if k not in ("name", "description", "tags", "outcome_metrics")},
+        meta={
+            k: v
+            for k, v in frontmatter.items()
+            if k not in ("name", "description", "tags", "outcome_metrics")
+        },
     )
 
 

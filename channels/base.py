@@ -13,6 +13,7 @@ from core.updater import UpdateResult
 @dataclass
 class IterationReport:
     """Report generated after one iteration loop."""
+
     domain: str
     analysis: AnalysisResult
     updates: list[UpdateResult]
@@ -66,9 +67,11 @@ def create_channel(name: str, **kwargs: Any) -> Channel:
         # Auto-import known channels
         if name == "stdout":
             from channels.stdout import StdoutChannel
+
             register_channel("stdout", StdoutChannel)
         elif name == "feishu":
             from channels.feishu import FeishuChannel
+
             register_channel("feishu", FeishuChannel)
         else:
             raise ValueError(f"Unknown channel '{name}'. Available: {list(_registry.keys())}")

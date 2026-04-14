@@ -7,7 +7,6 @@ real-world business metrics.
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from core.config import load_config
@@ -23,40 +22,46 @@ def _write(path: Path, content: str) -> Path:
 def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
     """Create a minimal project layout for integration testing."""
     # Metrics CSV
-    _write(tmp_path / "data.csv",
-           "title,reads,upvotes\n"
-           "Golden Article,5000,200\n"
-           "Decent Article,1500,60\n"
-           "Mediocre Article,400,12\n"
-           "Flop Article,80,2\n")
+    _write(
+        tmp_path / "data.csv",
+        "title,reads,upvotes\n"
+        "Golden Article,5000,200\n"
+        "Decent Article,1500,60\n"
+        "Mediocre Article,400,12\n"
+        "Flop Article,80,2\n",
+    )
 
     # Skill WITH outcome_metrics
-    _write(tmp_path / "skills" / "write-article" / "SKILL.md",
-           "---\n"
-           "name: write-article\n"
-           "description: Write compelling articles\n"
-           "outcome_metrics: true\n"
-           "---\n"
-           "## Instructions\n"
-           "Write good stuff.\n"
-           "\n"
-           "## Reference Data\n"
-           "(placeholder — will be replaced by aiflay)\n"
-           "\n"
-           "## Footer\n"
-           "Do not touch this section.\n")
+    _write(
+        tmp_path / "skills" / "write-article" / "SKILL.md",
+        "---\n"
+        "name: write-article\n"
+        "description: Write compelling articles\n"
+        "outcome_metrics: true\n"
+        "---\n"
+        "## Instructions\n"
+        "Write good stuff.\n"
+        "\n"
+        "## Reference Data\n"
+        "(placeholder — will be replaced by aiflay)\n"
+        "\n"
+        "## Footer\n"
+        "Do not touch this section.\n",
+    )
 
     # Skill WITHOUT outcome_metrics — must NOT be modified
-    _write(tmp_path / "skills" / "other-skill" / "SKILL.md",
-           "---\n"
-           "name: other-skill\n"
-           "description: Some other skill\n"
-           "---\n"
-           "## Instructions\n"
-           "Do other things.\n"
-           "\n"
-           "## Reference Data\n"
-           "(this should NOT be touched)\n")
+    _write(
+        tmp_path / "skills" / "other-skill" / "SKILL.md",
+        "---\n"
+        "name: other-skill\n"
+        "description: Some other skill\n"
+        "---\n"
+        "## Instructions\n"
+        "Do other things.\n"
+        "\n"
+        "## Reference Data\n"
+        "(this should NOT be touched)\n",
+    )
 
     # aiflay.yaml
     config = {
@@ -90,7 +95,7 @@ class TestSkillSelfIteration:
         cfg_path = _setup_project(tmp_path)
         config = load_config(cfg_path)
 
-        report = run_iteration(config, base_dir=tmp_path)
+        run_iteration(config, base_dir=tmp_path)
 
         skill_content = (tmp_path / "skills" / "write-article" / "SKILL.md").read_text()
 
@@ -145,24 +150,25 @@ class TestSkillSelfIteration:
 
     def test_custom_update_section(self, tmp_path: Path):
         # Skill with custom update_section frontmatter
-        _write(tmp_path / "data.csv",
-               "title,reads\nA,100\nB,50\n")
+        _write(tmp_path / "data.csv", "title,reads\nA,100\nB,50\n")
 
-        _write(tmp_path / "skills" / "custom" / "SKILL.md",
-               "---\n"
-               "name: custom\n"
-               "description: Custom section skill\n"
-               "outcome_metrics: true\n"
-               "update_section: \"## My Custom Section\"\n"
-               "---\n"
-               "## Instructions\n"
-               "Do things.\n"
-               "\n"
-               "## My Custom Section\n"
-               "(old data here)\n"
-               "\n"
-               "## Reference Data\n"
-               "This one should NOT be updated.\n")
+        _write(
+            tmp_path / "skills" / "custom" / "SKILL.md",
+            "---\n"
+            "name: custom\n"
+            "description: Custom section skill\n"
+            "outcome_metrics: true\n"
+            'update_section: "## My Custom Section"\n'
+            "---\n"
+            "## Instructions\n"
+            "Do things.\n"
+            "\n"
+            "## My Custom Section\n"
+            "(old data here)\n"
+            "\n"
+            "## Reference Data\n"
+            "This one should NOT be updated.\n",
+        )
 
         config_data = {
             "domain": "test",

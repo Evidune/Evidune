@@ -1,7 +1,6 @@
 """Tests for agent/core.py with mocked LLM."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,7 +9,6 @@ from agent.llm import LLMClient
 from gateway.base import InboundMessage
 from memory.store import MemoryStore
 from skills.registry import SkillRegistry
-from skills.loader import parse_skill
 
 
 class MockLLM(LLMClient):
@@ -106,7 +104,9 @@ class TestAgentCore:
         memory.add_message("conv-h", "user", "previous question")
         memory.add_message("conv-h", "assistant", "previous answer")
 
-        msg = InboundMessage(text="follow up", sender_id="u", channel="cli", conversation_id="conv-h")
+        msg = InboundMessage(
+            text="follow up", sender_id="u", channel="cli", conversation_id="conv-h"
+        )
         await agent.handle(msg)
 
         user_msgs = [m for m in llm.last_messages if m["role"] == "user"]

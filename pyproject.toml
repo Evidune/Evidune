@@ -43,3 +43,28 @@ packages = ["core", "adapters", "channels", "memory", "skills", "agent", "gatewa
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["web/dist", "web/node_modules", ".pytest_cache", "*.egg-info"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]  # line length handled by black
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+exclude = '''
+/(
+    web/dist
+  | web/node_modules
+  | \.pytest_cache
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["core", "adapters", "channels", "memory", "skills", "agent", "gateway"]

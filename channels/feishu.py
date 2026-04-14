@@ -42,10 +42,12 @@ class FeishuChannel(Channel):
         elements: list[dict[str, Any]] = []
 
         # Summary section
-        elements.append({
-            "tag": "markdown",
-            "content": f"**{report.analysis.summary}**",
-        })
+        elements.append(
+            {
+                "tag": "markdown",
+                "content": f"**{report.analysis.summary}**",
+            }
+        )
 
         # Top performers table
         if report.analysis.top_performers:
@@ -53,10 +55,12 @@ class FeishuChannel(Channel):
             for i, r in enumerate(report.analysis.top_performers[:5], 1):
                 metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
                 top_lines.append(f"{i}. {r.title} ({metrics_str})")
-            elements.append({
-                "tag": "markdown",
-                "content": "\n".join(top_lines),
-            })
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": "\n".join(top_lines),
+                }
+            )
 
         # Bottom performers
         if report.analysis.bottom_performers:
@@ -64,10 +68,12 @@ class FeishuChannel(Channel):
             for r in report.analysis.bottom_performers:
                 metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
                 bottom_lines.append(f"- {r.title} ({metrics_str})")
-            elements.append({
-                "tag": "markdown",
-                "content": "\n".join(bottom_lines),
-            })
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": "\n".join(bottom_lines),
+                }
+            )
 
         # Divider
         elements.append({"tag": "hr"})
@@ -78,30 +84,38 @@ class FeishuChannel(Channel):
             change_lines = [f"Updated **{len(changed)}** reference doc(s):"]
             for u in changed:
                 change_lines.append(f"- `{u.path}` ({u.strategy})")
-            elements.append({
-                "tag": "markdown",
-                "content": "\n".join(change_lines),
-            })
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": "\n".join(change_lines),
+                }
+            )
 
         # Patterns
         if report.analysis.patterns:
             pattern_lines = ["**Patterns Detected:**"]
             for p in report.analysis.patterns:
                 pattern_lines.append(f"- {p}")
-            elements.append({
-                "tag": "markdown",
-                "content": "\n".join(pattern_lines),
-            })
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": "\n".join(pattern_lines),
+                }
+            )
 
         # Commit info
         if report.commit_sha:
-            elements.append({
-                "tag": "note",
-                "elements": [{
-                    "tag": "plain_text",
-                    "content": f"Commit: {report.commit_sha[:8]}",
-                }],
-            })
+            elements.append(
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": f"Commit: {report.commit_sha[:8]}",
+                        }
+                    ],
+                }
+            )
 
         return {
             "header": {

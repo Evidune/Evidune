@@ -27,8 +27,8 @@ class OpenAIClient(LLMClient):
     ) -> None:
         try:
             from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("Install openai: pip install aiflay[openai]")
+        except ImportError as e:
+            raise ImportError("Install openai: pip install aiflay[openai]") from e
 
         self.model = model
         self.temperature = temperature
@@ -60,8 +60,8 @@ class AnthropicClient(LLMClient):
     ) -> None:
         try:
             from anthropic import AsyncAnthropic
-        except ImportError:
-            raise ImportError("Install anthropic: pip install aiflay[anthropic]")
+        except ImportError as e:
+            raise ImportError("Install anthropic: pip install aiflay[anthropic]") from e
 
         self.model = model
         self.temperature = temperature
@@ -122,10 +122,14 @@ def create_llm_client(
 ) -> LLMClient:
     """Factory function to create an LLM client."""
     if provider == "openai":
-        return OpenAIClient(model=model, api_key=api_key, base_url=base_url, temperature=temperature)
+        return OpenAIClient(
+            model=model, api_key=api_key, base_url=base_url, temperature=temperature
+        )
     elif provider == "anthropic":
         return AnthropicClient(model=model, api_key=api_key, temperature=temperature, **kwargs)
     elif provider == "local":
-        return LocalClient(model=model, base_url=base_url or "http://localhost:11434/v1", temperature=temperature)
+        return LocalClient(
+            model=model, base_url=base_url or "http://localhost:11434/v1", temperature=temperature
+        )
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")

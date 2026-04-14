@@ -1,13 +1,11 @@
 """Tests for core/config.py."""
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
 import yaml
 
-from core.config import AiflayConfig, load_config
+from core.config import load_config
 
 
 def _write_yaml(data: dict, path: Path) -> Path:
@@ -33,7 +31,11 @@ class TestLoadConfig:
                 "config": {"file": "data.csv", "title_field": "title"},
             },
             "references": [
-                {"path": "refs/case-studies.md", "update_strategy": "replace_section", "section": "## Top Performers"},
+                {
+                    "path": "refs/case-studies.md",
+                    "update_strategy": "replace_section",
+                    "section": "## Top Performers",
+                },
                 {"path": "refs/hot.md", "update_strategy": "full_replace"},
             ],
             "analysis": {"compare_window_days": 14, "top_n": 3, "bottom_n": 2},

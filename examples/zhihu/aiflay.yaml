@@ -1,9 +1,9 @@
 domain: zhihu
-description: "知乎内容自动化 — 文章生成 + 数据驱动迭代"
+description: '知乎内容自动化 — 文章生成 + 数据驱动迭代'
 
 # === Agent 配置 ===
 agent:
-  llm_provider: openai        # openai | anthropic | local
+  llm_provider: openai # openai | anthropic | local
   llm_model: gpt-4o
   api_key_env: OPENAI_API_KEY
   temperature: 0.7
@@ -15,7 +15,7 @@ agent:
 skills:
   directories:
     - skills/
-  auto_update: true  # 迭代循环自动更新 skill 参考文档
+  auto_update: true # 迭代循环自动更新 skill 参考文档
 
 # === 记忆 ===
 memory:
@@ -44,7 +44,7 @@ metrics:
 references:
   - path: skills/write-article/references/case-studies.md
     update_strategy: replace_section
-    section: "## Top Performers"
+    section: '## Top Performers'
   - path: skills/write-article/references/hot-questions.md
     update_strategy: full_replace
 
@@ -54,9 +54,9 @@ analysis:
   bottom_n: 3
 
 iteration:
-  schedule: "0 21 * * *"
+  schedule: '0 21 * * *'
   git_commit: true
-  commit_prefix: "chore(zhihu-review): "
+  commit_prefix: 'chore(zhihu-review): '
 
 # === 通知渠道（单向报告） ===
 channels:

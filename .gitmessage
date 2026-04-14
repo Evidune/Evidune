@@ -1,0 +1,15 @@
+# <type>(<scope>): <subject>     # ≤72 chars, lowercase
+#
+# <body>                          # WHY, not WHAT. Wrap at 72.
+#
+# Refs: #<issue>
+#
+# Allowed types:
+#   build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
+#
+# Example:
+#   feat(skills): support custom update_section in frontmatter
+#
+#   Skills with outcome_metrics: true can now specify which markdown
+#   section the iteration loop should replace, defaulting to the
+#   existing "## Reference Data".

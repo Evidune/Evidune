@@ -11,6 +11,7 @@ from core.metrics import MetricRecord, MetricsSnapshot
 @dataclass
 class AnalysisResult:
     """Result of analyzing a metrics snapshot."""
+
     domain: str
     total_records: int
     top_performers: list[MetricRecord]
@@ -63,9 +64,13 @@ def _extract_patterns(
         avg_top_title = sum(len(r.title) for r in top) / len(top)
         avg_bottom_title = sum(len(r.title) for r in bottom) / len(bottom)
         if avg_top_title > avg_bottom_title * 1.3:
-            patterns.append(f"Top performers have longer titles (avg {avg_top_title:.0f} vs {avg_bottom_title:.0f} chars)")
+            patterns.append(
+                f"Top performers have longer titles (avg {avg_top_title:.0f} vs {avg_bottom_title:.0f} chars)"
+            )
         elif avg_bottom_title > avg_top_title * 1.3:
-            patterns.append(f"Top performers have shorter titles (avg {avg_top_title:.0f} vs {avg_bottom_title:.0f} chars)")
+            patterns.append(
+                f"Top performers have shorter titles (avg {avg_top_title:.0f} vs {avg_bottom_title:.0f} chars)"
+            )
 
     return patterns
 
@@ -111,7 +116,8 @@ def analyze(
         f"{snapshot.domain}: {len(records)} items, "
         f"total {sort_metric}={total:.0f}, avg={avg:.0f}. "
         f"Top: '{top[0].title}' ({top[0].metrics.get(sort_metric, 0)})"
-        if top else f"{snapshot.domain}: {len(records)} items analyzed."
+        if top
+        else f"{snapshot.domain}: {len(records)} items analyzed."
     )
 
     return AnalysisResult(

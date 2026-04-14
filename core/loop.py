@@ -6,12 +6,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from core.analyzer import analyze
+from channels.base import IterationReport, create_channel
+from core.analyzer import AnalysisResult, analyze
 from core.config import AiflayConfig, load_config
 from core.git_ops import commit_changes
 from core.metrics import get_adapter
 from core.updater import update_reference
-from channels.base import IterationReport, create_channel
 
 
 def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> IterationReport:
@@ -104,7 +104,7 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
 def _update_outcome_skills(
     config: AiflayConfig,
     base_dir: Path,
-    result: "AnalysisResult",
+    result: AnalysisResult,
 ) -> list:
     """Update SKILL.md files for skills with outcome_metrics: true.
 
@@ -114,7 +114,6 @@ def _update_outcome_skills(
 
     Returns a list of UpdateResult objects appended to the main updates list.
     """
-    from datetime import datetime, timezone
     from skills.registry import SkillRegistry
 
     registry = SkillRegistry()
@@ -139,7 +138,7 @@ def _update_outcome_skills(
 
 def _build_skill_reference_content(
     section: str,
-    result: "AnalysisResult",
+    result: AnalysisResult,
 ) -> str:
     """Build the skill's reference data section from analysis results.
 
@@ -172,10 +171,9 @@ def _build_skill_reference_content(
 def _build_reference_content(
     strategy: str,
     section: str | None,
-    result: "AnalysisResult",
+    result: AnalysisResult,
 ) -> str:
     """Build new content for a reference document based on analysis results."""
-    from core.analyzer import AnalysisResult
 
     lines = []
 
@@ -215,11 +213,12 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
     skills + memory + LLM.
     """
     import os
-    from agent.llm import create_llm_client
+
     from agent.core import AgentCore
+    from agent.llm import create_llm_client
+    from gateway.router import Router, create_gateway
     from memory.store import MemoryStore
     from skills.registry import SkillRegistry
-    from gateway.router import Router, create_gateway
 
     if base_dir is None:
         base_dir = Path.cwd()
@@ -267,6 +266,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
 
     # Initialize web gateways with skill metadata
     from gateway.web import WebGateway
+
     skills_meta = [{"name": s.name, "description": s.description} for s in skill_registry.all()]
     for gw in gateways_list:
         if isinstance(gw, WebGateway):

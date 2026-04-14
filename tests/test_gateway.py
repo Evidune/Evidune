@@ -2,7 +2,7 @@
 
 import pytest
 
-from gateway.base import InboundMessage, OutboundMessage
+from gateway.base import InboundMessage
 from gateway.router import create_gateway
 
 

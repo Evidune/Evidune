@@ -6,7 +6,6 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -40,7 +39,8 @@ class MemoryStore:
         self._init_tables()
 
     def _init_tables(self) -> None:
-        self._conn.executescript("""
+        self._conn.executescript(
+            """
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
                 channel TEXT DEFAULT '',
@@ -67,7 +67,8 @@ class MemoryStore:
 
             CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
             CREATE INDEX IF NOT EXISTS idx_facts_source ON facts(source);
-        """)
+        """
+        )
         self._conn.commit()
 
     def _now(self) -> str:
@@ -143,9 +144,7 @@ class MemoryStore:
 
     def get_fact(self, key: str) -> str | None:
         """Get a single fact by key."""
-        row = self._conn.execute(
-            "SELECT value FROM facts WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._conn.execute("SELECT value FROM facts WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
     def get_facts(self, prefix: str | None = None) -> list[Fact]:
@@ -156,12 +155,15 @@ class MemoryStore:
                 (f"{prefix}%",),
             ).fetchall()
         else:
-            rows = self._conn.execute(
-                "SELECT * FROM facts ORDER BY key"
-            ).fetchall()
+            rows = self._conn.execute("SELECT * FROM facts ORDER BY key").fetchall()
         return [
-            Fact(key=r["key"], value=r["value"], source=r["source"],
-                 created_at=r["created_at"], updated_at=r["updated_at"])
+            Fact(
+                key=r["key"],
+                value=r["value"],
+                source=r["source"],
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+            )
             for r in rows
         ]
 
@@ -172,8 +174,13 @@ class MemoryStore:
             (f"%{query}%", f"%{query}%"),
         ).fetchall()
         return [
-            Fact(key=r["key"], value=r["value"], source=r["source"],
-                 created_at=r["created_at"], updated_at=r["updated_at"])
+            Fact(
+                key=r["key"],
+                value=r["value"],
+                source=r["source"],
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+            )
             for r in rows
         ]
 

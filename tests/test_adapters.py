@@ -16,14 +16,18 @@ def adapter():
 class TestGenericCsvAdapter:
     def test_load_csv(self, adapter: GenericCsvAdapter, tmp_path: Path):
         csv_path = tmp_path / "data.csv"
-        csv_path.write_text("title,reads,upvotes,date\nArticle A,1200,45,2026-04-01\nArticle B,300,10,2026-04-02\n")
+        csv_path.write_text(
+            "title,reads,upvotes,date\nArticle A,1200,45,2026-04-01\nArticle B,300,10,2026-04-02\n"
+        )
 
-        snapshot = adapter.fetch({
-            "file": str(csv_path),
-            "title_field": "title",
-            "metric_fields": ["reads", "upvotes"],
-            "metadata_fields": ["date"],
-        })
+        snapshot = adapter.fetch(
+            {
+                "file": str(csv_path),
+                "title_field": "title",
+                "metric_fields": ["reads", "upvotes"],
+                "metadata_fields": ["date"],
+            }
+        )
 
         assert len(snapshot.records) == 2
         assert snapshot.records[0].title == "Article A"
@@ -39,11 +43,13 @@ class TestGenericCsvAdapter:
         ]
         json_path.write_text(json.dumps(data))
 
-        snapshot = adapter.fetch({
-            "file": str(json_path),
-            "title_field": "title",
-            "metric_fields": ["reads", "likes"],
-        })
+        snapshot = adapter.fetch(
+            {
+                "file": str(json_path),
+                "title_field": "title",
+                "metric_fields": ["reads", "likes"],
+            }
+        )
 
         assert len(snapshot.records) == 2
         assert snapshot.records[1].title == "Post 2"
@@ -54,11 +60,13 @@ class TestGenericCsvAdapter:
         data = {"records": [{"title": "A", "views": 100}]}
         json_path.write_text(json.dumps(data))
 
-        snapshot = adapter.fetch({
-            "file": str(json_path),
-            "title_field": "title",
-            "metric_fields": ["views"],
-        })
+        snapshot = adapter.fetch(
+            {
+                "file": str(json_path),
+                "title_field": "title",
+                "metric_fields": ["views"],
+            }
+        )
 
         assert len(snapshot.records) == 1
         assert snapshot.records[0].metrics["views"] == 100.0
@@ -75,11 +83,13 @@ class TestGenericCsvAdapter:
         csv_path = tmp_path / "data.csv"
         csv_path.write_text("title,reads\nArticle,not_a_number\n")
 
-        snapshot = adapter.fetch({
-            "file": str(csv_path),
-            "title_field": "title",
-            "metric_fields": ["reads"],
-        })
+        snapshot = adapter.fetch(
+            {
+                "file": str(csv_path),
+                "title_field": "title",
+                "metric_fields": ["reads"],
+            }
+        )
 
         assert len(snapshot.records) == 1
         assert "reads" not in snapshot.records[0].metrics

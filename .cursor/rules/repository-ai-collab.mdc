@@ -1,0 +1,25 @@
+---
+description: Aiflay repository-wide AI collaboration rules
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Aiflay Repo Rules
+
+The single source of truth is `AGENTS.md` at the repo root. Always read it before making changes.
+
+Key rules (see AGENTS.md for full detail):
+
+- Conventional Commits: `type(scope): subject`. Allowed types: `build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test`.
+- All Python tests must pass: `python -m pytest tests/`.
+- Pre-commit hooks must succeed; never use `--no-verify`.
+- Module boundaries: `gateway/` = bidirectional, `channels/` = outbound notifications only.
+- Skill self-iteration is the unique differentiator — preserve `core/loop._update_outcome_skills`.
+- Skills are injected as system prompt context, not as LLM tool definitions.
+
+Forbidden:
+
+- Force push to `main`.
+- Committing secrets (`.env`, `~/.aiflay/`, `*.db`).
+- Bypassing pre-commit hooks.
+- Editing `web/dist/` or `web/node_modules/` directly.
