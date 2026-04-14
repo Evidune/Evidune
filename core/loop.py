@@ -122,7 +122,7 @@ def _update_outcome_skills(
 
     skill_updates = []
     for skill in registry.get_outcome_skills():
-        section = skill.meta.get("update_section", "## Reference Data")
+        section = skill.update_section
         new_content = _build_skill_reference_content(section, result)
 
         update = update_reference(

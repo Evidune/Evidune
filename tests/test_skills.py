@@ -33,6 +33,52 @@ BARE_SKILL = """# No Frontmatter Skill
 Just instructions, no YAML header.
 """
 
+CLAUDE_STYLE_SKILL = """---
+name: api-helper
+description: Help build with the Anthropic API
+version: 2.0.0
+tags: [api, anthropic]
+triggers:
+  - user imports anthropic SDK
+  - user asks about prompt caching
+anti_triggers:
+  - user imports openai SDK
+  - task is about general programming
+outcome_metrics: false
+update_section: "## Reference Data"
+---
+
+## Instructions
+
+Build apps with the Anthropic API. Always include prompt caching.
+
+## Triggers
+
+When to use:
+
+- File imports `anthropic` package
+- User mentions Claude models
+
+## Anti-Triggers
+
+When NOT to use:
+
+- File imports `openai`
+- Task is plain Python with no AI
+
+## Examples
+
+### Example 1: Add caching
+
+Input: existing call without caching
+Output: same call with cache_control headers
+
+### Example 2: Streaming
+
+Input: synchronous client
+Output: AsyncAnthropic with stream=True
+"""
+
 
 class TestParseSkill:
     def test_full_skill(self, tmp_path: Path):
@@ -43,6 +89,8 @@ class TestParseSkill:
         assert "writing" in skill.tags
         assert skill.outcome_metrics is True
         assert "Be practical" in skill.instructions
+        assert skill.version == "1.0.0"  # default
+        assert skill.update_section == "## Reference Data"  # default
 
     def test_bare_skill(self, tmp_path: Path):
         path = _write_skill(tmp_path / "SKILL.md", BARE_SKILL)
@@ -56,6 +104,82 @@ class TestParseSkill:
         path = _write_skill(tmp_path / "SKILL.md", content)
         skill = parse_skill(path)
         assert skill.meta.get("custom_field") == "hello"
+
+    def test_claude_style_full_parse(self, tmp_path: Path):
+        path = _write_skill(tmp_path / "api-helper" / "SKILL.md", CLAUDE_STYLE_SKILL)
+        skill = parse_skill(path)
+        assert skill.version == "2.0.0"
+        assert "user imports anthropic SDK" in skill.triggers
+        assert "user asks about prompt caching" in skill.triggers
+        # Markdown ## Triggers section is also merged
+        assert "File imports `anthropic` package" in skill.triggers
+        assert "user imports openai SDK" in skill.anti_triggers
+        assert "File imports `openai`" in skill.anti_triggers
+        # Examples parsed
+        assert len(skill.examples) == 2
+        assert "Example 1: Add caching" in skill.examples[0]
+        assert "Example 2: Streaming" in skill.examples[1]
+
+    def test_triggers_dedup(self, tmp_path: Path):
+        # Same trigger in frontmatter and markdown should appear once
+        content = """---
+name: dup
+description: dup test
+triggers:
+  - same trigger
+---
+
+## Triggers
+
+- same trigger
+- different trigger
+"""
+        path = _write_skill(tmp_path / "SKILL.md", content)
+        skill = parse_skill(path)
+        assert skill.triggers.count("same trigger") == 1
+        assert "different trigger" in skill.triggers
+
+    def test_loads_references_directory(self, tmp_path: Path):
+        skill_dir = tmp_path / "with-refs"
+        _write_skill(skill_dir / "SKILL.md", SAMPLE_SKILL)
+        _write_skill(
+            skill_dir / "references" / "advanced.md", "# Advanced topic\nDeep dive content"
+        )
+        _write_skill(skill_dir / "references" / "examples.md", "# Examples\nMore samples")
+
+        skill = parse_skill(skill_dir / "SKILL.md")
+        assert "advanced.md" in skill.references
+        assert "Deep dive content" in skill.references["advanced.md"]
+        assert "examples.md" in skill.references
+
+    def test_loads_scripts_and_assets(self, tmp_path: Path):
+        skill_dir = tmp_path / "with-resources"
+        _write_skill(skill_dir / "SKILL.md", SAMPLE_SKILL)
+        _write_skill(skill_dir / "scripts" / "helper.py", "def hi(): pass")
+        _write_skill(skill_dir / "assets" / "template.json", '{"a": 1}')
+
+        skill = parse_skill(skill_dir / "SKILL.md")
+        assert "helper.py" in skill.scripts
+        assert skill.scripts["helper.py"].name == "helper.py"
+        assert "template.json" in skill.assets
+
+    def test_skill_root_property(self, tmp_path: Path):
+        skill_dir = tmp_path / "rooted"
+        path = _write_skill(skill_dir / "SKILL.md", SAMPLE_SKILL)
+        skill = parse_skill(path)
+        assert skill.root == skill_dir
+
+    def test_custom_update_section(self, tmp_path: Path):
+        content = """---
+name: custom
+description: custom
+update_section: "## My Custom Section"
+---
+Body
+"""
+        path = _write_skill(tmp_path / "SKILL.md", content)
+        skill = parse_skill(path)
+        assert skill.update_section == "## My Custom Section"
 
 
 class TestLoadSkillsFromDir:
@@ -108,8 +232,56 @@ class TestSkillRegistry:
         results = registry.find_relevant("analytics review")
         assert any(s.name == "review-data" for s in results)
 
-    def test_as_system_prompt(self, registry: SkillRegistry):
-        prompt = registry.as_system_prompt()
+    def test_as_full_prompt(self, registry: SkillRegistry):
+        prompt = registry.as_full_prompt()
         assert "write-article" in prompt
         assert "review-data" in prompt
-        assert "# Available Skills" in prompt
+        assert "# Active Skills" in prompt
+
+    def test_as_index_prompt_compact(self, registry: SkillRegistry):
+        prompt = registry.as_index_prompt()
+        assert "write-article" in prompt
+        assert "Write a compelling" in prompt
+        # Index should NOT include full instructions
+        assert "Be practical and concrete" not in prompt
+
+    def test_register_direct(self, tmp_path: Path):
+        path = _write_skill(tmp_path / "SKILL.md", SAMPLE_SKILL)
+        skill = parse_skill(path)
+        reg = SkillRegistry()
+        reg.register(skill)
+        assert reg.get("write-article") is skill
+
+
+class TestRegistryTriggerMatching:
+    @pytest.fixture
+    def registry(self, tmp_path: Path) -> SkillRegistry:
+        _write_skill(tmp_path / "anthropic" / "SKILL.md", CLAUDE_STYLE_SKILL)
+        _write_skill(tmp_path / "writing" / "SKILL.md", SAMPLE_SKILL)
+        reg = SkillRegistry()
+        reg.load_directory(tmp_path)
+        return reg
+
+    def test_trigger_match_boosts_score(self, registry: SkillRegistry):
+        results = registry.find_relevant("how do I add prompt caching to my code?")
+        assert results
+        assert results[0].name == "api-helper"
+
+    def test_anti_trigger_excludes(self, registry: SkillRegistry):
+        # Mentions openai which is in anti_triggers — should exclude api-helper
+        results = registry.find_relevant("user imports openai sdk for chat")
+        assert not any(s.name == "api-helper" for s in results)
+
+    def test_get_reference_loads_doc(self, tmp_path: Path):
+        skill_dir = tmp_path / "skill-with-refs"
+        _write_skill(skill_dir / "SKILL.md", SAMPLE_SKILL)
+        _write_skill(skill_dir / "references" / "deep.md", "# Deep dive\nDetails")
+        reg = SkillRegistry()
+        reg.load_directory(tmp_path)
+        ref = reg.get_reference("write-article", "deep.md")
+        assert ref is not None
+        assert "Details" in ref
+
+    def test_get_reference_missing(self, registry: SkillRegistry):
+        assert registry.get_reference("write-article", "nonexistent.md") is None
+        assert registry.get_reference("nonexistent-skill", "anything.md") is None
