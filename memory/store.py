@@ -48,6 +48,31 @@ class MemoryStore:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS skill_executions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                skill_name TEXT NOT NULL,
+                conversation_id TEXT,
+                user_input TEXT NOT NULL,
+                assistant_output TEXT NOT NULL,
+                signals_json TEXT DEFAULT '{}',
+                cross_model_score REAL,
+                evaluator_reasoning TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_executions_skill
+                ON skill_executions(skill_name);
+
+            CREATE TABLE IF NOT EXISTS emerged_skills (
+                name TEXT PRIMARY KEY,
+                source_conversation_id TEXT,
+                evaluation_criteria TEXT,
+                version INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'pending_review',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT NOT NULL,
@@ -189,6 +214,142 @@ class MemoryStore:
         cursor = self._conn.execute("DELETE FROM facts WHERE key = ?", (key,))
         self._conn.commit()
         return cursor.rowcount > 0
+
+    # --- Skill Execution API ---
+
+    def record_execution(
+        self,
+        skill_name: str,
+        user_input: str,
+        assistant_output: str,
+        conversation_id: str | None = None,
+        signals: dict | None = None,
+        cross_model_score: float | None = None,
+        evaluator_reasoning: str | None = None,
+    ) -> int:
+        """Record a skill execution. Returns the new row id."""
+        import json as _json
+
+        now = self._now()
+        cursor = self._conn.execute(
+            """INSERT INTO skill_executions
+               (skill_name, conversation_id, user_input, assistant_output,
+                signals_json, cross_model_score, evaluator_reasoning, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                skill_name,
+                conversation_id,
+                user_input,
+                assistant_output,
+                _json.dumps(signals or {}, ensure_ascii=False),
+                cross_model_score,
+                evaluator_reasoning,
+                now,
+            ),
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def update_execution_signals(self, execution_id: int, signals: dict) -> bool:
+        """Update the signals_json for an existing execution."""
+        import json as _json
+
+        cursor = self._conn.execute(
+            "UPDATE skill_executions SET signals_json = ? WHERE id = ?",
+            (_json.dumps(signals, ensure_ascii=False), execution_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def update_execution_score(self, execution_id: int, score: float, reasoning: str = "") -> bool:
+        """Update the cross_model_score and reasoning for an execution."""
+        cursor = self._conn.execute(
+            """UPDATE skill_executions
+               SET cross_model_score = ?, evaluator_reasoning = ?
+               WHERE id = ?""",
+            (score, reasoning, execution_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def get_skill_executions(self, skill_name: str, limit: int = 50) -> list[dict]:
+        """Get recent executions for a skill (newest first)."""
+        import json as _json
+
+        rows = self._conn.execute(
+            """SELECT id, skill_name, conversation_id, user_input, assistant_output,
+                      signals_json, cross_model_score, evaluator_reasoning, created_at
+               FROM skill_executions
+               WHERE skill_name = ?
+               ORDER BY id DESC
+               LIMIT ?""",
+            (skill_name, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "skill_name": r["skill_name"],
+                "conversation_id": r["conversation_id"],
+                "user_input": r["user_input"],
+                "assistant_output": r["assistant_output"],
+                "signals": _json.loads(r["signals_json"] or "{}"),
+                "score": r["cross_model_score"],
+                "evaluator_reasoning": r["evaluator_reasoning"],
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+
+    # --- Emerged Skill API ---
+
+    def register_emerged_skill(
+        self,
+        name: str,
+        source_conversation_id: str | None = None,
+        evaluation_criteria: str = "",
+        status: str = "pending_review",
+    ) -> None:
+        """Record metadata about a skill that emerged from a conversation."""
+        now = self._now()
+        self._conn.execute(
+            """INSERT INTO emerged_skills
+               (name, source_conversation_id, evaluation_criteria,
+                version, status, created_at, updated_at)
+               VALUES (?, ?, ?, 1, ?, ?, ?)
+               ON CONFLICT(name) DO UPDATE SET
+                 evaluation_criteria = ?,
+                 status = ?,
+                 updated_at = ?,
+                 version = version + 1""",
+            (
+                name,
+                source_conversation_id,
+                evaluation_criteria,
+                status,
+                now,
+                now,
+                evaluation_criteria,
+                status,
+                now,
+            ),
+        )
+        self._conn.commit()
+
+    def get_emerged_skill(self, name: str) -> dict | None:
+        row = self._conn.execute("SELECT * FROM emerged_skills WHERE name = ?", (name,)).fetchone()
+        return dict(row) if row else None
+
+    def list_emerged_skills(self, status: str | None = None) -> list[dict]:
+        if status:
+            rows = self._conn.execute(
+                "SELECT * FROM emerged_skills WHERE status = ? ORDER BY updated_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM emerged_skills ORDER BY updated_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         self._conn.close()

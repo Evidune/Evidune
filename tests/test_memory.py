@@ -87,3 +87,107 @@ class TestFacts:
         assert store.delete_fact("key") is True
         assert store.get_fact("key") is None
         assert store.delete_fact("key") is False
+
+
+class TestSkillExecutions:
+    def test_record_and_retrieve(self, store: MemoryStore):
+        eid = store.record_execution(
+            skill_name="write-article",
+            user_input="write me an article",
+            assistant_output="Here is the article...",
+            conversation_id="conv-1",
+        )
+        assert eid > 0
+
+        executions = store.get_skill_executions("write-article")
+        assert len(executions) == 1
+        assert executions[0]["skill_name"] == "write-article"
+        assert executions[0]["user_input"] == "write me an article"
+        assert executions[0]["score"] is None  # not yet evaluated
+
+    def test_record_with_signals(self, store: MemoryStore):
+        store.record_execution(
+            skill_name="s",
+            user_input="i",
+            assistant_output="o",
+            signals={"copied": True, "rating": 5},
+        )
+        executions = store.get_skill_executions("s")
+        assert executions[0]["signals"] == {"copied": True, "rating": 5}
+
+    def test_update_execution_score(self, store: MemoryStore):
+        eid = store.record_execution(skill_name="s", user_input="i", assistant_output="o")
+        ok = store.update_execution_score(eid, 0.85, "Good output")
+        assert ok is True
+
+        executions = store.get_skill_executions("s")
+        assert executions[0]["score"] == 0.85
+        assert executions[0]["evaluator_reasoning"] == "Good output"
+
+    def test_update_execution_signals(self, store: MemoryStore):
+        eid = store.record_execution(skill_name="s", user_input="i", assistant_output="o")
+        ok = store.update_execution_signals(eid, {"thumbs_up": True})
+        assert ok is True
+        executions = store.get_skill_executions("s")
+        assert executions[0]["signals"] == {"thumbs_up": True}
+
+    def test_get_skill_executions_filters_by_name(self, store: MemoryStore):
+        store.record_execution(skill_name="a", user_input="i", assistant_output="o")
+        store.record_execution(skill_name="b", user_input="i", assistant_output="o")
+        store.record_execution(skill_name="a", user_input="i2", assistant_output="o2")
+
+        a_execs = store.get_skill_executions("a")
+        b_execs = store.get_skill_executions("b")
+        assert len(a_execs) == 2
+        assert len(b_execs) == 1
+
+    def test_get_skill_executions_newest_first(self, store: MemoryStore):
+        store.record_execution(skill_name="s", user_input="first", assistant_output="o")
+        store.record_execution(skill_name="s", user_input="second", assistant_output="o")
+        execs = store.get_skill_executions("s")
+        assert execs[0]["user_input"] == "second"
+        assert execs[1]["user_input"] == "first"
+
+    def test_executions_limit(self, store: MemoryStore):
+        for i in range(20):
+            store.record_execution(skill_name="s", user_input=f"in {i}", assistant_output="o")
+        execs = store.get_skill_executions("s", limit=5)
+        assert len(execs) == 5
+
+
+class TestEmergedSkills:
+    def test_register_and_get(self, store: MemoryStore):
+        store.register_emerged_skill(
+            name="my-emerged",
+            source_conversation_id="conv-1",
+            evaluation_criteria="user accepts output without modification",
+        )
+        skill = store.get_emerged_skill("my-emerged")
+        assert skill is not None
+        assert skill["name"] == "my-emerged"
+        assert skill["source_conversation_id"] == "conv-1"
+        assert skill["status"] == "pending_review"
+        assert skill["version"] == 1
+
+    def test_register_twice_increments_version(self, store: MemoryStore):
+        store.register_emerged_skill(name="x", evaluation_criteria="v1")
+        store.register_emerged_skill(name="x", evaluation_criteria="v2")
+        skill = store.get_emerged_skill("x")
+        assert skill["version"] == 2
+        assert skill["evaluation_criteria"] == "v2"
+
+    def test_get_missing_skill(self, store: MemoryStore):
+        assert store.get_emerged_skill("nonexistent") is None
+
+    def test_list_all_emerged(self, store: MemoryStore):
+        store.register_emerged_skill(name="a", status="active")
+        store.register_emerged_skill(name="b", status="pending_review")
+        skills = store.list_emerged_skills()
+        assert len(skills) == 2
+
+    def test_list_filtered_by_status(self, store: MemoryStore):
+        store.register_emerged_skill(name="a", status="active")
+        store.register_emerged_skill(name="b", status="pending_review")
+        active = store.list_emerged_skills(status="active")
+        assert len(active) == 1
+        assert active[0]["name"] == "a"

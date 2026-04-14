@@ -56,6 +56,20 @@ class ChannelConfig:
 
 
 @dataclass
+class EvaluatorConfig:
+    """Cross-model evaluator config.
+
+    Should use a DIFFERENT model from the main agent to avoid LLM
+    self-justification bias. E.g. agent=Claude, evaluator=GPT-4.
+    """
+
+    llm_provider: str = "anthropic"  # default differs from agent (openai)
+    llm_model: str = "claude-sonnet-4-6"
+    llm_base_url: str | None = None
+    api_key_env: str = "ANTHROPIC_API_KEY"
+
+
+@dataclass
 class AgentConfig:
     llm_provider: str = "openai"  # openai | anthropic | local
     llm_model: str = "gpt-4o"
@@ -64,6 +78,7 @@ class AgentConfig:
     max_history: int = 20
     temperature: float = 0.7
     system_prompt: str = ""
+    evaluator: EvaluatorConfig | None = None
 
 
 @dataclass
@@ -181,6 +196,15 @@ def load_config(path: str | Path) -> AiflayConfig:
     agent = None
     agent_raw = raw.get("agent")
     if agent_raw:
+        evaluator = None
+        eval_raw = agent_raw.get("evaluator")
+        if eval_raw:
+            evaluator = EvaluatorConfig(
+                llm_provider=eval_raw.get("llm_provider", "anthropic"),
+                llm_model=eval_raw.get("llm_model", "claude-sonnet-4-6"),
+                llm_base_url=eval_raw.get("llm_base_url"),
+                api_key_env=eval_raw.get("api_key_env", "ANTHROPIC_API_KEY"),
+            )
         agent = AgentConfig(
             llm_provider=agent_raw.get("llm_provider", "openai"),
             llm_model=agent_raw.get("llm_model", "gpt-4o"),
@@ -189,6 +213,7 @@ def load_config(path: str | Path) -> AiflayConfig:
             max_history=agent_raw.get("max_history", 20),
             temperature=agent_raw.get("temperature", 0.7),
             system_prompt=agent_raw.get("system_prompt", ""),
+            evaluator=evaluator,
         )
 
     # Skills config
