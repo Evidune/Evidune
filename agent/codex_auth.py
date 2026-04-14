@@ -43,6 +43,7 @@ class CodexAuth:
     auth_mode: str = "chatgpt"
     refresh_token: str | None = None
     id_token: str | None = None
+    account_id: str | None = None  # required header for ChatGPT-mode calls
     last_refresh: str | None = None
     source_path: Path = DEFAULT_AUTH_PATH
 
@@ -91,6 +92,7 @@ def read_codex_auth(path: str | Path | None = None) -> CodexAuth:
         auth_mode=data.get("auth_mode", "chatgpt"),
         refresh_token=tokens.get("refresh_token"),
         id_token=tokens.get("id_token"),
+        account_id=tokens.get("account_id"),
         last_refresh=data.get("last_refresh"),
         source_path=auth_path,
     )

@@ -3,7 +3,7 @@
 import json
 import stat
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +13,15 @@ from agent.llm import AnthropicClient, CodexClient, LocalClient, OpenAIClient, c
 def _write_codex_auth(path: Path, token: str = "sk-tok-x") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"auth_mode": "chatgpt", "tokens": {"access_token": token}}),
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": token,
+                    "account_id": "test-acct-id",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -69,61 +77,98 @@ class TestCodexClient:
         with pytest.raises(CodexAuthError):
             CodexClient(model="gpt-5.4", auth_path=str(tmp_path / "nope.json"))
 
+    def test_builds_payload_separates_system(self, tmp_path: Path):
+        auth_path = _write_codex_auth(tmp_path / "auth.json")
+        client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
+        payload = client._build_payload(
+            [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello"},
+                {"role": "user", "content": "Ok"},
+            ]
+        )
+        assert payload["instructions"] == "You are helpful."
+        assert payload["stream"] is True
+        assert payload["store"] is False
+        assert payload["model"] == "gpt-5.4"
+        # System becomes instructions; remaining turns become input items
+        assert len(payload["input"]) == 3
+        assert payload["input"][0]["role"] == "user"
+        assert payload["input"][1]["role"] == "assistant"
+
+    def test_headers_include_required_fields(self, tmp_path: Path):
+        auth_path = _write_codex_auth(tmp_path / "auth.json", "sk-tok-x")
+        client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
+        headers = client._headers()
+        assert headers["Authorization"] == "Bearer sk-tok-x"
+        assert headers["originator"] == "codex_cli_rs"
+        assert "chatgpt-account-id" in headers
+
+    def test_accumulate_sse_deltas(self):
+        raw = (
+            "event: response.output_text.delta\n"
+            'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n'
+            "event: response.output_text.delta\n"
+            'data: {"type":"response.output_text.delta","delta":" world"}\n\n'
+            "event: response.completed\n"
+            'data: {"type":"response.completed"}\n\n'
+        )
+        assert CodexClient._accumulate_text_from_sse(raw) == "Hello world"
+
+    def test_accumulate_ignores_unknown_events(self):
+        raw = (
+            "event: response.created\n"
+            'data: {"type":"response.created"}\n\n'
+            "event: response.output_text.delta\n"
+            'data: {"type":"response.output_text.delta","delta":"A"}\n\n'
+        )
+        assert CodexClient._accumulate_text_from_sse(raw) == "A"
+
     @pytest.mark.asyncio
-    async def test_complete_delegates_to_inner(self, tmp_path: Path):
+    async def test_complete_uses_post(self, tmp_path: Path):
         auth_path = _write_codex_auth(tmp_path / "auth.json")
         client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
 
-        # Replace inner with a mock
-        mock_inner = MagicMock()
+        async def fake_post(payload):
+            assert payload["model"] == "gpt-5.4"
+            assert payload["stream"] is True
+            return "response text"
 
-        async def fake_complete(messages, **kwargs):
-            return "hello from inner"
-
-        mock_inner.complete = fake_complete
-        client._inner = mock_inner
-
-        result = await client.complete([{"role": "user", "content": "hi"}])
-        assert result == "hello from inner"
+        with patch.object(client, "_post", side_effect=fake_post):
+            result = await client.complete([{"role": "user", "content": "hi"}])
+        assert result == "response text"
 
     @pytest.mark.asyncio
     async def test_401_triggers_token_refresh(self, tmp_path: Path):
-        auth_path = _write_codex_auth(tmp_path / "auth.json", "sk-old-token")
-        client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
+        from agent.llm import _CodexUnauthorized
 
-        # First call raises 401, then we re-write the auth file, then retry succeeds
+        auth_path = _write_codex_auth(tmp_path / "auth.json", "sk-old")
+        client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
         call_count = {"n": 0}
 
-        async def flaky_complete(messages, **kwargs):
+        async def flaky_post(payload):
             call_count["n"] += 1
             if call_count["n"] == 1:
-                raise Exception("HTTP 401: Unauthorized")
-            return "second-call-success"
+                raise _CodexUnauthorized("401")
+            return "recovered"
 
-        # Patch the build_inner to keep returning a mock that uses flaky_complete
-        with patch.object(client, "_build_inner") as mock_build:
-            mock_inner = MagicMock()
-            mock_inner.complete = flaky_complete
-            mock_build.return_value = mock_inner
-            client._inner = mock_inner
-
-            # Rotate the token on disk before retry
-            _write_codex_auth(auth_path, "sk-rotated-token")
-
+        with patch.object(client, "_post", side_effect=flaky_post):
+            # Rotate the token on disk so the refresh picks up the new one
+            _write_codex_auth(auth_path, "sk-new")
             result = await client.complete([{"role": "user", "content": "hi"}])
-            assert result == "second-call-success"
-            assert client._token == "sk-rotated-token"
-            assert call_count["n"] == 2
+        assert result == "recovered"
+        assert client._token == "sk-new"
+        assert call_count["n"] == 2
 
     @pytest.mark.asyncio
     async def test_non_auth_error_propagates(self, tmp_path: Path):
         auth_path = _write_codex_auth(tmp_path / "auth.json")
         client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
 
-        async def boom(messages, **kwargs):
+        async def boom(payload):
             raise RuntimeError("rate limited")
 
-        client._inner.complete = boom
-
-        with pytest.raises(RuntimeError, match="rate limited"):
-            await client.complete([{"role": "user", "content": "hi"}])
+        with patch.object(client, "_post", side_effect=boom):
+            with pytest.raises(RuntimeError, match="rate limited"):
+                await client.complete([{"role": "user", "content": "hi"}])

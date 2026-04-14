@@ -22,6 +22,7 @@ VALID_AUTH = {
         "access_token": "sk-codex-access-token-abc",
         "id_token": "id-token-xyz",
         "refresh_token": "refresh-token-456",
+        "account_id": "acct-uuid-aaaa",
     },
     "last_refresh": "2026-04-14T10:00:00Z",
 }
@@ -35,6 +36,7 @@ class TestReadCodexAuth:
         assert auth.access_token == "sk-codex-access-token-abc"
         assert auth.refresh_token == "refresh-token-456"
         assert auth.id_token == "id-token-xyz"
+        assert auth.account_id == "acct-uuid-aaaa"
         assert auth.auth_mode == "chatgpt"
         assert auth.last_refresh == "2026-04-14T10:00:00Z"
         assert auth.source_path == path
