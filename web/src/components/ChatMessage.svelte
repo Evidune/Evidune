@@ -1,14 +1,81 @@
 <script lang="ts">
-  import type { Message } from '../lib/types'
+  import type { Message, SignalType } from '../lib/types'
+  import { sendFeedback } from '../lib/api'
 
-  let { message }: { message: Message } = $props()
+  let { message, onRegenerate }: { message: Message; onRegenerate?: () => void } = $props()
 
   const isUser = $derived(message.role === 'user')
+  let feedback: Partial<Record<SignalType, boolean>> = $state(message.feedback ?? {})
+  let copiedJustNow = $state(false)
+
+  async function send(signal: SignalType, value: boolean | number = true) {
+    if (!message.executionIds || message.executionIds.length === 0) return
+    feedback = { ...feedback, [signal]: !!value }
+    // Send for each execution id (a turn may touch multiple skills)
+    await Promise.all(
+      message.executionIds.map(id =>
+        sendFeedback({ execution_id: id, signal, value }),
+      ),
+    )
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(message.content)
+      copiedJustNow = true
+      setTimeout(() => (copiedJustNow = false), 1500)
+      send('copied', true)
+    } catch {
+      // clipboard blocked — silent fail
+    }
+  }
+
+  function thumbsUp() {
+    if (feedback.thumbs_up) return
+    send('thumbs_up', true)
+  }
+
+  function thumbsDown() {
+    if (feedback.thumbs_down) return
+    send('thumbs_down', true)
+  }
+
+  function regenerate() {
+    send('regenerated', true)
+    onRegenerate?.()
+  }
 </script>
 
 <div class="msg" class:user={isUser} class:bot={!isUser}>
   <span class="msg-label">{isUser ? 'You' : 'Aiflay'}</span>
   <div class="msg-body">{message.content}</div>
+
+  {#if !isUser && message.executionIds && message.executionIds.length > 0}
+    <div class="actions">
+      <button
+        class="action"
+        class:active={feedback.thumbs_up}
+        title="Good response"
+        onclick={thumbsUp}
+      >
+        👍
+      </button>
+      <button
+        class="action"
+        class:active={feedback.thumbs_down}
+        title="Bad response"
+        onclick={thumbsDown}
+      >
+        👎
+      </button>
+      <button class="action" title={copiedJustNow ? 'Copied!' : 'Copy'} onclick={copy}>
+        {copiedJustNow ? '✓' : '📋'}
+      </button>
+      {#if onRegenerate}
+        <button class="action" title="Regenerate" onclick={regenerate}>🔄</button>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -20,12 +87,22 @@
   }
 
   @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
-  .msg.user { align-self: flex-end; }
-  .msg.bot { align-self: flex-start; }
+  .msg.user {
+    align-self: flex-end;
+  }
+  .msg.bot {
+    align-self: flex-start;
+  }
 
   .msg-label {
     font-size: 11px;
@@ -34,7 +111,9 @@
     padding: 0 4px;
   }
 
-  .msg.user .msg-label { text-align: right; }
+  .msg.user .msg-label {
+    text-align: right;
+  }
 
   .msg-body {
     padding: 12px 16px;
@@ -57,7 +136,48 @@
     border-bottom-left-radius: 4px;
   }
 
+  .actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 0 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .msg:hover .actions {
+    opacity: 1;
+  }
+
+  .action {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text2);
+    transition: all 0.15s;
+  }
+
+  .action:hover {
+    background: var(--surface2);
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
+  .action.active {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: var(--accent);
+    color: var(--accent2);
+  }
+
   @media (max-width: 640px) {
-    .msg { max-width: 92%; }
+    .msg {
+      max-width: 92%;
+    }
+    .actions {
+      opacity: 1; /* Always visible on mobile (no hover) */
+    }
   }
 </style>

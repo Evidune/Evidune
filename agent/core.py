@@ -58,12 +58,27 @@ class AgentCore:
         self.memory.add_message(message.conversation_id, "user", message.text)
         self.memory.add_message(message.conversation_id, "assistant", response_text)
 
+        # 7. Record skill execution(s) for outcome iteration / feedback
+        execution_ids: list[int] = []
+        for skill in relevant_skills:
+            eid = self.memory.record_execution(
+                skill_name=skill.name,
+                user_input=message.text,
+                assistant_output=response_text,
+                conversation_id=message.conversation_id,
+            )
+            execution_ids.append(eid)
+
         # Trim old history
         self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
 
         return OutboundMessage(
             text=response_text,
             conversation_id=message.conversation_id,
+            metadata={
+                "skills": [s.name for s in relevant_skills],
+                "execution_ids": execution_ids,
+            },
         )
 
     def _build_messages(

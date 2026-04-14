@@ -272,6 +272,20 @@ class MemoryStore:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def get_skill_executions_by_id(self, execution_id: int) -> dict | None:
+        """Get a single execution by id, with parsed signals."""
+        import json as _json
+
+        row = self._conn.execute(
+            "SELECT * FROM skill_executions WHERE id = ?", (execution_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["signals"] = _json.loads(d.pop("signals_json") or "{}")
+        d["score"] = d.pop("cross_model_score")
+        return d
+
     def get_skill_executions(self, skill_name: str, limit: int = 50) -> list[dict]:
         """Get recent executions for a skill (newest first)."""
         import json as _json

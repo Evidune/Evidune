@@ -54,6 +54,7 @@
       content: resp.error ? `[Error] ${resp.error}` : resp.text,
       timestamp: Date.now(),
       skills: resp.skills,
+      executionIds: resp.execution_ids,
     }
 
     messages.update(m => [...m, botMsg])
@@ -61,6 +62,17 @@
       activeSkills.set(resp.skills)
     }
     await scrollToBottom()
+  }
+
+  function handleRegenerate(originalUserMsg: Message) {
+    handleSend(originalUserMsg.content)
+  }
+
+  function getPriorUserMessage(idx: number): Message | undefined {
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messageList[i].role === 'user') return messageList[i]
+    }
+    return undefined
   }
 </script>
 
@@ -75,8 +87,12 @@
 <SkillsBar skills={skillsList} />
 
 <div class="messages" bind:this={messagesEl}>
-  {#each messageList as msg (msg.id)}
-    <ChatMessage message={msg} />
+  {#each messageList as msg, i (msg.id)}
+    {@const prior = msg.role === 'assistant' ? getPriorUserMessage(i) : undefined}
+    <ChatMessage
+      message={msg}
+      onRegenerate={prior ? () => handleRegenerate(prior) : undefined}
+    />
   {/each}
   {#if loading}
     <TypingIndicator />

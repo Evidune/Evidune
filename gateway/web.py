@@ -36,9 +36,14 @@ class WebGateway(Gateway):
         self._thread: Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._skills_json: str = "[]"
+        self._memory_store: Any = None  # Optional MemoryStore for /api/feedback
 
     def set_skills(self, skills: list[dict[str, str]]) -> None:
         self._skills_json = json.dumps(skills, ensure_ascii=False)
+
+    def set_memory_store(self, store: Any) -> None:
+        """Wire a MemoryStore so /api/feedback can persist signals."""
+        self._memory_store = store
 
     async def start(self, handler: MessageHandler) -> None:
         self._handler = handler
@@ -83,6 +88,18 @@ class WebGateway(Gateway):
                         self._json_resp(200, result)
                     except Exception as e:
                         self._json_resp(500, {"error": str(e)})
+
+                elif path == "/api/feedback":
+                    body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                    try:
+                        data = json.loads(body)
+                    except json.JSONDecodeError:
+                        self._json_resp(400, {"error": "Invalid JSON"})
+                        return
+                    result = gateway._handle_feedback(data)
+                    code = 200 if "error" not in result else 400
+                    self._json_resp(code, result)
+
                 else:
                     self.send_response(404)
                     self.end_headers()
@@ -180,4 +197,34 @@ class WebGateway(Gateway):
             "text": response.text,
             "conversation_id": response.conversation_id,
             "skills": response.metadata.get("skills", []),
+            "execution_ids": response.metadata.get("execution_ids", []),
         }
+
+    def _handle_feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist a user feedback signal for a previous execution.
+
+        Expected payload:
+          {execution_id: int, signal: str, value: bool|int|str}
+
+        signal must be one of: thumbs_up, thumbs_down, copied,
+        regenerated, rating.
+        """
+        execution_id = payload.get("execution_id")
+        signal_type = payload.get("signal")
+        value = payload.get("value", True)
+
+        if not isinstance(execution_id, int) or not signal_type:
+            return {"error": "execution_id (int) and signal (str) required"}
+
+        if not self._memory_store:
+            return {"error": "Memory store not configured"}
+
+        # Read existing signals, merge new one, write back
+        execs = self._memory_store.get_skill_executions_by_id(execution_id)
+        if not execs:
+            return {"error": f"Execution {execution_id} not found"}
+
+        existing = execs.get("signals", {})
+        existing[signal_type] = value
+        ok = self._memory_store.update_execution_signals(execution_id, existing)
+        return {"ok": ok, "execution_id": execution_id, "signals": existing}
