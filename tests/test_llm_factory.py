@@ -133,7 +133,7 @@ class TestCodexClient:
         async def fake_post(payload):
             assert payload["model"] == "gpt-5.4"
             assert payload["stream"] is True
-            return "response text"
+            return ("response text", [])
 
         with patch.object(client, "_post", side_effect=fake_post):
             result = await client.complete([{"role": "user", "content": "hi"}])
@@ -151,7 +151,7 @@ class TestCodexClient:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise _CodexUnauthorized("401")
-            return "recovered"
+            return ("recovered", [])
 
         with patch.object(client, "_post", side_effect=flaky_post):
             # Rotate the token on disk so the refresh picks up the new one

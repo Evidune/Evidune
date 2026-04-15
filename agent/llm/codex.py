@@ -14,10 +14,10 @@ Requirements (empirically discovered):
 - stream: true (server rejects non-streaming)
 - store: false (do not persist response server-side)
 
-The SSE stream emits `response.output_text.delta` events whose payload
-carries incremental text fragments; we accumulate and return the final
-string. On 401 we re-read auth.json once (Codex CLI may have refreshed
-the token in the background) and retry the call.
+The SSE stream emits `response.output_text.delta` events for text and
+`response.output_item.done` events (with item.type == "function_call")
+for tool calls. On 401 we re-read auth.json once (Codex CLI may have
+refreshed the token in the background) and retry the call.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import json
 from typing import Any
 
 from agent.llm.base import LLMClient
+from agent.tools.base import CompletionResult, Tool, ToolCall
 
 
 class _CodexUnauthorized(Exception):
@@ -61,31 +62,85 @@ class CodexClient(LLMClient):
         self._token = auth.access_token
         self._account_id = auth.account_id or ""
 
-    def _build_payload(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        """Convert OpenAI chat-format messages to Responses API format."""
-        instructions_parts = []
+    def _build_payload(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[Tool] | None = None,
+    ) -> dict[str, Any]:
+        """Convert OpenAI chat-format messages + tools to Responses API format."""
+        instructions_parts: list[str] = []
         input_items: list[dict[str, Any]] = []
         for m in messages:
             role = m.get("role", "user")
-            content = m.get("content", "")
             if role == "system":
-                instructions_parts.append(content)
-            else:
-                content_type = "input_text" if role == "user" else "output_text"
+                instructions_parts.append(m.get("content", ""))
+                continue
+            if role == "tool":
+                # Tool result from a previous turn
                 input_items.append(
                     {
-                        "type": "message",
-                        "role": role,
-                        "content": [{"type": content_type, "text": content}],
+                        "type": "function_call_output",
+                        "call_id": m.get("tool_call_id", ""),
+                        "output": m.get("content", ""),
                     }
                 )
-        return {
+                continue
+            if role == "assistant" and (m.get("tool_calls") or m.get("_aiflay_tool_calls")):
+                # Assistant's tool-call turn — prefer the aiflay-native
+                # representation (already parsed args) over OpenAI's
+                # string-encoded one.
+                native = m.get("_aiflay_tool_calls")
+                if native:
+                    for tc in native:
+                        input_items.append(
+                            {
+                                "type": "function_call",
+                                "call_id": tc["id"],
+                                "name": tc["name"],
+                                "arguments": json.dumps(tc.get("arguments", {})),
+                            }
+                        )
+                else:
+                    for tc in m["tool_calls"]:
+                        fn = tc.get("function", {})
+                        input_items.append(
+                            {
+                                "type": "function_call",
+                                "call_id": tc.get("id", ""),
+                                "name": fn.get("name", ""),
+                                "arguments": fn.get("arguments", "{}"),
+                            }
+                        )
+                if m.get("content"):
+                    input_items.append(
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": m["content"]}],
+                        }
+                    )
+                continue
+
+            content = m.get("content", "")
+            content_type = "input_text" if role == "user" else "output_text"
+            input_items.append(
+                {
+                    "type": "message",
+                    "role": role,
+                    "content": [{"type": content_type, "text": content}],
+                }
+            )
+
+        payload: dict[str, Any] = {
             "model": self.model,
             "instructions": "\n\n".join(instructions_parts) or " ",
             "input": input_items,
             "stream": True,
             "store": False,
         }
+        if tools:
+            payload["tools"] = [_tool_to_codex_schema(t) for t in tools]
+        return payload
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -97,11 +152,12 @@ class CodexClient(LLMClient):
         }
 
     @staticmethod
-    def _accumulate_text_from_sse(raw: str) -> str:
-        """Walk SSE events and concatenate response.output_text.delta pieces."""
-        out: list[str] = []
+    def _parse_sse(raw: str) -> tuple[str, list[ToolCall]]:
+        """Walk SSE events. Returns (accumulated_text, tool_calls)."""
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
         for block in raw.split("\n\n"):
-            if "response.output_text.delta" not in block:
+            if not block.strip():
                 continue
             for line in block.splitlines():
                 if not line.startswith("data:"):
@@ -110,12 +166,29 @@ class CodexClient(LLMClient):
                     payload = json.loads(line[5:].strip())
                 except json.JSONDecodeError:
                     continue
-                delta = payload.get("delta")
-                if isinstance(delta, str):
-                    out.append(delta)
-        return "".join(out)
 
-    async def _post(self, payload: dict[str, Any]) -> str:
+                etype = payload.get("type", "")
+                if etype == "response.output_text.delta":
+                    delta = payload.get("delta")
+                    if isinstance(delta, str):
+                        text_parts.append(delta)
+                elif etype == "response.output_item.done":
+                    item = payload.get("item") or {}
+                    if item.get("type") == "function_call":
+                        try:
+                            args = json.loads(item.get("arguments") or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        tool_calls.append(
+                            ToolCall(
+                                id=item.get("call_id") or item.get("id") or "",
+                                name=item.get("name") or "",
+                                arguments=args,
+                            )
+                        )
+        return "".join(text_parts), tool_calls
+
+    async def _post(self, payload: dict[str, Any]) -> tuple[str, list[ToolCall]]:
         import httpx
 
         async with httpx.AsyncClient(timeout=120) as client:
@@ -133,12 +206,43 @@ class CodexClient(LLMClient):
                 chunks: list[str] = []
                 async for chunk in resp.aiter_text():
                     chunks.append(chunk)
-        return self._accumulate_text_from_sse("".join(chunks))
+        return self._parse_sse("".join(chunks))
 
-    async def complete(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+    async def complete(self, messages: list[dict[str, Any]], **kwargs: Any) -> str:
         payload = self._build_payload(messages)
         try:
-            return await self._post(payload)
+            text, _ = await self._post(payload)
         except _CodexUnauthorized:
             self._refresh_from_disk()
-            return await self._post(payload)
+            text, _ = await self._post(payload)
+        return text
+
+    async def complete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[Tool],
+        **kwargs: Any,
+    ) -> CompletionResult:
+        payload = self._build_payload(messages, tools=tools)
+        try:
+            text, tool_calls = await self._post(payload)
+        except _CodexUnauthorized:
+            self._refresh_from_disk()
+            text, tool_calls = await self._post(payload)
+        return CompletionResult(text=text, tool_calls=tool_calls)
+
+    # Backward-compat alias: old tests exercised _accumulate_text_from_sse
+    @staticmethod
+    def _accumulate_text_from_sse(raw: str) -> str:
+        text, _ = CodexClient._parse_sse(raw)
+        return text
+
+
+def _tool_to_codex_schema(tool: Tool) -> dict[str, Any]:
+    """Responses API tool schema (flat, not nested under 'function')."""
+    return {
+        "type": "function",
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": tool.parameters,
+    }

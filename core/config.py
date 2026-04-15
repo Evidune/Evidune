@@ -88,6 +88,29 @@ class FactExtractionConfig:
 
 
 @dataclass
+class ToolsConfig:
+    """Tool-use configuration.
+
+    Internal tools (memory/skills/conversations) are always on when
+    the agent runs. External tools (shell/file/http/python/grep/glob)
+    are opt-in via `external_enabled` since they can touch the real
+    filesystem and network.
+    """
+
+    external_enabled: bool = False
+    shell_timeout_s: int = 60
+    shell_output_bytes: int = 20_000
+    file_read_max_bytes: int = 200_000
+    file_write_max_bytes: int = 500_000
+    http_timeout_s: int = 30
+    http_max_bytes: int = 500_000
+    python_timeout_s: int = 30
+    python_output_bytes: int = 20_000
+    grep_max_hits: int = 200
+    glob_max_hits: int = 200
+
+
+@dataclass
 class EvaluatorConfig:
     """Cross-model evaluator config.
 
@@ -113,6 +136,7 @@ class AgentConfig:
     evaluator: EvaluatorConfig | None = None
     fact_extraction: FactExtractionConfig = field(default_factory=FactExtractionConfig)
     emergence: EmergenceConfig = field(default_factory=EmergenceConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
 
 
 @dataclass
@@ -263,6 +287,20 @@ def load_config(path: str | Path) -> AiflayConfig:
             output_dir=em_raw.get("output_dir", "~/.aiflay/emerged_skills"),
             use_evaluator=em_raw.get("use_evaluator", True),
         )
+        tools_raw = agent_raw.get("tools", {}) or {}
+        tools_cfg = ToolsConfig(
+            external_enabled=tools_raw.get("external_enabled", False),
+            shell_timeout_s=tools_raw.get("shell_timeout_s", 60),
+            shell_output_bytes=tools_raw.get("shell_output_bytes", 20_000),
+            file_read_max_bytes=tools_raw.get("file_read_max_bytes", 200_000),
+            file_write_max_bytes=tools_raw.get("file_write_max_bytes", 500_000),
+            http_timeout_s=tools_raw.get("http_timeout_s", 30),
+            http_max_bytes=tools_raw.get("http_max_bytes", 500_000),
+            python_timeout_s=tools_raw.get("python_timeout_s", 30),
+            python_output_bytes=tools_raw.get("python_output_bytes", 20_000),
+            grep_max_hits=tools_raw.get("grep_max_hits", 200),
+            glob_max_hits=tools_raw.get("glob_max_hits", 200),
+        )
         agent = AgentConfig(
             llm_provider=agent_raw.get("llm_provider", "openai"),
             llm_model=agent_raw.get("llm_model", "gpt-4o"),
@@ -274,6 +312,7 @@ def load_config(path: str | Path) -> AiflayConfig:
             evaluator=evaluator,
             fact_extraction=fact_extraction,
             emergence=emergence,
+            tools=tools_cfg,
         )
 
     # Skills config

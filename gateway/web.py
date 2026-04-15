@@ -245,6 +245,11 @@ class WebGateway(Gateway):
             "conversation_id": response.conversation_id,
             "skills": response.metadata.get("skills", []),
             "execution_ids": response.metadata.get("execution_ids", []),
+            "emerged_skill": response.metadata.get("emerged_skill"),
+            "facts_extracted": response.metadata.get("facts_extracted", 0),
+            "persona": response.metadata.get("persona"),
+            "new_title": response.metadata.get("new_title"),
+            "tool_trace": response.metadata.get("tool_trace", []),
         }
 
     def _handle_feedback(self, payload: dict[str, Any]) -> dict[str, Any]:

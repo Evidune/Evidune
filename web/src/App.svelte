@@ -138,6 +138,7 @@
       timestamp: Date.now(),
       skills: resp.skills,
       executionIds: resp.execution_ids,
+      toolTrace: resp.tool_trace,
     }
 
     messages.update(m => [...m, botMsg])

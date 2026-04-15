@@ -193,6 +193,30 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
 
     title_generator = TitleGenerator(llm=llm)
 
+    # Tool registry: internal tools always; external tools when enabled
+    from agent.tools.external import ExternalToolsConfig, external_tools
+    from agent.tools.internal import conversation_tools, memory_tools, skill_tools
+    from agent.tools.registry import ToolRegistry
+
+    tool_registry = ToolRegistry()
+    tool_registry.register_many(memory_tools(memory))
+    tool_registry.register_many(skill_tools(skill_registry))
+    tool_registry.register_many(conversation_tools(memory, current_conversation_id=""))
+    if config.agent.tools.external_enabled:
+        ext_cfg = ExternalToolsConfig(
+            shell_timeout_s=config.agent.tools.shell_timeout_s,
+            shell_output_bytes=config.agent.tools.shell_output_bytes,
+            file_read_max_bytes=config.agent.tools.file_read_max_bytes,
+            file_write_max_bytes=config.agent.tools.file_write_max_bytes,
+            http_timeout_s=config.agent.tools.http_timeout_s,
+            http_max_bytes=config.agent.tools.http_max_bytes,
+            python_timeout_s=config.agent.tools.python_timeout_s,
+            python_output_bytes=config.agent.tools.python_output_bytes,
+            grep_max_hits=config.agent.tools.grep_max_hits,
+            glob_max_hits=config.agent.tools.glob_max_hits,
+        )
+        tool_registry.register_many(external_tools(base_dir=base_dir, config=ext_cfg))
+
     agent = AgentCore(
         llm=llm,
         skill_registry=skill_registry,
@@ -208,6 +232,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         emergence_every_n_turns=config.agent.emergence.every_n_turns,
         emergence_min_confidence=config.agent.emergence.min_confidence,
         title_generator=title_generator,
+        tool_registry=tool_registry,
     )
 
     # Create gateways

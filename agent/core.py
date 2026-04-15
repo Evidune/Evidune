@@ -7,6 +7,8 @@ from agent.llm import LLMClient
 from agent.pattern_detector import PatternDetector
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
+from agent.tools.base import ToolCall
+from agent.tools.registry import ToolRegistry
 from gateway.base import InboundMessage, OutboundMessage
 from memory.store import MemoryStore
 from personas.loader import Persona
@@ -35,6 +37,8 @@ class AgentCore:
         emergence_min_confidence: float = 0.7,
         title_generator: TitleGenerator | None = None,
         title_after_turns: int = 3,
+        tool_registry: ToolRegistry | None = None,
+        max_tool_iterations: int = 8,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -51,8 +55,85 @@ class AgentCore:
         self.emergence_min_confidence = emergence_min_confidence
         self.title_generator = title_generator
         self.title_after_turns = title_after_turns
+        self.tool_registry = tool_registry
+        self.max_tool_iterations = max_tool_iterations
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
+
+    async def _run_llm(self, messages: list[dict]) -> tuple[str, list[dict]]:
+        """Run the LLM, looping through tool calls until we get a final text.
+
+        Returns (final_response_text, tool_trace) where tool_trace is a
+        list of {name, arguments, result, is_error} entries recorded for
+        the UI / memory.
+
+        If no ToolRegistry is configured, falls back to a single
+        plain-text completion (legacy path).
+        """
+        if not self.tool_registry or len(self.tool_registry) == 0:
+            text = await self.llm.complete(messages)
+            return text, []
+
+        tools = self.tool_registry.all()
+        tool_trace: list[dict] = []
+        working: list[dict] = list(messages)
+
+        for _ in range(self.max_tool_iterations):
+            result = await self.llm.complete_with_tools(working, tools)
+            if not result.tool_calls:
+                return result.text, tool_trace
+
+            # Record the assistant's tool-call turn in working messages
+            # in OpenAI chat.completions format (CodexClient handles its
+            # own conversion in _build_payload).
+            working.append(
+                {
+                    "role": "assistant",
+                    "content": result.text or None,
+                    "tool_calls": [self._openai_tool_call(tc) for tc in result.tool_calls],
+                    # Keep aiflay-native tool_calls alongside so CodexClient
+                    # can rebuild Responses API function_call items without
+                    # re-parsing JSON
+                    "_aiflay_tool_calls": [
+                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                        for tc in result.tool_calls
+                    ],
+                }
+            )
+
+            # Execute each call and append its result
+            for tc in result.tool_calls:
+                tr = await self.tool_registry.execute(tc)
+                tool_trace.append(
+                    {
+                        "name": tc.name,
+                        "arguments": tc.arguments,
+                        "result": tr.content,
+                        "is_error": tr.is_error,
+                    }
+                )
+                working.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tr.content,
+                    }
+                )
+
+        # Hit iteration cap — force a final text completion without tools
+        final = await self.llm.complete(working)
+        return final, tool_trace
+
+    # Normalise messages so the assistant role message carrying tool_calls
+    # serialises cleanly to OpenAI chat.completions (see ToolCall shape)
+    def _openai_tool_call(self, tc: ToolCall) -> dict:
+        import json as _json
+
+        return {
+            "id": tc.id,
+            "type": "function",
+            "function": {"name": tc.name, "arguments": _json.dumps(tc.arguments)},
+        }
 
     def _resolve_persona(self, message: InboundMessage) -> Persona | None:
         """Pick the persona for this turn.
@@ -98,10 +179,11 @@ class AgentCore:
         # 5. Build messages
         messages = self._build_messages(persona, relevant_skills, facts, history, message)
 
-        # 6. Call LLM
-        response_text = await self.llm.complete(messages)
+        # 6. Call LLM — with optional tool-use loop
+        response_text, tool_trace = await self._run_llm(messages)
 
-        # 7. Store in memory
+        # 7. Store in memory (only user input + final assistant response;
+        #    intermediate tool calls stay in the per-turn working messages)
         self.memory.add_message(message.conversation_id, "user", message.text)
         self.memory.add_message(message.conversation_id, "assistant", response_text)
 
@@ -138,6 +220,7 @@ class AgentCore:
                 "facts_extracted": extracted_count,
                 "emerged_skill": emerged_skill,
                 "new_title": new_title,
+                "tool_trace": tool_trace,
             },
         )
 

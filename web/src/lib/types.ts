@@ -1,5 +1,12 @@
 export type SignalType = 'thumbs_up' | 'thumbs_down' | 'copied' | 'regenerated'
 
+export interface ToolTraceEntry {
+  name: string
+  arguments: Record<string, unknown>
+  result: string
+  is_error: boolean
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -8,6 +15,7 @@ export interface Message {
   skills?: string[]
   executionIds?: number[]
   feedback?: Partial<Record<SignalType, boolean>>
+  toolTrace?: ToolTraceEntry[]
 }
 
 export interface Skill {
@@ -24,6 +32,7 @@ export interface ChatResponse {
   facts_extracted?: number
   persona?: string | null
   new_title?: string | null
+  tool_trace?: ToolTraceEntry[]
   error?: string
 }
 

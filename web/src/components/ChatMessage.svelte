@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Message, SignalType } from '../lib/types'
   import { sendFeedback } from '../lib/api'
+  import ToolTrace from './ToolTrace.svelte'
 
   let { message, onRegenerate }: { message: Message; onRegenerate?: () => void } = $props()
 
@@ -48,6 +49,11 @@
 
 <div class="msg" class:user={isUser} class:bot={!isUser}>
   <span class="msg-label">{isUser ? 'You' : 'Aiflay'}</span>
+
+  {#if !isUser && message.toolTrace && message.toolTrace.length > 0}
+    <ToolTrace trace={message.toolTrace} />
+  {/if}
+
   <div class="msg-body">{message.content}</div>
 
   {#if !isUser && message.executionIds && message.executionIds.length > 0}
