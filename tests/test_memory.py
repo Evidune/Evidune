@@ -1,6 +1,7 @@
 """Tests for memory/store.py."""
 
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
@@ -214,6 +215,24 @@ class TestConversationManagement:
 
     def test_delete_missing_returns_false(self, store: MemoryStore):
         assert store.delete_conversation("nonexistent") is False
+
+    def test_cross_thread_reads_and_writes_use_same_store(self, store: MemoryStore):
+        store.add_message("c1", "user", "hi")
+
+        result: dict[str, object] = {}
+
+        def worker() -> None:
+            result["list"] = store.list_conversations(status=None)
+            result["archived"] = store.set_conversation_status("c1", "archived")
+            result["meta"] = store.get_conversation("c1")
+
+        thread = Thread(target=worker)
+        thread.start()
+        thread.join()
+
+        assert result["archived"] is True
+        assert result["list"]
+        assert result["meta"]["status"] == "archived"
 
 
 class TestEmergedSkills:

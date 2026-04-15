@@ -1,6 +1,7 @@
 """Tests for the WebGateway feedback handling logic."""
 
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
@@ -108,3 +109,18 @@ class TestConversationEndpoints:
         result = gateway._delete_conversation("c1")
         assert result["ok"] is True
         assert store.get_conversation("c1") is None
+
+    def test_list_conversations_from_http_thread(self, gateway: WebGateway, store: MemoryStore):
+        store.ensure_conversation("c-web", channel="web")
+        store.add_message("c-web", "user", "hi")
+
+        result: dict[str, object] = {}
+
+        def worker() -> None:
+            result["value"] = gateway._list_conversations()
+
+        thread = Thread(target=worker)
+        thread.start()
+        thread.join()
+
+        assert [c["id"] for c in result["value"]] == ["c-web"]
