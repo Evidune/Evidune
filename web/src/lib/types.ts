@@ -39,6 +39,7 @@ export interface ChatResponse {
 export interface ConversationSummary {
   id: string
   channel: string
+  persona?: string
   title: string
   status: 'active' | 'archived'
   created_at: string

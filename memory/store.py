@@ -47,13 +47,17 @@ class MemoryStore:
 
     # --- Conversation / Message API ---
 
-    def ensure_conversation(self, conversation_id: str, channel: str = "") -> None:
+    def ensure_conversation(
+        self, conversation_id: str, channel: str = "", persona: str = ""
+    ) -> None:
         """Create a conversation if it doesn't exist."""
         with self._lock:
             now = self._now()
             self._conn.execute(
-                "INSERT OR IGNORE INTO conversations (id, channel, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (conversation_id, channel, now, now),
+                """INSERT OR IGNORE INTO conversations
+                   (id, channel, persona, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (conversation_id, channel, persona, now, now),
             )
             # Backfill the channel for legacy rows that were created before
             # the caller had the gateway/channel context available.
@@ -61,6 +65,11 @@ class MemoryStore:
                 self._conn.execute(
                     "UPDATE conversations SET channel = ? WHERE id = ? AND channel = ''",
                     (channel, conversation_id),
+                )
+            if persona:
+                self._conn.execute(
+                    "UPDATE conversations SET persona = ? WHERE id = ? AND persona = ''",
+                    (persona, conversation_id),
                 )
             self._conn.commit()
 
@@ -135,7 +144,7 @@ class MemoryStore:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                f"""SELECT c.id, c.channel, c.title, c.status,
+                f"""SELECT c.id, c.channel, c.persona, c.title, c.status,
                            c.created_at, c.updated_at,
                            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id)
                              AS message_count,
@@ -158,6 +167,7 @@ class MemoryStore:
                 {
                     "id": r["id"],
                     "channel": r["channel"],
+                    "persona": r["persona"] or "",
                     "title": r["title"] or "",
                     "status": r["status"],
                     "created_at": r["created_at"],
@@ -193,6 +203,16 @@ class MemoryStore:
             cursor = self._conn.execute(
                 "UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?",
                 (status, self._now(), conversation_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def set_conversation_persona(self, conversation_id: str, persona: str) -> bool:
+        """Persist the current persona for a conversation."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE conversations SET persona = ?, updated_at = ? WHERE id = ?",
+                (persona, self._now(), conversation_id),
             )
             self._conn.commit()
             return cursor.rowcount > 0

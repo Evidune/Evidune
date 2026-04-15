@@ -2,8 +2,9 @@
 
 import pytest
 
-from gateway.base import InboundMessage
+from gateway.base import InboundMessage, OutboundMessage
 from gateway.router import create_gateway
+from gateway.web import WebGateway
 
 
 class TestCreateGateway:
@@ -26,3 +27,23 @@ class TestInboundMessage:
         )
         assert msg.text == "hello"
         assert msg.channel == "cli"
+
+
+class TestWebGatewayChat:
+    @pytest.mark.asyncio
+    async def test_handle_chat_passes_persona_into_metadata(self):
+        gw = WebGateway()
+        seen: dict[str, object] = {}
+
+        async def handler(message: InboundMessage) -> OutboundMessage:
+            seen["metadata"] = message.metadata
+            return OutboundMessage(
+                text="ok",
+                conversation_id=message.conversation_id,
+                metadata={"persona": message.metadata.get("persona")},
+            )
+
+        gw._handler = handler
+        result = await gw._handle_chat("hello", "conv1", persona="formal-helper")
+        assert seen["metadata"] == {"persona": "formal-helper"}
+        assert result["persona"] == "formal-helper"

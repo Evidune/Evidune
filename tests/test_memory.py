@@ -167,6 +167,7 @@ class TestConversationManagement:
         assert len(items) == 2
         ids = {i["id"] for i in items}
         assert ids == {"c1", "c2"}
+        assert all("persona" in item for item in items)
 
     def test_list_includes_preview(self, store: MemoryStore):
         store.add_message("c1", "user", "first")
@@ -204,11 +205,23 @@ class TestConversationManagement:
         store.ensure_conversation("c1", channel="web")
         assert store.get_conversation("c1")["channel"] == "cli"
 
+    def test_ensure_conversation_backfills_empty_persona(self, store: MemoryStore):
+        store.ensure_conversation("c1", channel="web")
+        assert store.get_conversation("c1")["persona"] == ""
+
+        store.ensure_conversation("c1", persona="zhihu-writer")
+        assert store.get_conversation("c1")["persona"] == "zhihu-writer"
+
     def test_set_title(self, store: MemoryStore):
         store.add_message("c1", "user", "x")
         assert store.set_conversation_title("c1", "My Chat") is True
         meta = store.get_conversation("c1")
         assert meta["title"] == "My Chat"
+
+    def test_set_persona(self, store: MemoryStore):
+        store.ensure_conversation("c1", channel="web")
+        assert store.set_conversation_persona("c1", "zhihu-writer") is True
+        assert store.get_conversation("c1")["persona"] == "zhihu-writer"
 
     def test_set_status_invalid_raises(self, store: MemoryStore):
         store.add_message("c1", "user", "x")

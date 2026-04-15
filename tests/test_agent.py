@@ -221,3 +221,42 @@ class TestAgentWithPersona:
         assert "uses 老拐 voice" in system_content
         assert "polite English" not in system_content  # other persona's fact
         assert "shared across personas" in system_content  # global fact
+
+    @pytest.mark.asyncio
+    async def test_persists_explicit_persona_on_conversation(
+        self, agent_with_persona, memory: MemoryStore
+    ):
+        msg = InboundMessage(
+            text="hi",
+            sender_id="u",
+            channel="web",
+            conversation_id="c4",
+            metadata={"persona": "formal-helper"},
+        )
+        await agent_with_persona.handle(msg)
+        assert memory.get_conversation("c4")["persona"] == "formal-helper"
+
+    @pytest.mark.asyncio
+    async def test_reuses_conversation_persona_when_request_omits_it(
+        self, agent_with_persona, llm: MockLLM
+    ):
+        first = InboundMessage(
+            text="hi",
+            sender_id="u",
+            channel="web",
+            conversation_id="c5",
+            metadata={"persona": "formal-helper"},
+        )
+        await agent_with_persona.handle(first)
+
+        second = InboundMessage(
+            text="follow up",
+            sender_id="u",
+            channel="web",
+            conversation_id="c5",
+        )
+        resp = await agent_with_persona.handle(second)
+
+        system_content = llm.last_messages[0]["content"]
+        assert "polite, formal tone" in system_content
+        assert resp.metadata["persona"] == "formal-helper"

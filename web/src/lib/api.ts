@@ -15,11 +15,15 @@ export async function fetchSkills(): Promise<Skill[]> {
   return resp.json()
 }
 
-export async function sendMessage(text: string, conversationId: string): Promise<ChatResponse> {
+export async function sendMessage(
+  text: string,
+  conversationId: string,
+  persona?: string,
+): Promise<ChatResponse> {
   const resp = await fetch(`${BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, conversation_id: conversationId }),
+    body: JSON.stringify({ text, conversation_id: conversationId, ...(persona ? { persona } : {}) }),
   })
   if (!resp.ok) {
     return { text: '', conversation_id: conversationId, error: `HTTP ${resp.status}` }

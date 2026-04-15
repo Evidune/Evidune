@@ -137,14 +137,25 @@ class AgentCore:
             "function": {"name": tc.name, "arguments": _json.dumps(tc.arguments)},
         }
 
-    def _resolve_persona(self, message: InboundMessage) -> Persona | None:
+    def _resolve_persona(
+        self, message: InboundMessage, conversation_meta: dict | None = None
+    ) -> Persona | None:
         """Pick the persona for this turn.
 
-        Priority: message.metadata['persona'] > registry default.
+        Priority: message.metadata['persona'] > stored conversation persona > registry default.
         Returns None if no personas are configured at all.
         """
         requested = message.metadata.get("persona") if message.metadata else None
-        return self.personas.resolve(requested)
+        if requested:
+            return self.personas.resolve(requested)
+
+        stored = (conversation_meta or {}).get("persona")
+        if stored:
+            persona = self.personas.get(stored)
+            if persona is not None:
+                return persona
+
+        return self.personas.resolve(None)
 
     async def handle(self, message: InboundMessage) -> OutboundMessage:
         """Process an inbound message and return a response.
@@ -159,12 +170,15 @@ class AgentCore:
         7. Store message + response in memory
         8. Record skill executions
         """
-        # 1. Persona
-        persona = self._resolve_persona(message)
-
         # Ensure the conversation exists with the originating gateway/channel
         # before any later reads or writes. Web UI lists are channel-scoped.
         self.memory.ensure_conversation(message.conversation_id, channel=message.channel)
+
+        # 1. Persona
+        conversation_meta = self.memory.get_conversation(message.conversation_id)
+        persona = self._resolve_persona(message, conversation_meta)
+        if persona is not None:
+            self.memory.set_conversation_persona(message.conversation_id, persona.name)
 
         # 2. History
         history = self.memory.get_history(message.conversation_id, self.max_history)

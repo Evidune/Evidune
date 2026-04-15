@@ -12,6 +12,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     channel TEXT DEFAULT '',
+    persona TEXT DEFAULT '',
     title TEXT DEFAULT '',
     status TEXT DEFAULT 'active',
     created_at TEXT NOT NULL,
@@ -104,8 +105,10 @@ def _migrate_facts_namespace(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
-    """Older DBs have conversations without title / status; ADD COLUMN them."""
+    """Older DBs have conversations without newer metadata columns; ADD them."""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+    if "persona" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN persona TEXT DEFAULT ''")
     if "title" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT ''")
     if "status" not in cols:
