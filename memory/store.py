@@ -55,6 +55,13 @@ class MemoryStore:
                 "INSERT OR IGNORE INTO conversations (id, channel, created_at, updated_at) VALUES (?, ?, ?, ?)",
                 (conversation_id, channel, now, now),
             )
+            # Backfill the channel for legacy rows that were created before
+            # the caller had the gateway/channel context available.
+            if channel:
+                self._conn.execute(
+                    "UPDATE conversations SET channel = ? WHERE id = ? AND channel = ''",
+                    (channel, conversation_id),
+                )
             self._conn.commit()
 
     def add_message(self, conversation_id: str, role: str, content: str) -> None:

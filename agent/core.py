@@ -162,6 +162,10 @@ class AgentCore:
         # 1. Persona
         persona = self._resolve_persona(message)
 
+        # Ensure the conversation exists with the originating gateway/channel
+        # before any later reads or writes. Web UI lists are channel-scoped.
+        self.memory.ensure_conversation(message.conversation_id, channel=message.channel)
+
         # 2. History
         history = self.memory.get_history(message.conversation_id, self.max_history)
 

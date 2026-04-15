@@ -192,6 +192,18 @@ class TestConversationManagement:
         all_ = store.list_conversations(status=None)
         assert len(all_) == 2
 
+    def test_ensure_conversation_backfills_empty_channel(self, store: MemoryStore):
+        store.add_message("c1", "user", "hi")
+        assert store.get_conversation("c1")["channel"] == ""
+
+        store.ensure_conversation("c1", channel="web")
+        assert store.get_conversation("c1")["channel"] == "web"
+
+    def test_ensure_conversation_does_not_overwrite_nonempty_channel(self, store: MemoryStore):
+        store.ensure_conversation("c1", channel="cli")
+        store.ensure_conversation("c1", channel="web")
+        assert store.get_conversation("c1")["channel"] == "cli"
+
     def test_set_title(self, store: MemoryStore):
         store.add_message("c1", "user", "x")
         assert store.set_conversation_title("c1", "My Chat") is True

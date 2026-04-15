@@ -117,6 +117,14 @@ class TestAgentCore:
         assert history[1]["role"] == "assistant"
 
     @pytest.mark.asyncio
+    async def test_stores_conversation_channel_from_inbound_message(
+        self, agent: AgentCore, memory: MemoryStore
+    ):
+        msg = InboundMessage(text="hello", sender_id="u", channel="web", conversation_id="conv-web")
+        await agent.handle(msg)
+        assert memory.get_conversation("conv-web")["channel"] == "web"
+
+    @pytest.mark.asyncio
     async def test_includes_history(self, agent: AgentCore, llm: MockLLM, memory: MemoryStore):
         # Pre-populate history
         memory.add_message("conv-h", "user", "previous question")
