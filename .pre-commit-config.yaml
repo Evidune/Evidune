@@ -52,6 +52,11 @@ repos:
 
   - repo: local
     hooks:
+      - id: aiflay-docs-lint
+        name: aiflay docs lint
+        entry: python -m core.docs_lint
+        language: system
+        pass_filenames: false
       - id: commitlint
         name: commitlint conventional commits
         entry: commitlint --config commitlint.config.cjs --edit

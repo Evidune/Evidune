@@ -129,7 +129,14 @@ class SkillRegistry:
         if not skills:
             return ""
 
-        lines = ["# Available Skills (index)"]
+        lines = [
+            "# Available Skills (index)",
+            "",
+            "Load full skill details only when needed:",
+            "- call `get_skill` before relying on a skill's detailed behavior",
+            "- call `read_skill_reference` for deeper reference material",
+            "",
+        ]
         for s in skills:
             lines.append(f"- **{s.name}** — {s.description}")
         return "\n".join(lines)

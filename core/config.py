@@ -143,6 +143,12 @@ class AgentConfig:
 class SkillsConfig:
     directories: list[str] = field(default_factory=lambda: ["skills/"])
     auto_update: bool = True  # Whether iteration loop updates skill docs
+    prompt_mode: str = "auto"  # auto | full | index
+
+    def __post_init__(self) -> None:
+        valid = {"auto", "full", "index"}
+        if self.prompt_mode not in valid:
+            raise ValueError(f"Invalid prompt_mode '{self.prompt_mode}', must be one of {valid}")
 
 
 @dataclass
@@ -320,6 +326,7 @@ def load_config(path: str | Path) -> AiflayConfig:
     skills_config = SkillsConfig(
         directories=skills_raw.get("directories", ["skills/"]),
         auto_update=skills_raw.get("auto_update", True),
+        prompt_mode=skills_raw.get("prompt_mode", "auto"),
     )
 
     # Personas config

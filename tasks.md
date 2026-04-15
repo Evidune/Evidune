@@ -9,6 +9,9 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 ## Pending
 
 - [ ] Add `aiflay init` CLI command to scaffold starter `aiflay.yaml`
+- [ ] Browser-driven validation harness for the web gateway
+- [ ] Worktree-local runtime artifacts and validation commands
+- [ ] Agent-visible logs, metrics, and traces for local runs
 - [ ] Streaming responses for the web gateway (SSE)
 - [ ] Markdown rendering + code highlighting in the chat UI
 - [ ] End-to-end smoke test with a real LLM (mocked or via OpenRouter free tier)
@@ -26,6 +29,9 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Vite + Svelte web UI with chat interface
 - [x] Skill self-iteration wired into the iteration loop (Aiflay differentiator)
 - [x] Pre-commit hooks + commitlint + AGENTS.md collaboration baseline
+- [x] Docs knowledge base skeleton with architecture, quality, reliability, and tech debt records
+- [x] Repo docs lint, CI workflow, and structural guardrails
+- [x] Progressive skill disclosure default with compatibility mode
 
 ## Notes
 

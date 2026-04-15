@@ -9,6 +9,7 @@ from pathlib import Path
 from channels.base import IterationReport, create_channel
 from core.analyzer import analyze
 from core.config import AiflayConfig, load_config
+from core.docs_lint import lint_repo
 from core.git_ops import commit_changes
 from core.iteration_helpers import build_reference_content, update_outcome_skills
 from core.metrics import get_adapter
@@ -222,6 +223,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         skill_registry=skill_registry,
         memory=memory,
         system_prompt=config.agent.system_prompt,
+        skill_prompt_mode=config.skills.prompt_mode,
         max_history=config.agent.max_history,
         persona_registry=persona_registry,
         fact_extractor=fact_extractor,
@@ -266,15 +268,28 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
 
 
 def main() -> None:
-    """CLI entry point: aiflay run|serve [config_path]."""
+    """CLI entry point: aiflay run|serve|docs."""
     import asyncio
 
     parser = argparse.ArgumentParser(description="Aiflay — outcome-driven skill self-iteration")
-    parser.add_argument("command", choices=["run", "serve"], help="Command to execute")
+    parser.add_argument("command", choices=["run", "serve", "docs"], help="Command to execute")
+    parser.add_argument("subcommand", nargs="?", help="Subcommand for the selected command")
     parser.add_argument("--config", "-c", default="aiflay.yaml", help="Path to aiflay.yaml")
     parser.add_argument("--base-dir", "-d", default=None, help="Base directory for resolving paths")
 
     args = parser.parse_args()
+
+    if args.command == "docs":
+        if args.subcommand not in (None, "lint"):
+            parser.error("docs only supports the 'lint' subcommand")
+        base_dir = Path(args.base_dir) if args.base_dir else Path.cwd()
+        errors = lint_repo(base_dir)
+        if errors:
+            for error in errors:
+                print(f"ERROR: {error}")
+            sys.exit(1)
+        print(f"Documentation lint passed for {base_dir.resolve()}")
+        sys.exit(0)
 
     config = load_config(args.config)
     base_dir = Path(args.base_dir) if args.base_dir else Path(args.config).parent

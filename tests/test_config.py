@@ -41,6 +41,7 @@ class TestLoadConfig:
             "analysis": {"compare_window_days": 14, "top_n": 3, "bottom_n": 2},
             "iteration": {"schedule": "0 21 * * *", "git_commit": False},
             "channels": [{"type": "stdout"}],
+            "skills": {"directories": ["skills"], "prompt_mode": "index"},
         }
         config = load_config(_write_yaml(data, tmp_path / "aiflay.yaml"))
         assert config.domain == "zhihu"
@@ -50,6 +51,7 @@ class TestLoadConfig:
         assert config.analysis.top_n == 3
         assert config.iteration.git_commit is False
         assert len(config.channels) == 1
+        assert config.skills.prompt_mode == "index"
 
     def test_env_expansion(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TEST_WEBHOOK", "https://feishu.example.com/hook/abc")
@@ -91,4 +93,12 @@ class TestLoadConfig:
             "references": [{"path": "x.md", "update_strategy": "replace_section"}],
         }
         with pytest.raises(ValueError, match="requires a 'section'"):
+            load_config(_write_yaml(data, tmp_path / "aiflay.yaml"))
+
+    def test_invalid_skill_prompt_mode_raises(self, tmp_path: Path):
+        data = {
+            "domain": "test",
+            "skills": {"prompt_mode": "invalid"},
+        }
+        with pytest.raises(ValueError, match="Invalid prompt_mode"):
             load_config(_write_yaml(data, tmp_path / "aiflay.yaml"))

@@ -90,6 +90,24 @@ class TestAgentCore:
         assert "Say hello" in system_content
 
     @pytest.mark.asyncio
+    async def test_index_skill_prompt_mode_uses_compact_skill_index(
+        self, llm: MockLLM, skill_registry: SkillRegistry, memory: MemoryStore
+    ):
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            system_prompt="You are Aiflay, a helpful assistant.",
+            skill_prompt_mode="index",
+        )
+        msg = InboundMessage(text="greeting", sender_id="u", channel="cli", conversation_id="c")
+        await agent.handle(msg)
+        system_content = llm.last_messages[0]["content"]
+        assert "greet" in system_content
+        assert "get_skill" in system_content
+        assert "Say hello warmly." not in system_content
+
+    @pytest.mark.asyncio
     async def test_stores_in_memory(self, agent: AgentCore, memory: MemoryStore):
         msg = InboundMessage(text="hello", sender_id="u", channel="cli", conversation_id="conv-mem")
         await agent.handle(msg)

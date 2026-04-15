@@ -242,6 +242,7 @@ class TestSkillRegistry:
         prompt = registry.as_index_prompt()
         assert "write-article" in prompt
         assert "Write a compelling" in prompt
+        assert "get_skill" in prompt
         # Index should NOT include full instructions
         assert "Be practical and concrete" not in prompt
 

@@ -26,6 +26,7 @@ class AgentCore:
         skill_registry: SkillRegistry,
         memory: MemoryStore,
         system_prompt: str = "",
+        skill_prompt_mode: str = "auto",
         max_history: int = 20,
         persona_registry: PersonaRegistry | None = None,
         fact_extractor: FactExtractor | None = None,
@@ -44,6 +45,7 @@ class AgentCore:
         self.skills = skill_registry
         self.memory = memory
         self.system_prompt = system_prompt
+        self.skill_prompt_mode = skill_prompt_mode
         self.max_history = max_history
         self.personas = persona_registry or PersonaRegistry()
         self.fact_extractor = fact_extractor
@@ -358,7 +360,7 @@ class AgentCore:
             system_parts.append(self.system_prompt)
 
         # Inject skills
-        skill_prompt = self.skills.as_system_prompt(skills)
+        skill_prompt = self._build_skill_prompt(skills)
         if skill_prompt:
             system_parts.append(skill_prompt)
 
@@ -380,3 +382,12 @@ class AgentCore:
         messages.append({"role": "user", "content": message.text})
 
         return messages
+
+    def _build_skill_prompt(self, skills: list) -> str:
+        """Render the skill prompt according to the configured disclosure mode."""
+        mode = self.skill_prompt_mode
+        if mode == "auto":
+            mode = "index" if self.tool_registry and len(self.tool_registry) > 0 else "full"
+        if mode == "index":
+            return self.skills.as_index_prompt(skills)
+        return self.skills.as_full_prompt(skills)
