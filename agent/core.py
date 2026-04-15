@@ -1,4 +1,4 @@
-"""Agent core — orchestrates skills, memory, persona, and LLM."""
+"""Agent core — orchestrates skills, memory, identity, and LLM."""
 
 from __future__ import annotations
 
@@ -10,15 +10,15 @@ from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
 from agent.tools.registry import ToolRegistry
 from gateway.base import InboundMessage, OutboundMessage
+from identities.loader import Identity
+from identities.registry import IdentityRegistry
 from memory.store import MemoryStore
-from personas.loader import Persona
-from personas.registry import PersonaRegistry
 from skills.loader import parse_skill
 from skills.registry import SkillRegistry
 
 
 class AgentCore:
-    """Central agent that handles messages using skills + memory + persona + LLM."""
+    """Central agent that handles messages using skills + memory + identity + LLM."""
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class AgentCore:
         system_prompt: str = "",
         skill_prompt_mode: str = "auto",
         max_history: int = 20,
-        persona_registry: PersonaRegistry | None = None,
+        identity_registry: IdentityRegistry | None = None,
         fact_extractor: FactExtractor | None = None,
         fact_extraction_every_n_turns: int = 5,
         fact_extraction_min_confidence: float = 0.7,
@@ -47,7 +47,7 @@ class AgentCore:
         self.system_prompt = system_prompt
         self.skill_prompt_mode = skill_prompt_mode
         self.max_history = max_history
-        self.personas = persona_registry or PersonaRegistry()
+        self.identities = identity_registry or IdentityRegistry()
         self.fact_extractor = fact_extractor
         self.fact_extraction_every_n_turns = fact_extraction_every_n_turns
         self.fact_extraction_min_confidence = fact_extraction_min_confidence
@@ -137,35 +137,35 @@ class AgentCore:
             "function": {"name": tc.name, "arguments": _json.dumps(tc.arguments)},
         }
 
-    def _resolve_persona(
+    def _resolve_identity(
         self, message: InboundMessage, conversation_meta: dict | None = None
-    ) -> Persona | None:
-        """Pick the persona for this turn.
+    ) -> Identity | None:
+        """Pick the identity package for this turn.
 
-        Priority: message.metadata['persona'] > stored conversation persona > registry default.
-        Returns None if no personas are configured at all.
+        Priority: message.metadata['identity'] > stored conversation identity > registry default.
+        Returns None if no identity packages are configured at all.
         """
-        requested = message.metadata.get("persona") if message.metadata else None
+        requested = message.metadata.get("identity") if message.metadata else None
         if requested:
-            return self.personas.resolve(requested)
+            return self.identities.resolve(requested)
 
-        stored = (conversation_meta or {}).get("persona")
+        stored = (conversation_meta or {}).get("identity")
         if stored:
-            persona = self.personas.get(stored)
-            if persona is not None:
-                return persona
+            identity = self.identities.get(stored)
+            if identity is not None:
+                return identity
 
-        return self.personas.resolve(None)
+        return self.identities.resolve(None)
 
     async def handle(self, message: InboundMessage) -> OutboundMessage:
         """Process an inbound message and return a response.
 
         Flow:
-        1. Pick persona (from message.metadata or registry default)
+        1. Pick identity package (from message.metadata or registry default)
         2. Load conversation history from memory
-        3. Load facts from persona's namespace (+ shared global)
+        3. Load facts from the identity namespace (+ shared global)
         4. Find relevant skills
-        5. Build prompt (persona + system + skills + facts + history + message)
+        5. Build prompt (identity + system + skills + facts + history + message)
         6. Call LLM
         7. Store message + response in memory
         8. Record skill executions
@@ -174,20 +174,20 @@ class AgentCore:
         # before any later reads or writes. Web UI lists are channel-scoped.
         self.memory.ensure_conversation(message.conversation_id, channel=message.channel)
 
-        # 1. Persona
+        # 1. Identity
         conversation_meta = self.memory.get_conversation(message.conversation_id)
-        persona = self._resolve_persona(message, conversation_meta)
-        if persona is not None:
-            self.memory.set_conversation_persona(message.conversation_id, persona.name)
+        identity = self._resolve_identity(message, conversation_meta)
+        if identity is not None:
+            self.memory.set_conversation_identity(message.conversation_id, identity.name)
 
         # 2. History
         history = self.memory.get_history(message.conversation_id, self.max_history)
 
-        # 3. Facts (persona-scoped + global)
-        if persona is not None:
-            persona_facts = self.memory.get_facts(namespace=persona.namespace)
+        # 3. Facts (identity-scoped + global)
+        if identity is not None:
+            identity_facts = self.memory.get_facts(namespace=identity.namespace)
             global_facts = self.memory.get_facts(namespace="")
-            facts = global_facts + persona_facts
+            facts = global_facts + identity_facts
         else:
             facts = self.memory.get_facts()
 
@@ -197,7 +197,7 @@ class AgentCore:
             relevant_skills = self.skills.all()
 
         # 5. Build messages
-        messages = self._build_messages(persona, relevant_skills, facts, history, message)
+        messages = self._build_messages(identity, relevant_skills, facts, history, message)
 
         # 6. Call LLM — with optional tool-use loop
         response_text, tool_trace = await self._run_llm(messages)
@@ -219,7 +219,7 @@ class AgentCore:
             execution_ids.append(eid)
 
         # 9. Auto fact extraction (every N turns, when enabled)
-        extracted_count = await self._maybe_extract_facts(message, persona)
+        extracted_count = await self._maybe_extract_facts(message, identity)
 
         # 10. Skill emergence (every N turns, when enabled)
         emerged_skill = await self._maybe_emerge_skill(message)
@@ -236,7 +236,7 @@ class AgentCore:
             metadata={
                 "skills": [s.name for s in relevant_skills],
                 "execution_ids": execution_ids,
-                "persona": persona.name if persona else None,
+                "identity": identity.name if identity else None,
                 "facts_extracted": extracted_count,
                 "emerged_skill": emerged_skill,
                 "new_title": new_title,
@@ -244,7 +244,7 @@ class AgentCore:
             },
         )
 
-    async def _maybe_extract_facts(self, message: InboundMessage, persona: Persona | None) -> int:
+    async def _maybe_extract_facts(self, message: InboundMessage, identity: Identity | None) -> int:
         """Extract new facts from history every N turns. Returns count saved."""
         if not self.fact_extractor:
             return 0
@@ -254,7 +254,7 @@ class AgentCore:
         if self._turn_counts[conv_id] % self.fact_extraction_every_n_turns != 0:
             return 0
 
-        namespace = persona.namespace if persona else ""
+        namespace = identity.namespace if identity else ""
         history = self.memory.get_history(conv_id, self.max_history)
         existing = self.memory.get_facts(namespace=namespace) + (
             self.memory.get_facts(namespace="") if namespace else []
@@ -360,7 +360,7 @@ class AgentCore:
 
     def _build_messages(
         self,
-        persona: Persona | None,
+        identity: Identity | None,
         skills: list,
         facts: list,
         history: list[dict[str, str]],
@@ -369,10 +369,10 @@ class AgentCore:
         """Build the message list for the LLM call."""
         system_parts = []
 
-        # Persona body comes FIRST — it's the assistant's identity
-        if persona is not None and persona.body:
-            system_parts.append(f"# Persona: {persona.display_name or persona.name}")
-            system_parts.append(persona.body)
+        # Identity package comes FIRST — it defines the assistant.
+        if identity is not None and identity.prompt:
+            system_parts.append(f"# Identity Package: {identity.display_name or identity.name}")
+            system_parts.append(identity.prompt)
 
         if self.system_prompt:
             system_parts.append(self.system_prompt)

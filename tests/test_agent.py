@@ -148,31 +148,35 @@ class TestAgentCore:
         assert "formal tone" in system_content
 
 
-class TestAgentWithPersona:
+class TestAgentWithIdentity:
     @pytest.fixture
-    def agent_with_persona(self, llm, skill_registry, memory):
+    def agent_with_identity(self, llm, skill_registry, memory):
         from pathlib import Path
 
         from agent.core import AgentCore
-        from personas.loader import Persona
-        from personas.registry import PersonaRegistry
+        from identities.loader import Identity
+        from identities.registry import IdentityRegistry
 
-        reg = PersonaRegistry()
+        reg = IdentityRegistry()
         reg.register(
-            Persona(
+            Identity(
                 name="老拐",
                 display_name="老拐",
-                body="你是老拐，知乎写作专家。说话直接，不端着。",
+                soul="你说话直接，不端着。",
+                identity="你是老拐，知乎写作专家。",
+                user="你把用户当同行，不装老师。",
                 default=True,
-                path=Path("/tmp/PERSONA.md"),
+                path=Path("/tmp/identities/zhihu-writer"),
             )
         )
         reg.register(
-            Persona(
+            Identity(
                 name="formal-helper",
                 display_name="Formal Helper",
-                body="You speak in a polite, formal tone.",
-                path=Path("/tmp/PERSONA.md"),
+                soul="You speak in a polite, formal tone.",
+                identity="You are a concise formal assistant.",
+                user="The user wants clear, well-structured answers.",
+                path=Path("/tmp/identities/formal-helper"),
             )
         )
         return AgentCore(
@@ -180,74 +184,74 @@ class TestAgentWithPersona:
             skill_registry=skill_registry,
             memory=memory,
             system_prompt="",
-            persona_registry=reg,
+            identity_registry=reg,
         )
 
     @pytest.mark.asyncio
-    async def test_default_persona_injected(self, agent_with_persona, llm: MockLLM):
+    async def test_default_identity_injected(self, agent_with_identity, llm: MockLLM):
         msg = InboundMessage(text="hi", sender_id="u", channel="cli", conversation_id="c1")
-        resp = await agent_with_persona.handle(msg)
+        resp = await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "老拐" in system_content
         assert "知乎写作专家" in system_content
-        assert resp.metadata["persona"] == "老拐"
+        assert resp.metadata["identity"] == "老拐"
 
     @pytest.mark.asyncio
-    async def test_explicit_persona_via_metadata(self, agent_with_persona, llm: MockLLM):
+    async def test_explicit_identity_via_metadata(self, agent_with_identity, llm: MockLLM):
         msg = InboundMessage(
             text="hi",
             sender_id="u",
             channel="cli",
             conversation_id="c2",
-            metadata={"persona": "formal-helper"},
+            metadata={"identity": "formal-helper"},
         )
-        resp = await agent_with_persona.handle(msg)
+        resp = await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "polite, formal tone" in system_content
         assert "知乎写作专家" not in system_content
-        assert resp.metadata["persona"] == "formal-helper"
+        assert resp.metadata["identity"] == "formal-helper"
 
     @pytest.mark.asyncio
-    async def test_persona_facts_isolated(
-        self, agent_with_persona, llm: MockLLM, memory: MemoryStore
+    async def test_identity_facts_isolated(
+        self, agent_with_identity, llm: MockLLM, memory: MemoryStore
     ):
-        memory.set_fact("style", "uses 老拐 voice", namespace="persona:老拐")
-        memory.set_fact("style", "polite English", namespace="persona:formal-helper")
-        memory.set_fact("global_fact", "shared across personas")
+        memory.set_fact("style", "uses 老拐 voice", namespace="identity:老拐")
+        memory.set_fact("style", "polite English", namespace="identity:formal-helper")
+        memory.set_fact("global_fact", "shared across identities")
 
         msg = InboundMessage(text="hi", sender_id="u", channel="cli", conversation_id="c3")
-        await agent_with_persona.handle(msg)
+        await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "uses 老拐 voice" in system_content
-        assert "polite English" not in system_content  # other persona's fact
-        assert "shared across personas" in system_content  # global fact
+        assert "polite English" not in system_content  # other identity's fact
+        assert "shared across identities" in system_content  # global fact
 
     @pytest.mark.asyncio
-    async def test_persists_explicit_persona_on_conversation(
-        self, agent_with_persona, memory: MemoryStore
+    async def test_persists_explicit_identity_on_conversation(
+        self, agent_with_identity, memory: MemoryStore
     ):
         msg = InboundMessage(
             text="hi",
             sender_id="u",
             channel="web",
             conversation_id="c4",
-            metadata={"persona": "formal-helper"},
+            metadata={"identity": "formal-helper"},
         )
-        await agent_with_persona.handle(msg)
-        assert memory.get_conversation("c4")["persona"] == "formal-helper"
+        await agent_with_identity.handle(msg)
+        assert memory.get_conversation("c4")["identity"] == "formal-helper"
 
     @pytest.mark.asyncio
-    async def test_reuses_conversation_persona_when_request_omits_it(
-        self, agent_with_persona, llm: MockLLM
+    async def test_reuses_conversation_identity_when_request_omits_it(
+        self, agent_with_identity, llm: MockLLM
     ):
         first = InboundMessage(
             text="hi",
             sender_id="u",
             channel="web",
             conversation_id="c5",
-            metadata={"persona": "formal-helper"},
+            metadata={"identity": "formal-helper"},
         )
-        await agent_with_persona.handle(first)
+        await agent_with_identity.handle(first)
 
         second = InboundMessage(
             text="follow up",
@@ -255,8 +259,8 @@ class TestAgentWithPersona:
             channel="web",
             conversation_id="c5",
         )
-        resp = await agent_with_persona.handle(second)
+        resp = await agent_with_identity.handle(second)
 
         system_content = llm.last_messages[0]["content"]
         assert "polite, formal tone" in system_content
-        assert resp.metadata["persona"] == "formal-helper"
+        assert resp.metadata["identity"] == "formal-helper"

@@ -12,6 +12,7 @@
 - `agent/`: prompt assembly, LLM clients, evaluation, synthesis, and tool orchestration
 - `gateway/`: bidirectional request/response transports
 - `channels/`: outbound reports only
+- `identities/`: OpenClaw-style multi-file assistant identity packages
 - `skills/`: skill parsing, indexing, and progressive disclosure
 - `memory/`: SQLite-backed persistence API
 - `adapters/`: metrics ingestion adapters used by the iteration loop
@@ -21,10 +22,10 @@
 
 The repository is organized around these practical rules:
 
-- `memory/` must stay storage-focused and must not depend on `agent/`, `gateway/`, `skills/`, `channels/`, `adapters/`, or `personas/`.
-- `skills/` must not depend on `agent/`, `gateway/`, `memory/`, `channels/`, `adapters/`, or `personas/`.
-- `gateway/` may depend on `agent/` and `gateway/` internals, but should not import `core/`, `skills/`, `memory/`, `channels/`, `adapters/`, or `personas/`.
-- `agent/` may depend on `skills/`, `memory/`, `gateway.base`, and `personas/`, but should not import `core/`, `channels/`, or `adapters/`.
+- `memory/` must stay storage-focused and must not depend on `agent/`, `gateway/`, `skills/`, `channels/`, `adapters/`, or `identities/`.
+- `skills/` must not depend on `agent/`, `gateway/`, `memory/`, `channels/`, `adapters/`, or `identities/`.
+- `gateway/` may depend on `agent/` and `gateway/` internals, but should not import `core/`, `skills/`, `memory/`, `channels/`, `adapters/`, or `identities/`.
+- `agent/` may depend on `skills/`, `memory/`, `gateway.base`, and `identities/`, but should not import `core/`, `channels/`, or `adapters/`.
 - `core/` is the orchestration layer and may wire the system together, but product logic should not migrate into it.
 
 Structural tests enforce the high-signal boundaries above.

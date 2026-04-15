@@ -19,7 +19,7 @@ Usage:
 
 What it does:
 1. Spins up an in-memory MemoryStore, empty SkillRegistry,
-   one persona, the chosen LLM client.
+   one identity package, the chosen LLM client.
 2. Plays a scripted 12-turn conversation that should look like a
    reusable pattern (asking for haiku-style summaries of news
    articles).
@@ -47,9 +47,9 @@ from agent.llm import create_llm_client  # noqa: E402
 from agent.pattern_detector import PatternDetector  # noqa: E402
 from agent.skill_synthesizer import SkillSynthesizer  # noqa: E402
 from gateway.base import InboundMessage  # noqa: E402
+from identities.loader import Identity  # noqa: E402
+from identities.registry import IdentityRegistry  # noqa: E402
 from memory.store import MemoryStore  # noqa: E402
-from personas.loader import Persona  # noqa: E402
-from personas.registry import PersonaRegistry  # noqa: E402
 from skills.registry import SkillRegistry  # noqa: E402
 
 SCRIPTED_TURNS = [
@@ -90,14 +90,16 @@ async def run(provider: str, model: str, base_url: str | None = None) -> None:
         memory = MemoryStore(Path(tmp) / "smoke.db")
         skill_registry = SkillRegistry()
 
-        persona_registry = PersonaRegistry()
-        persona_registry.register(
-            Persona(
+        identity_registry = IdentityRegistry()
+        identity_registry.register(
+            Identity(
                 name="news-helper",
                 display_name="News Helper",
-                body="You are a concise news summariser. Reply briefly and helpfully.",
+                soul="You are concise, helpful, and calm.",
+                identity="You are a concise news summariser.",
+                user="The user wants fast summaries and practical takeaways.",
                 default=True,
-                path=Path("/tmp/PERSONA.md"),
+                path=Path("/tmp/identities/news-helper"),
             )
         )
 
@@ -111,7 +113,7 @@ async def run(provider: str, model: str, base_url: str | None = None) -> None:
             llm=llm,
             skill_registry=skill_registry,
             memory=memory,
-            persona_registry=persona_registry,
+            identity_registry=identity_registry,
             fact_extractor=fact_extractor,
             fact_extraction_every_n_turns=4,
             fact_extraction_min_confidence=0.6,

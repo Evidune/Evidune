@@ -124,8 +124,8 @@ class TestMemoryTools:
 
     @pytest.mark.asyncio
     async def test_namespace_isolation(self, memory: MemoryStore):
-        alice_tools = {t.name: t for t in memory_tools(memory, namespace="persona:alice")}
-        bob_tools = {t.name: t for t in memory_tools(memory, namespace="persona:bob")}
+        alice_tools = {t.name: t for t in memory_tools(memory, namespace="identity:alice")}
+        bob_tools = {t.name: t for t in memory_tools(memory, namespace="identity:bob")}
         await alice_tools["set_fact"].handler(key="x", value="A")
         await bob_tools["set_fact"].handler(key="x", value="B")
         assert await alice_tools["get_fact"].handler(key="x") == "A"

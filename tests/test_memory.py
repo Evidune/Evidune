@@ -167,7 +167,7 @@ class TestConversationManagement:
         assert len(items) == 2
         ids = {i["id"] for i in items}
         assert ids == {"c1", "c2"}
-        assert all("persona" in item for item in items)
+        assert all("identity" in item for item in items)
 
     def test_list_includes_preview(self, store: MemoryStore):
         store.add_message("c1", "user", "first")
@@ -205,12 +205,12 @@ class TestConversationManagement:
         store.ensure_conversation("c1", channel="web")
         assert store.get_conversation("c1")["channel"] == "cli"
 
-    def test_ensure_conversation_backfills_empty_persona(self, store: MemoryStore):
+    def test_ensure_conversation_backfills_empty_identity(self, store: MemoryStore):
         store.ensure_conversation("c1", channel="web")
-        assert store.get_conversation("c1")["persona"] == ""
+        assert store.get_conversation("c1")["identity"] == ""
 
-        store.ensure_conversation("c1", persona="zhihu-writer")
-        assert store.get_conversation("c1")["persona"] == "zhihu-writer"
+        store.ensure_conversation("c1", identity="zhihu-writer")
+        assert store.get_conversation("c1")["identity"] == "zhihu-writer"
 
     def test_set_title(self, store: MemoryStore):
         store.add_message("c1", "user", "x")
@@ -218,10 +218,10 @@ class TestConversationManagement:
         meta = store.get_conversation("c1")
         assert meta["title"] == "My Chat"
 
-    def test_set_persona(self, store: MemoryStore):
+    def test_set_identity(self, store: MemoryStore):
         store.ensure_conversation("c1", channel="web")
-        assert store.set_conversation_persona("c1", "zhihu-writer") is True
-        assert store.get_conversation("c1")["persona"] == "zhihu-writer"
+        assert store.set_conversation_identity("c1", "zhihu-writer") is True
+        assert store.get_conversation("c1")["identity"] == "zhihu-writer"
 
     def test_set_status_invalid_raises(self, store: MemoryStore):
         store.add_message("c1", "user", "x")

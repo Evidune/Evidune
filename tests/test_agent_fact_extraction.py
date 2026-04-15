@@ -7,9 +7,9 @@ import pytest
 from agent.core import AgentCore
 from agent.llm import LLMClient
 from gateway.base import InboundMessage
+from identities.loader import Identity
+from identities.registry import IdentityRegistry
 from memory.store import MemoryStore
-from personas.loader import Persona
-from personas.registry import PersonaRegistry
 from skills.registry import SkillRegistry
 
 
@@ -47,15 +47,15 @@ def llm():
     return MockLLM("response text")
 
 
-def _make_agent(llm, memory, *, extractor=None, every_n=5, min_conf=0.7, persona=None):
-    persona_reg = PersonaRegistry()
-    if persona:
-        persona_reg.register(persona)
+def _make_agent(llm, memory, *, extractor=None, every_n=5, min_conf=0.7, identity=None):
+    identity_reg = IdentityRegistry()
+    if identity:
+        identity_reg.register(identity)
     return AgentCore(
         llm=llm,
         skill_registry=SkillRegistry(),
         memory=memory,
-        persona_registry=persona_reg,
+        identity_registry=identity_reg,
         fact_extractor=extractor,
         fact_extraction_every_n_turns=every_n,
         fact_extraction_min_confidence=min_conf,
@@ -119,24 +119,26 @@ class TestExtractionPersistence:
         assert memory.get_fact("user.lang") is None  # filtered
 
     @pytest.mark.asyncio
-    async def test_persona_namespace_isolation(self, llm, memory):
+    async def test_identity_namespace_isolation(self, llm, memory):
         from agent.fact_extractor import ExtractedFact
 
         extractor = MockExtractor([ExtractedFact(key="style", value="formal", confidence=0.9)])
-        persona = Persona(
+        identity = Identity(
             name="alice",
             display_name="Alice",
-            body="...",
+            soul="...",
+            identity="You are Alice.",
+            user="The user likes structured answers.",
             default=True,
-            path=Path("/tmp/PERSONA.md"),
+            path=Path("/tmp/identities/alice"),
         )
-        agent = _make_agent(llm, memory, extractor=extractor, every_n=1, persona=persona)
+        agent = _make_agent(llm, memory, extractor=extractor, every_n=1, identity=identity)
 
         msg = InboundMessage(text="x", sender_id="u", channel="cli", conversation_id="c")
         await agent.handle(msg)
 
-        # Saved into persona namespace, not global
-        assert memory.get_fact("style", namespace="persona:alice") == "formal"
+        # Saved into identity namespace, not global
+        assert memory.get_fact("style", namespace="identity:alice") == "formal"
         assert memory.get_fact("style", namespace="") is None
 
     @pytest.mark.asyncio

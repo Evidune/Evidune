@@ -19,7 +19,7 @@ Follow instructions in this order:
 Aiflay is a lightweight AI agent framework with two operating modes:
 
 - `aiflay run`: metrics -> analysis -> skill/reference updates -> optional git commit
-- `aiflay serve`: interactive agent with gateways, memory, skills, personas, and tools
+- `aiflay serve`: interactive agent with gateways, memory, identities, skills, and tools
 
 The product differentiator is outcome-driven skill self-iteration. Preserve that
 behavior carefully.

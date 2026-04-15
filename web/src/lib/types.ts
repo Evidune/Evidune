@@ -30,7 +30,7 @@ export interface ChatResponse {
   execution_ids?: number[]
   emerged_skill?: string | null
   facts_extracted?: number
-  persona?: string | null
+  identity?: string | null
   new_title?: string | null
   tool_trace?: ToolTraceEntry[]
   error?: string
@@ -39,7 +39,7 @@ export interface ChatResponse {
 export interface ConversationSummary {
   id: string
   channel: string
-  persona?: string
+  identity?: string
   title: string
   status: 'active' | 'archived'
   created_at: string

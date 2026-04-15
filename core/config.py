@@ -152,11 +152,11 @@ class SkillsConfig:
 
 
 @dataclass
-class PersonasConfig:
-    """Where to look for assistant personas (PERSONA.md files)."""
+class IdentitiesConfig:
+    """Where to look for assistant identity packages."""
 
-    directories: list[str] = field(default_factory=lambda: ["personas/"])
-    default: str | None = None  # name of default persona; None → first loaded
+    directories: list[str] = field(default_factory=lambda: ["identities/"])
+    default: str | None = None  # name of default identity; None → first loaded
 
 
 @dataclass
@@ -183,7 +183,7 @@ class AiflayConfig:
     # Agent framework config (optional — when absent, iteration-only mode)
     agent: AgentConfig | None = None
     skills: SkillsConfig = field(default_factory=SkillsConfig)
-    personas: PersonasConfig = field(default_factory=PersonasConfig)
+    identities: IdentitiesConfig = field(default_factory=IdentitiesConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     gateways: list[GatewayConfig] = field(default_factory=list)
 
@@ -329,11 +329,11 @@ def load_config(path: str | Path) -> AiflayConfig:
         prompt_mode=skills_raw.get("prompt_mode", "auto"),
     )
 
-    # Personas config
-    personas_raw = raw.get("personas", {})
-    personas_config = PersonasConfig(
-        directories=personas_raw.get("directories", ["personas/"]),
-        default=personas_raw.get("default"),
+    # Identity packages
+    identities_raw = raw.get("identities", {})
+    identities_config = IdentitiesConfig(
+        directories=identities_raw.get("directories", ["identities/"]),
+        default=identities_raw.get("default"),
     )
 
     # Memory config
@@ -362,7 +362,7 @@ def load_config(path: str | Path) -> AiflayConfig:
         channels=channels,
         agent=agent,
         skills=skills_config,
-        personas=personas_config,
+        identities=identities_config,
         memory=memory_config,
         gateways=gateways,
     )

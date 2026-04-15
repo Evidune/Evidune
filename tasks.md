@@ -32,6 +32,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Docs knowledge base skeleton with architecture, quality, reliability, and tech debt records
 - [x] Repo docs lint, CI workflow, and structural guardrails
 - [x] Progressive skill disclosure default with compatibility mode
+- [x] Replace monolithic personas with OpenClaw-style identity packages
 
 ## Notes
 

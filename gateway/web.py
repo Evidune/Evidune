@@ -114,16 +114,16 @@ class WebGateway(Gateway):
                         self._json_resp(400, {"error": "Empty message"})
                         return
 
-                    persona = data.get("persona")
-                    if persona is not None and not isinstance(persona, str):
-                        self._json_resp(400, {"error": "persona must be a string"})
+                    identity = data.get("identity")
+                    if identity is not None and not isinstance(identity, str):
+                        self._json_resp(400, {"error": "identity must be a string"})
                         return
-                    persona = persona.strip() if isinstance(persona, str) else None
+                    identity = identity.strip() if isinstance(identity, str) else None
 
                     conv_id = data.get("conversation_id", f"web-{uuid.uuid4().hex[:8]}")
 
                     future = asyncio.run_coroutine_threadsafe(
-                        gateway._handle_chat(text, conv_id, persona=persona), gateway._loop
+                        gateway._handle_chat(text, conv_id, identity=identity), gateway._loop
                     )
                     try:
                         result = future.result(timeout=120)
@@ -235,7 +235,7 @@ class WebGateway(Gateway):
             self._server = None
 
     async def _handle_chat(
-        self, text: str, conversation_id: str, persona: str | None = None
+        self, text: str, conversation_id: str, identity: str | None = None
     ) -> dict[str, Any]:
         if not self._handler:
             return {"error": "Agent not ready"}
@@ -245,7 +245,7 @@ class WebGateway(Gateway):
             sender_id="web-user",
             channel="web",
             conversation_id=conversation_id,
-            metadata={"persona": persona} if persona else {},
+            metadata={"identity": identity} if identity else {},
         )
 
         response = await self._handler(message)
@@ -256,7 +256,7 @@ class WebGateway(Gateway):
             "execution_ids": response.metadata.get("execution_ids", []),
             "emerged_skill": response.metadata.get("emerged_skill"),
             "facts_extracted": response.metadata.get("facts_extracted", 0),
-            "persona": response.metadata.get("persona"),
+            "identity": response.metadata.get("identity"),
             "new_title": response.metadata.get("new_title"),
             "tool_trace": response.metadata.get("tool_trace", []),
         }

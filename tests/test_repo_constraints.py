@@ -15,9 +15,10 @@ OVERSIZED_SECTION_RE = re.compile(
 )
 OVERSIZED_ITEM_RE = re.compile(r"- `([^`]+)` \(hard limit exception\)")
 FORBIDDEN_IMPORTS = {
-    "memory": {"agent", "gateway", "skills", "channels", "adapters", "personas", "core"},
-    "skills": {"agent", "gateway", "memory", "channels", "adapters", "personas", "core"},
-    "gateway": {"core", "skills", "memory", "channels", "adapters", "personas"},
+    "memory": {"agent", "gateway", "skills", "channels", "adapters", "identities", "core"},
+    "skills": {"agent", "gateway", "memory", "channels", "adapters", "identities", "core"},
+    "gateway": {"core", "skills", "memory", "channels", "adapters", "identities"},
+    "identities": {"agent", "gateway", "memory", "skills", "channels", "adapters", "core"},
     "agent": {"core", "channels", "adapters"},
 }
 
@@ -49,7 +50,16 @@ def test_no_untracked_oversized_files():
     allowlist = _oversized_allowlist()
     actual: set[str] = set()
 
-    for directory in ("agent", "core", "gateway", "memory", "skills", "channels", "adapters"):
+    for directory in (
+        "agent",
+        "core",
+        "gateway",
+        "memory",
+        "skills",
+        "channels",
+        "adapters",
+        "identities",
+    ):
         for path in (ROOT / directory).rglob("*.py"):
             rel = path.relative_to(ROOT).as_posix()
             if _line_count(path) > PYTHON_LIMIT:

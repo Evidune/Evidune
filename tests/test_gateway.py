@@ -31,7 +31,7 @@ class TestInboundMessage:
 
 class TestWebGatewayChat:
     @pytest.mark.asyncio
-    async def test_handle_chat_passes_persona_into_metadata(self):
+    async def test_handle_chat_passes_identity_into_metadata(self):
         gw = WebGateway()
         seen: dict[str, object] = {}
 
@@ -40,10 +40,10 @@ class TestWebGatewayChat:
             return OutboundMessage(
                 text="ok",
                 conversation_id=message.conversation_id,
-                metadata={"persona": message.metadata.get("persona")},
+                metadata={"identity": message.metadata.get("identity")},
             )
 
         gw._handler = handler
-        result = await gw._handle_chat("hello", "conv1", persona="formal-helper")
-        assert seen["metadata"] == {"persona": "formal-helper"}
-        assert result["persona"] == "formal-helper"
+        result = await gw._handle_chat("hello", "conv1", identity="formal-helper")
+        assert seen["metadata"] == {"identity": "formal-helper"}
+        assert result["identity"] == "formal-helper"

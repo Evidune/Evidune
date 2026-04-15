@@ -144,16 +144,16 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         if count > 0:
             print(f"Loaded {count} skill(s) from {skill_path}")
 
-    from personas.registry import PersonaRegistry
+    from identities.registry import IdentityRegistry
 
-    persona_registry = PersonaRegistry()
-    for persona_dir in config.personas.directories:
-        persona_path = base_dir / persona_dir
-        count = persona_registry.load_directory(persona_path)
+    identity_registry = IdentityRegistry()
+    for identity_dir in config.identities.directories:
+        identity_path = base_dir / identity_dir
+        count = identity_registry.load_directory(identity_path)
         if count > 0:
-            print(f"Loaded {count} persona(s) from {persona_path}")
-    if config.personas.default and persona_registry.get(config.personas.default):
-        persona_registry.set_default(config.personas.default)
+            print(f"Loaded {count} identity package(s) from {identity_path}")
+    if config.identities.default and identity_registry.get(config.identities.default):
+        identity_registry.set_default(config.identities.default)
 
     # Helper: build the (optional) evaluator LLM client lazily.
     def _build_judge():
@@ -225,7 +225,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         system_prompt=config.agent.system_prompt,
         skill_prompt_mode=config.skills.prompt_mode,
         max_history=config.agent.max_history,
-        persona_registry=persona_registry,
+        identity_registry=identity_registry,
         fact_extractor=fact_extractor,
         fact_extraction_every_n_turns=config.agent.fact_extraction.every_n_turns,
         fact_extraction_min_confidence=config.agent.fact_extraction.min_confidence,

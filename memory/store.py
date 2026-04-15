@@ -48,16 +48,16 @@ class MemoryStore:
     # --- Conversation / Message API ---
 
     def ensure_conversation(
-        self, conversation_id: str, channel: str = "", persona: str = ""
+        self, conversation_id: str, channel: str = "", identity: str = ""
     ) -> None:
         """Create a conversation if it doesn't exist."""
         with self._lock:
             now = self._now()
             self._conn.execute(
                 """INSERT OR IGNORE INTO conversations
-                   (id, channel, persona, created_at, updated_at)
+                   (id, channel, identity, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?)""",
-                (conversation_id, channel, persona, now, now),
+                (conversation_id, channel, identity, now, now),
             )
             # Backfill the channel for legacy rows that were created before
             # the caller had the gateway/channel context available.
@@ -66,10 +66,10 @@ class MemoryStore:
                     "UPDATE conversations SET channel = ? WHERE id = ? AND channel = ''",
                     (channel, conversation_id),
                 )
-            if persona:
+            if identity:
                 self._conn.execute(
-                    "UPDATE conversations SET persona = ? WHERE id = ? AND persona = ''",
-                    (persona, conversation_id),
+                    "UPDATE conversations SET identity = ? WHERE id = ? AND identity = ''",
+                    (identity, conversation_id),
                 )
             self._conn.commit()
 
@@ -144,7 +144,7 @@ class MemoryStore:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                f"""SELECT c.id, c.channel, c.persona, c.title, c.status,
+                f"""SELECT c.id, c.channel, c.identity, c.title, c.status,
                            c.created_at, c.updated_at,
                            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id)
                              AS message_count,
@@ -167,7 +167,7 @@ class MemoryStore:
                 {
                     "id": r["id"],
                     "channel": r["channel"],
-                    "persona": r["persona"] or "",
+                    "identity": r["identity"] or "",
                     "title": r["title"] or "",
                     "status": r["status"],
                     "created_at": r["created_at"],
@@ -182,7 +182,9 @@ class MemoryStore:
         """Get a conversation's metadata (without history)."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+                """SELECT id, channel, identity, title, status, created_at, updated_at
+                   FROM conversations WHERE id = ?""",
+                (conversation_id,),
             ).fetchone()
         return dict(row) if row else None
 
@@ -207,12 +209,12 @@ class MemoryStore:
             self._conn.commit()
             return cursor.rowcount > 0
 
-    def set_conversation_persona(self, conversation_id: str, persona: str) -> bool:
-        """Persist the current persona for a conversation."""
+    def set_conversation_identity(self, conversation_id: str, identity: str) -> bool:
+        """Persist the current identity for a conversation."""
         with self._lock:
             cursor = self._conn.execute(
-                "UPDATE conversations SET persona = ?, updated_at = ? WHERE id = ?",
-                (persona, self._now(), conversation_id),
+                "UPDATE conversations SET identity = ?, updated_at = ? WHERE id = ?",
+                (identity, self._now(), conversation_id),
             )
             self._conn.commit()
             return cursor.rowcount > 0
@@ -236,7 +238,7 @@ class MemoryStore:
     # --- Facts API (namespaced) ---
     #
     # namespace="" is the global / shared namespace (default).
-    # namespace="persona:<name>" isolates one assistant identity's facts.
+    # namespace="identity:<name>" isolates one assistant identity's facts.
     # All read/write helpers default to the global namespace for
     # backward compatibility.
 

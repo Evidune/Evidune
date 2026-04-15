@@ -38,11 +38,11 @@ skills:
     - skills/
   auto_update: true # 迭代循环自动更新 skill 参考文档
 
-# === Persona 配置（多人设/结构化角色档案）===
-personas:
+# === Identity 配置（OpenClaw 风格多文件角色包）===
+identities:
   directories:
-    - personas/
-  default: zhihu-writer # 没指定时用这个；任何对话也可在 message.metadata.persona 显式切换
+    - identities/
+  default: zhihu-writer # 没指定时用这个；任何对话也可在 message.metadata.identity 显式切换
 
 # === 记忆 ===
 memory:

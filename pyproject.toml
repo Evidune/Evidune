@@ -44,7 +44,7 @@ packages = [
     "channels",
     "memory",
     "skills",
-    "personas",
+    "identities",
     "agent",
     "gateway",
 ]
@@ -82,7 +82,7 @@ known_first_party = [
     "channels",
     "memory",
     "skills",
-    "personas",
+    "identities",
     "agent",
     "gateway",
 ]
