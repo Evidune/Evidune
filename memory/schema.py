@@ -39,10 +39,26 @@ CREATE TABLE IF NOT EXISTS emerged_skills (
     name TEXT PRIMARY KEY,
     source_conversation_id TEXT,
     evaluation_criteria TEXT,
+    path TEXT DEFAULT '',
     version INTEGER DEFAULT 1,
-    status TEXT DEFAULT 'pending_review',
+    status TEXT DEFAULT 'active',
+    reason TEXT DEFAULT '',
+    evidence_json TEXT DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS skill_lifecycle_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    skill_name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT DEFAULT '',
+    path TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    evidence_json TEXT DEFAULT '{}',
+    content_before TEXT DEFAULT '',
+    content_after TEXT DEFAULT '',
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS iteration_runs (
@@ -115,6 +131,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _migrate_facts_namespace(conn)
     _migrate_conversations_metadata(conn)
+    _migrate_emerged_skills(conn)
     _ensure_indexes(conn)
     conn.commit()
 
@@ -146,6 +163,19 @@ def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE conversations ADD COLUMN status TEXT DEFAULT 'active'")
 
 
+def _migrate_emerged_skills(conn: sqlite3.Connection) -> None:
+    """Older DBs have thinner emerged_skill rows; add lifecycle metadata columns."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(emerged_skills)").fetchall()]
+    if not cols:
+        return
+    if "path" not in cols:
+        conn.execute("ALTER TABLE emerged_skills ADD COLUMN path TEXT DEFAULT ''")
+    if "reason" not in cols:
+        conn.execute("ALTER TABLE emerged_skills ADD COLUMN reason TEXT DEFAULT ''")
+    if "evidence_json" not in cols:
+        conn.execute("ALTER TABLE emerged_skills ADD COLUMN evidence_json TEXT DEFAULT '{}'")
+
+
 def _ensure_indexes(conn: sqlite3.Connection) -> None:
     """Create indexes only after legacy-column migrations have completed."""
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status)")
@@ -157,4 +187,7 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_iteration_updates_run ON iteration_run_updates(run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_skill ON skill_lifecycle_events(skill_name)"
     )

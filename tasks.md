@@ -8,6 +8,12 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 
 ## Pending
 
+- [ ] Connect feedback signals and evaluator scores into a single skill-iteration decision loop
+- [ ] Auto-activate emerged skills and reload them across restarts
+- [ ] Add audit trail, disable, and rollback flow for automatic skill activation
+- [ ] Extend outcome-driven iteration from evidence-only updates to direct `SKILL.md` rewrites
+- [ ] Add evidence-backed rewrite guardrails to prevent automatic skill drift
+- [ ] Add end-to-end coverage for skill generation, activation, reload, rewrite, and rollback
 - [ ] Browser-driven validation harness for the web gateway
 - [ ] Agent-visible logs, metrics, and traces for local runs
 - [ ] Streaming responses for the web gateway (SSE)

@@ -129,7 +129,11 @@ class TestEmergenceTrigger:
         # Registered in emerged_skills table
         rec = memory.get_emerged_skill("explain-topic")
         assert rec is not None
-        assert rec["status"] == "pending_review"
+        assert rec["status"] == "active"
+        assert rec["path"].endswith("explain-topic/SKILL.md")
+        event = memory.get_latest_skill_lifecycle_event("explain-topic", action="activate")
+        assert event is not None
+        assert event["status"] == "active"
         # And added to live registry
         assert agent.skills.get("explain-topic") is not None
 

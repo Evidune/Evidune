@@ -70,6 +70,23 @@ class TestHandleFeedback:
         result = gw._handle_feedback({"execution_id": 1, "signal": "thumbs_up", "value": True})
         assert "error" in result
 
+    def test_negative_feedback_rolls_back_active_emerged_skill(
+        self, gateway: WebGateway, store: MemoryStore
+    ):
+        eid = store.record_execution(
+            skill_name="s", user_input="i", assistant_output="o", signals={}
+        )
+        store.register_emerged_skill(name="s", status="active", path="/tmp/s/SKILL.md")
+
+        result = gateway._handle_feedback(
+            {"execution_id": eid, "signal": "thumbs_down", "value": True}
+        )
+
+        assert result["rolled_back"] is True
+        assert store.get_emerged_skill("s")["status"] == "rolled_back"
+        event = store.get_latest_skill_lifecycle_event("s", action="rollback")
+        assert event is not None
+
 
 class TestConversationEndpoints:
     def test_list_conversations_empty(self, gateway: WebGateway):

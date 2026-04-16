@@ -6,11 +6,14 @@ import pytest
 
 from agent.core import AgentCore
 from agent.llm import LLMClient
+from agent.self_evaluator import SelfEvaluator
 from agent.tools.base import CompletionResult, Tool, ToolCall
 from agent.tools.registry import ToolRegistry
 from gateway.base import InboundMessage
 from memory.store import MemoryStore
+from skills.loader import Skill
 from skills.registry import SkillRegistry
+from tests.conftest import MockJudge
 
 
 class MockLLM(LLMClient):
@@ -340,6 +343,67 @@ class TestAgentCore:
 
         assert response.metadata["mode"] == "plan"
         assert memory.get_conversation("c-mode-reuse")["mode"] == "plan"
+
+    @pytest.mark.asyncio
+    async def test_persists_evaluator_scores_for_matched_skills(
+        self, skill_registry: SkillRegistry, memory: MemoryStore
+    ):
+        llm = MockLLM("Hello! How can I help you?")
+        evaluator = SelfEvaluator(MockJudge('{"score": 0.82, "reasoning": "Strong match"}'))
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            self_evaluator=evaluator,
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="greeting",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-eval",
+            )
+        )
+
+        execution = memory.get_skill_executions("greet")[0]
+        assert execution["score"] == 0.82
+        assert execution["evaluator_reasoning"] == "Strong match"
+        assert response.metadata["evaluations_recorded"] == 1
+
+    @pytest.mark.asyncio
+    async def test_prunes_rolled_back_emerged_skills_before_matching(
+        self, llm: MockLLM, memory: MemoryStore
+    ):
+        reg = SkillRegistry()
+        skill_path = Path("/tmp/rolled-back/SKILL.md")
+        reg.register(
+            Skill(
+                name="rolled-back-skill",
+                description="Should not be usable",
+                path=skill_path,
+                triggers=["rolled back"],
+                instructions="Ignore me",
+            )
+        )
+        memory.register_emerged_skill(
+            name="rolled-back-skill",
+            status="rolled_back",
+            path=str(skill_path),
+            reason="Bad feedback",
+        )
+        agent = AgentCore(llm=llm, skill_registry=reg, memory=memory)
+
+        await agent.handle(
+            InboundMessage(
+                text="rolled back",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-prune",
+            )
+        )
+
+        assert reg.get("rolled-back-skill") is None
 
 
 class TestAgentWithIdentity:

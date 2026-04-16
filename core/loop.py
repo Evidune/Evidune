@@ -61,52 +61,53 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
         bottom_n=config.analysis.bottom_n,
     )
 
-    # 3. Update reference documents
-    updates = []
-    for ref in config.references:
-        ref_path = base_dir / ref.path
-
-        # Build new content from analysis
-        new_content = build_reference_content(ref.update_strategy, ref.section, result)
-
-        update = update_reference(
-            path=ref_path,
-            strategy=ref.update_strategy,
-            new_content=new_content,
-            section=ref.section,
-        )
-        updates.append(update)
-
-    # 3b. Self-iterate outcome skills (Aiflay's unique differentiator)
-    if config.skills.auto_update:
-        updates.extend(update_outcome_skills(config, base_dir, result))
-
-    # 4. Git commit
-    commit_sha = None
-    if config.iteration.git_commit:
-        changed_files = [u.path for u in updates if u.has_changes]
-        if changed_files:
-            commit_result = commit_changes(
-                repo_path=base_dir,
-                changed_files=changed_files,
-                prefix=config.iteration.commit_prefix,
-                summary=result.summary,
-            )
-            if commit_result.success:
-                commit_sha = commit_result.sha
-
-    # 5. Build report
-    report = IterationReport(
-        domain=config.domain,
-        analysis=result,
-        updates=updates,
-        commit_sha=commit_sha,
-    )
-
     from memory.store import MemoryStore
 
     memory = MemoryStore(resolve_memory_path(config, base_dir))
+
     try:
+        # 3. Update reference documents
+        updates = []
+        for ref in config.references:
+            ref_path = base_dir / ref.path
+
+            # Build new content from analysis
+            new_content = build_reference_content(ref.update_strategy, ref.section, result)
+
+            update = update_reference(
+                path=ref_path,
+                strategy=ref.update_strategy,
+                new_content=new_content,
+                section=ref.section,
+            )
+            updates.append(update)
+
+        # 3b. Self-iterate outcome skills (Aiflay's unique differentiator)
+        if config.skills.auto_update:
+            updates.extend(update_outcome_skills(config, base_dir, result, memory))
+
+        # 4. Git commit
+        commit_sha = None
+        if config.iteration.git_commit:
+            changed_files = [u.path for u in updates if u.has_changes]
+            if changed_files:
+                commit_result = commit_changes(
+                    repo_path=base_dir,
+                    changed_files=changed_files,
+                    prefix=config.iteration.commit_prefix,
+                    summary=result.summary,
+                )
+                if commit_result.success:
+                    commit_sha = commit_result.sha
+
+        # 5. Build report
+        report = IterationReport(
+            domain=config.domain,
+            analysis=result,
+            updates=updates,
+            commit_sha=commit_sha,
+        )
+
         run_id = record_iteration_report(memory, config, snapshot, report, sort_metric)
     finally:
         memory.close()
@@ -124,6 +125,64 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
         channel.send_report(report)
 
     return report
+
+
+def _load_active_emerged_skills(skill_registry, memory, output_dir: str | Path) -> int:
+    """Load persisted active emerged skills into the live registry."""
+    from skills.loader import parse_skill
+
+    root = Path(output_dir).expanduser()
+    loaded = 0
+
+    for record in memory.list_emerged_skills(status="active"):
+        skill_path = Path(record.get("path") or (root / record["name"] / "SKILL.md")).expanduser()
+        if not skill_path.is_file():
+            reason = "Active emerged skill path missing during startup reload"
+            evidence = {"path": str(skill_path)}
+            memory.set_emerged_skill_status(
+                record["name"],
+                "disabled",
+                reason=reason,
+                evidence=evidence,
+            )
+            memory.record_skill_lifecycle_event(
+                record["name"],
+                "disable",
+                status="disabled",
+                path=str(skill_path),
+                reason=reason,
+                evidence=evidence,
+            )
+            continue
+
+        if skill_registry.get(record["name"]) is not None:
+            continue
+
+        try:
+            skill = parse_skill(skill_path)
+        except Exception as exc:
+            reason = "Failed to parse active emerged skill during startup reload"
+            evidence = {"path": str(skill_path), "error": str(exc)}
+            memory.set_emerged_skill_status(
+                record["name"],
+                "disabled",
+                reason=reason,
+                evidence=evidence,
+            )
+            memory.record_skill_lifecycle_event(
+                record["name"],
+                "disable",
+                status="disabled",
+                path=str(skill_path),
+                reason=reason,
+                evidence=evidence,
+            )
+            continue
+
+        skill_registry.register(skill)
+        loaded += 1
+
+    return loaded
 
 
 def _handle_docs_command(base_dir: Path, subcommand: str | None) -> int:
@@ -243,6 +302,12 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
             )
         return llm
 
+    self_evaluator = None
+    if config.agent.evaluator:
+        from agent.self_evaluator import SelfEvaluator
+
+        self_evaluator = SelfEvaluator(judge=_build_judge())
+
     # Optional fact extractor
     fact_extractor = None
     if config.agent.fact_extraction.enabled:
@@ -264,6 +329,13 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
             judge=emerge_judge,
             output_dir=resolve_emergence_output_dir(config, base_dir),
         )
+        loaded = _load_active_emerged_skills(
+            skill_registry,
+            memory,
+            resolve_emergence_output_dir(config, base_dir),
+        )
+        if loaded > 0:
+            print(f"Loaded {loaded} active emerged skill(s)")
 
     # Title generator (always on when agent is configured — cheap, high value)
     from agent.title_generator import TitleGenerator
@@ -301,6 +373,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         fact_extractor=fact_extractor,
         fact_extraction_every_n_turns=config.agent.fact_extraction.every_n_turns,
         fact_extraction_min_confidence=config.agent.fact_extraction.min_confidence,
+        self_evaluator=self_evaluator,
         pattern_detector=pattern_detector,
         skill_synthesizer=skill_synthesizer,
         emergence_every_n_turns=config.agent.emergence.every_n_turns,

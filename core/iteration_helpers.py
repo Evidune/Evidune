@@ -6,24 +6,31 @@ content-building functions below are pure and trivially testable.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent.skill_feedback import SkillFeedbackSummary, summarise_skill_feedback
 from core.analyzer import AnalysisResult
 from core.config import AiflayConfig
-from core.updater import UpdateResult, update_reference
+from core.updater import UpdateResult, replace_section, update_reference
+
+_FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_MANAGED_ADJUSTMENTS_HEADING = "### Outcome-Backed Adjustments"
 
 
 def update_outcome_skills(
     config: AiflayConfig,
     base_dir: Path,
     result: AnalysisResult,
+    memory,
 ) -> list[UpdateResult]:
     """Update SKILL.md files that opt into outcome-driven iteration.
 
     For each skill with `outcome_metrics: true` in its frontmatter,
-    replaces the skill's `update_section` (default "## Reference Data")
-    with fresh Top Performers + Patterns derived from the analysis.
+    refreshes evidence and, when guardrails allow, rewrites the
+    `## Instructions` section with outcome-backed adjustments.
     """
     from skills.registry import SkillRegistry
 
@@ -33,16 +40,197 @@ def update_outcome_skills(
 
     skill_updates: list[UpdateResult] = []
     for skill in registry.get_outcome_skills():
-        section = skill.update_section
-        new_content = build_skill_reference_content(section, result)
-        update = update_reference(
-            path=skill.path,
-            strategy="replace_section",
-            new_content=new_content,
-            section=section,
-        )
+        feedback = summarise_skill_feedback(memory.get_skill_executions(skill.name, limit=20))
+        update = _update_outcome_skill(skill, result, feedback, memory)
         skill_updates.append(update)
     return skill_updates
+
+
+def _update_outcome_skill(skill, result, feedback: SkillFeedbackSummary, memory) -> UpdateResult:
+    current = skill.path.read_text(encoding="utf-8")
+    if feedback.should_disable:
+        rollback = _rollback_skill(skill, current, result, feedback, memory)
+        if rollback is not None:
+            return rollback
+
+    has_metric_evidence = bool(result.top_performers) and (
+        len(result.top_performers) >= 2 or bool(result.patterns)
+    )
+    if has_metric_evidence and feedback.should_rewrite:
+        rewritten = _rewrite_skill(skill, current, result, feedback, memory)
+        if rewritten is not None:
+            return rewritten
+
+    reference_content = build_skill_reference_content(skill.update_section, result)
+    return update_reference(
+        path=skill.path,
+        strategy="replace_section",
+        new_content=reference_content,
+        section=skill.update_section,
+    )
+
+
+def _rewrite_skill(
+    skill,
+    current: str,
+    result: AnalysisResult,
+    feedback: SkillFeedbackSummary,
+    memory,
+) -> UpdateResult | None:
+    prefix, body = _split_frontmatter(current)
+    instructions_body = _extract_section(body, "## Instructions")
+    if instructions_body is None:
+        return None
+
+    reference_content = build_skill_reference_content(skill.update_section, result)
+    rewritten_instructions = _build_rewritten_instructions(instructions_body, result, feedback)
+    new_body = replace_section(body, "## Instructions", rewritten_instructions)
+    new_body = replace_section(new_body, skill.update_section, reference_content)
+    new_content = (prefix + new_body.rstrip() + "\n") if prefix else (new_body.rstrip() + "\n")
+    if new_content == current:
+        return None
+
+    skill.path.write_text(new_content, encoding="utf-8")
+    evidence = dict(feedback.evidence)
+    evidence["top_titles"] = [record.title for record in result.top_performers]
+    evidence["patterns"] = list(result.patterns)
+    memory.record_skill_lifecycle_event(
+        skill.name,
+        "rewrite",
+        path=str(skill.path),
+        reason="Outcome-driven rewrite from metrics and execution evidence",
+        evidence=evidence,
+        content_before=current,
+        content_after=new_content,
+    )
+    return UpdateResult(
+        path=str(skill.path),
+        strategy="skill_rewrite",
+        has_changes=True,
+        old_content=current,
+        new_content=new_content,
+    )
+
+
+def _rollback_skill(
+    skill,
+    current: str,
+    result: AnalysisResult,
+    feedback: SkillFeedbackSummary,
+    memory,
+) -> UpdateResult | None:
+    event = memory.get_latest_skill_lifecycle_event(skill.name, action="rewrite")
+    if not event or not event.get("content_before"):
+        return None
+
+    restored = event["content_before"]
+    prefix, body = _split_frontmatter(restored)
+    updated_body = replace_section(
+        body,
+        skill.update_section,
+        build_skill_reference_content(skill.update_section, result),
+    )
+    new_content = (
+        (prefix + updated_body.rstrip() + "\n") if prefix else (updated_body.rstrip() + "\n")
+    )
+    if new_content == current:
+        return None
+
+    skill.path.write_text(new_content, encoding="utf-8")
+    memory.record_skill_lifecycle_event(
+        skill.name,
+        "rollback",
+        status="rolled_back",
+        path=str(skill.path),
+        reason="Negative feedback or evaluator score reverted the last automatic rewrite",
+        evidence=feedback.evidence,
+        content_before=current,
+        content_after=new_content,
+    )
+    return UpdateResult(
+        path=str(skill.path),
+        strategy="skill_rollback",
+        has_changes=True,
+        old_content=current,
+        new_content=new_content,
+    )
+
+
+def _build_rewritten_instructions(
+    instructions_body: str,
+    result: AnalysisResult,
+    feedback: SkillFeedbackSummary,
+) -> str:
+    base = _strip_managed_adjustments(instructions_body).rstrip()
+    lines = ["## Instructions", ""]
+    if base:
+        lines.append(base)
+        lines.append("")
+
+    lines.append(_MANAGED_ADJUSTMENTS_HEADING)
+    lines.append("")
+    if result.top_performers:
+        exemplar_titles = ", ".join(record.title for record in result.top_performers[:2])
+        lines.append(
+            f"- Mirror the specificity and framing seen in top performers such as: {exemplar_titles}."
+        )
+    for pattern in result.patterns:
+        lines.append(f"- Reinforce this observed pattern: {pattern}.")
+    lines.append(
+        "- Keep the manual guidance above intact; treat these adjustments as evidence-backed overrides only."
+    )
+    if feedback.average_score is not None:
+        lines.append(
+            f"- Recent evaluator average is {feedback.average_score:.2f}; keep iterating only while evidence stays positive."
+        )
+    return "\n".join(lines)
+
+
+def _strip_managed_adjustments(instructions_body: str) -> str:
+    lines = instructions_body.rstrip().split("\n")
+    output: list[str] = []
+    skipping = False
+
+    for line in lines:
+        if line.strip() == _MANAGED_ADJUSTMENTS_HEADING:
+            skipping = True
+            continue
+        if skipping and line.startswith("## "):
+            skipping = False
+        if not skipping:
+            output.append(line)
+
+    return "\n".join(output).rstrip()
+
+
+def _split_frontmatter(content: str) -> tuple[str, str]:
+    match = _FRONTMATTER_RE.match(content)
+    if not match:
+        return "", content
+    return match.group(0), content[match.end() :].lstrip("\n")
+
+
+def _extract_section(body: str, heading: str) -> str | None:
+    target = heading.lstrip("#").strip()
+    lines = body.split("\n")
+    start_idx: int | None = None
+    start_level: int | None = None
+
+    for i, line in enumerate(lines):
+        match = _HEADING_RE.match(line)
+        if not match:
+            continue
+        level = len(match.group(1))
+        title = match.group(2).strip()
+        if start_idx is None and title == target:
+            start_idx = i
+            start_level = level
+        elif start_idx is not None and level <= (start_level or 0):
+            return "\n".join(lines[start_idx + 1 : i]).strip()
+
+    if start_idx is not None:
+        return "\n".join(lines[start_idx + 1 :]).strip()
+    return None
 
 
 def build_skill_reference_content(section: str, result: AnalysisResult) -> str:

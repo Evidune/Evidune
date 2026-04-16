@@ -23,6 +23,7 @@ __all__ = ["MemoryStore", "Fact", "Message"]
 
 _PLAN_STATUSES = {"pending", "in_progress", "completed"}
 _CONVERSATION_MODES = {"plan", "execute"}
+_EMERGED_SKILL_STATUSES = {"active", "pending_review", "disabled", "rolled_back"}
 
 
 class MemoryStore:
@@ -92,6 +93,21 @@ class MemoryStore:
 
     def _json_dump(self, value: Any) -> str:
         return json.dumps(value, ensure_ascii=False)
+
+    def _json_load_dict(self, raw: str | None) -> dict[str, Any]:
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _normalise_emerged_skill_status(self, status: str) -> str:
+        if status not in _EMERGED_SKILL_STATUSES:
+            valid = ", ".join(sorted(_EMERGED_SKILL_STATUSES))
+            raise ValueError(f"Invalid emerged skill status {status!r}; expected one of {valid}")
+        return status
 
     def _normalise_iteration_updates(
         self, updates: list[dict[str, Any]] | None
@@ -549,30 +565,43 @@ class MemoryStore:
         name: str,
         source_conversation_id: str | None = None,
         evaluation_criteria: str = "",
-        status: str = "pending_review",
+        status: str = "active",
+        path: str = "",
+        reason: str = "",
+        evidence: dict[str, Any] | None = None,
     ) -> None:
         """Record metadata about a skill that emerged from a conversation."""
+        normalised_status = self._normalise_emerged_skill_status(status)
         with self._lock:
             now = self._now()
             self._conn.execute(
                 """INSERT INTO emerged_skills
-                   (name, source_conversation_id, evaluation_criteria,
-                    version, status, created_at, updated_at)
-                   VALUES (?, ?, ?, 1, ?, ?, ?)
+                   (name, source_conversation_id, evaluation_criteria, path,
+                    version, status, reason, evidence_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
                    ON CONFLICT(name) DO UPDATE SET
                      evaluation_criteria = ?,
+                     path = ?,
                      status = ?,
+                     reason = ?,
+                     evidence_json = ?,
                      updated_at = ?,
                      version = version + 1""",
                 (
                     name,
                     source_conversation_id,
                     evaluation_criteria,
-                    status,
+                    path,
+                    normalised_status,
+                    reason,
+                    self._json_dump(evidence or {}),
                     now,
                     now,
                     evaluation_criteria,
-                    status,
+                    path,
+                    normalised_status,
+                    reason,
+                    self._json_dump(evidence or {}),
                     now,
                 ),
             )
@@ -583,20 +612,143 @@ class MemoryStore:
             row = self._conn.execute(
                 "SELECT * FROM emerged_skills WHERE name = ?", (name,)
             ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        payload = dict(row)
+        payload["evidence"] = self._json_load_dict(payload.pop("evidence_json", ""))
+        return payload
 
     def list_emerged_skills(self, status: str | None = None) -> list[dict]:
         with self._lock:
             if status:
+                normalised_status = self._normalise_emerged_skill_status(status)
                 rows = self._conn.execute(
                     "SELECT * FROM emerged_skills WHERE status = ? ORDER BY updated_at DESC",
-                    (status,),
+                    (normalised_status,),
                 ).fetchall()
             else:
                 rows = self._conn.execute(
                     "SELECT * FROM emerged_skills ORDER BY updated_at DESC"
                 ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for row in rows:
+            payload = dict(row)
+            payload["evidence"] = self._json_load_dict(payload.pop("evidence_json", ""))
+            result.append(payload)
+        return result
+
+    def set_emerged_skill_status(
+        self,
+        name: str,
+        status: str,
+        reason: str = "",
+        evidence: dict[str, Any] | None = None,
+    ) -> bool:
+        """Update lifecycle state for an emerged skill."""
+        normalised_status = self._normalise_emerged_skill_status(status)
+        with self._lock:
+            cursor = self._conn.execute(
+                """UPDATE emerged_skills
+                   SET status = ?, reason = ?, evidence_json = ?, updated_at = ?
+                   WHERE name = ?""",
+                (
+                    normalised_status,
+                    reason,
+                    self._json_dump(evidence or {}),
+                    self._now(),
+                    name,
+                ),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def record_skill_lifecycle_event(
+        self,
+        skill_name: str,
+        action: str,
+        *,
+        status: str = "",
+        path: str = "",
+        reason: str = "",
+        evidence: dict[str, Any] | None = None,
+        content_before: str = "",
+        content_after: str = "",
+    ) -> int:
+        """Append an auditable lifecycle event for a skill."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO skill_lifecycle_events
+                   (skill_name, action, status, path, reason, evidence_json,
+                    content_before, content_after, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    skill_name,
+                    action,
+                    status,
+                    path,
+                    reason,
+                    self._json_dump(evidence or {}),
+                    content_before,
+                    content_after,
+                    self._now(),
+                ),
+            )
+            self._conn.commit()
+            return cursor.lastrowid or 0
+
+    def list_skill_lifecycle_events(
+        self, skill_name: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Return recent lifecycle events, newest first."""
+        with self._lock:
+            if skill_name:
+                rows = self._conn.execute(
+                    """SELECT * FROM skill_lifecycle_events
+                       WHERE skill_name = ?
+                       ORDER BY id DESC
+                       LIMIT ?""",
+                    (skill_name, limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """SELECT * FROM skill_lifecycle_events
+                       ORDER BY id DESC
+                       LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+        events = []
+        for row in rows:
+            payload = dict(row)
+            payload["evidence"] = self._json_load_dict(payload.pop("evidence_json", ""))
+            events.append(payload)
+        return events
+
+    def get_latest_skill_lifecycle_event(
+        self, skill_name: str, action: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return the newest lifecycle event for a skill, optionally filtered by action."""
+        with self._lock:
+            if action:
+                row = self._conn.execute(
+                    """SELECT * FROM skill_lifecycle_events
+                       WHERE skill_name = ? AND action = ?
+                       ORDER BY id DESC
+                       LIMIT 1""",
+                    (skill_name, action),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    """SELECT * FROM skill_lifecycle_events
+                       WHERE skill_name = ?
+                       ORDER BY id DESC
+                       LIMIT 1""",
+                    (skill_name,),
+                ).fetchone()
+        if not row:
+            return None
+        payload = dict(row)
+        payload["evidence"] = self._json_load_dict(payload.pop("evidence_json", ""))
+        return payload
 
     # --- Iteration Run API ---
 

@@ -333,12 +333,18 @@ class TestEmergedSkills:
             name="my-emerged",
             source_conversation_id="conv-1",
             evaluation_criteria="user accepts output without modification",
+            path="/tmp/my-emerged/SKILL.md",
+            reason="Auto activated",
+            evidence={"pattern_confidence": 0.9},
         )
         skill = store.get_emerged_skill("my-emerged")
         assert skill is not None
         assert skill["name"] == "my-emerged"
         assert skill["source_conversation_id"] == "conv-1"
-        assert skill["status"] == "pending_review"
+        assert skill["status"] == "active"
+        assert skill["path"] == "/tmp/my-emerged/SKILL.md"
+        assert skill["reason"] == "Auto activated"
+        assert skill["evidence"] == {"pattern_confidence": 0.9}
         assert skill["version"] == 1
 
     def test_register_twice_increments_version(self, store: MemoryStore):
@@ -363,6 +369,40 @@ class TestEmergedSkills:
         active = store.list_emerged_skills(status="active")
         assert len(active) == 1
         assert active[0]["name"] == "a"
+
+    def test_set_status_updates_reason_and_evidence(self, store: MemoryStore):
+        store.register_emerged_skill(name="a", status="active")
+        ok = store.set_emerged_skill_status(
+            "a",
+            "rolled_back",
+            reason="Negative feedback",
+            evidence={"combined_confidence": -1.0},
+        )
+        assert ok is True
+        skill = store.get_emerged_skill("a")
+        assert skill["status"] == "rolled_back"
+        assert skill["reason"] == "Negative feedback"
+        assert skill["evidence"] == {"combined_confidence": -1.0}
+
+    def test_record_and_list_lifecycle_events(self, store: MemoryStore):
+        event_id = store.record_skill_lifecycle_event(
+            "a",
+            "activate",
+            status="active",
+            path="/tmp/a/SKILL.md",
+            reason="Auto activated",
+            evidence={"pattern_confidence": 0.8},
+            content_after="skill body",
+        )
+        assert event_id > 0
+        events = store.list_skill_lifecycle_events("a")
+        assert len(events) == 1
+        assert events[0]["action"] == "activate"
+        assert events[0]["status"] == "active"
+        assert events[0]["evidence"] == {"pattern_confidence": 0.8}
+        latest = store.get_latest_skill_lifecycle_event("a", action="activate")
+        assert latest is not None
+        assert latest["id"] == event_id
 
 
 class TestIterationRuns:

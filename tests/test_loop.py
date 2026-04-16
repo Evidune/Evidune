@@ -5,8 +5,9 @@ from pathlib import Path
 import yaml
 
 from core.config import load_config
-from core.loop import main, run_iteration
+from core.loop import _load_active_emerged_skills, main, run_iteration
 from memory.store import MemoryStore
+from skills.registry import SkillRegistry
 
 
 def _write(path: Path, content: str) -> Path:
@@ -119,3 +120,23 @@ class TestIterationLedger:
         assert f"Iteration Run #{report.extra['iteration_run_id']}" in shown
         assert "Patterns:" in shown
         assert "Updates:" in shown
+
+    def test_load_active_emerged_skills_from_persisted_metadata(self, tmp_path: Path):
+        emerged_path = _write(
+            tmp_path / ".aiflay" / "emerged_skills" / "explain-topic" / "SKILL.md",
+            "---\nname: explain-topic\ndescription: Explain\n---\n\n## Instructions\nDo it.\n",
+        )
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            store.register_emerged_skill(
+                name="explain-topic",
+                status="active",
+                path=str(emerged_path),
+            )
+            registry = SkillRegistry()
+            loaded = _load_active_emerged_skills(registry, store, emerged_path.parent.parent)
+        finally:
+            store.close()
+
+        assert loaded == 1
+        assert registry.get("explain-topic") is not None

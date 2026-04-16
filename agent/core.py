@@ -5,6 +5,8 @@ from __future__ import annotations
 from agent.fact_extractor import FactExtractor
 from agent.llm import LLMClient
 from agent.pattern_detector import PatternDetector
+from agent.self_evaluator import SelfEvaluator
+from agent.skill_feedback import summarise_skill_feedback
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
@@ -35,6 +37,7 @@ class AgentCore:
         fact_extractor: FactExtractor | None = None,
         fact_extraction_every_n_turns: int = 5,
         fact_extraction_min_confidence: float = 0.7,
+        self_evaluator: SelfEvaluator | None = None,
         pattern_detector: PatternDetector | None = None,
         skill_synthesizer: SkillSynthesizer | None = None,
         emergence_every_n_turns: int = 10,
@@ -54,6 +57,7 @@ class AgentCore:
         self.fact_extractor = fact_extractor
         self.fact_extraction_every_n_turns = fact_extraction_every_n_turns
         self.fact_extraction_min_confidence = fact_extraction_min_confidence
+        self.self_evaluator = self_evaluator
         self.pattern_detector = pattern_detector
         self.skill_synthesizer = skill_synthesizer
         self.emergence_every_n_turns = emergence_every_n_turns
@@ -219,6 +223,7 @@ class AgentCore:
         # Ensure the conversation exists with the originating gateway/channel
         # before any later reads or writes. Web UI lists are channel-scoped.
         self.memory.ensure_conversation(message.conversation_id, channel=message.channel)
+        self._prune_inactive_emerged_skills()
 
         # 1. Identity + mode
         conversation_meta = self.memory.get_conversation(message.conversation_id)
@@ -241,7 +246,8 @@ class AgentCore:
 
         # 4. Relevant skills
         relevant_skills = self.skills.find_relevant(message.text)
-        if not relevant_skills:
+        used_skill_fallback = not relevant_skills
+        if used_skill_fallback:
             relevant_skills = self.skills.all()
 
         # 5. Build messages
@@ -266,6 +272,13 @@ class AgentCore:
                 conversation_id=message.conversation_id,
             )
             execution_ids.append(eid)
+        evaluated_count = await self._maybe_evaluate_executions(
+            relevant_skills if not used_skill_fallback else [],
+            message.text,
+            response_text,
+            execution_ids,
+        )
+        lifecycle_updates = self._maybe_reconcile_skill_feedback(relevant_skills)
 
         # 9. Auto fact extraction (every N turns, when enabled)
         extracted_count = await self._maybe_extract_facts(message, identity)
@@ -291,7 +304,9 @@ class AgentCore:
                 "mode": mode,
                 "plan": current_plan,
                 "facts_extracted": extracted_count,
+                "evaluations_recorded": evaluated_count,
                 "emerged_skill": emerged_skill,
+                "skill_lifecycle_updates": lifecycle_updates,
                 "new_title": new_title,
                 "tool_trace": tool_trace,
             },
@@ -325,6 +340,83 @@ class AgentCore:
             self.memory.set_fact(c.key, c.value, source="auto", namespace=namespace)
             saved += 1
         return saved
+
+    async def _maybe_evaluate_executions(
+        self,
+        skills: list,
+        user_input: str,
+        assistant_output: str,
+        execution_ids: list[int],
+    ) -> int:
+        """Persist cross-model evaluation scores for matched skill executions."""
+        if not self.self_evaluator:
+            return 0
+
+        saved = 0
+        for skill, execution_id in zip(skills, execution_ids, strict=False):
+            try:
+                evaluation = await self.self_evaluator.evaluate(
+                    skill,
+                    user_input,
+                    assistant_output,
+                )
+            except Exception:
+                continue
+            if self.memory.update_execution_score(
+                execution_id,
+                evaluation.score,
+                evaluation.reasoning,
+            ):
+                saved += 1
+        return saved
+
+    def _prune_inactive_emerged_skills(self) -> None:
+        """Drop disabled or rolled-back emerged skills from the live registry."""
+        inactive = self.memory.list_emerged_skills(
+            status="disabled"
+        ) + self.memory.list_emerged_skills(status="rolled_back")
+        for skill_meta in inactive:
+            self.skills.unregister(skill_meta["name"])
+
+    def _maybe_reconcile_skill_feedback(self, skills: list) -> list[str]:
+        """Use stored signals and evaluator scores to retire bad emerged skills."""
+        updated: list[str] = []
+        seen: set[str] = set()
+
+        for skill in skills:
+            if skill.name in seen:
+                continue
+            seen.add(skill.name)
+
+            emerged = self.memory.get_emerged_skill(skill.name)
+            if not emerged or emerged.get("status") != "active":
+                continue
+
+            summary = summarise_skill_feedback(
+                self.memory.get_skill_executions(skill.name, limit=20)
+            )
+            if not summary.should_disable:
+                continue
+
+            reason = "Automatic rollback after negative feedback or evaluator score"
+            self.memory.set_emerged_skill_status(
+                skill.name,
+                "rolled_back",
+                reason=reason,
+                evidence=summary.evidence,
+            )
+            self.memory.record_skill_lifecycle_event(
+                skill.name,
+                "rollback",
+                status="rolled_back",
+                path=emerged.get("path", ""),
+                reason=reason,
+                evidence=summary.evidence,
+            )
+            self.skills.unregister(skill.name)
+            updated.append(skill.name)
+
+        return updated
 
     async def _maybe_emerge_skill(self, message: InboundMessage) -> str | None:
         """Detect and synthesise a new skill from recent conversation.
@@ -363,20 +455,58 @@ class AgentCore:
         if result is None:
             return None
 
-        # Register in emerged_skills table (status=pending_review)
+        try:
+            skill = parse_skill(result.path)
+        except Exception:
+            reason = "Synthesised skill could not be parsed for activation"
+            evidence = {
+                "pattern_confidence": pattern.confidence,
+                "pattern_rationale": pattern.rationale,
+            }
+            self.memory.register_emerged_skill(
+                name=result.name,
+                source_conversation_id=conv_id,
+                evaluation_criteria=pattern.rationale,
+                status="disabled",
+                path=str(result.path),
+                reason=reason,
+                evidence=evidence,
+            )
+            self.memory.record_skill_lifecycle_event(
+                result.name,
+                "activation_failed",
+                status="disabled",
+                path=str(result.path),
+                reason=reason,
+                evidence=evidence,
+                content_after=result.skill_md,
+            )
+            return None
+
+        evidence = {
+            "pattern_confidence": pattern.confidence,
+            "pattern_rationale": pattern.rationale,
+            "pattern_description": pattern.description,
+        }
         self.memory.register_emerged_skill(
             name=result.name,
             source_conversation_id=conv_id,
             evaluation_criteria=pattern.rationale,
-            status="pending_review",
+            status="active",
+            path=str(result.path),
+            reason="Auto-activated from conversation pattern",
+            evidence=evidence,
         )
-
-        # Load into the live registry so it can be used immediately
-        try:
-            skill = parse_skill(result.path)
-            self.skills.register(skill)
-        except Exception:
-            pass  # Synthesis succeeded but parsing failed — still recorded
+        self.memory.record_skill_lifecycle_event(
+            result.name,
+            "activate",
+            status="active",
+            path=str(result.path),
+            reason="Auto-activated from conversation pattern",
+            evidence=evidence,
+            content_after=result.skill_md,
+        )
+        self.skills.register(skill)
 
         return result.name
 

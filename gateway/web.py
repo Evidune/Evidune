@@ -310,7 +310,38 @@ class WebGateway(Gateway):
         existing = execs.get("signals", {})
         existing[signal_type] = value
         ok = self._memory_store.update_execution_signals(execution_id, existing)
-        return {"ok": ok, "execution_id": execution_id, "signals": existing}
+        skill_name = execs.get("skill_name", "")
+        emerged = self._memory_store.get_emerged_skill(skill_name) if skill_name else None
+        rolled_back = False
+        if emerged and emerged.get("status") == "active":
+            from agent.skill_feedback import summarise_skill_feedback
+
+            summary = summarise_skill_feedback(
+                self._memory_store.get_skill_executions(skill_name, limit=20)
+            )
+            if summary.should_disable:
+                reason = "Negative user feedback rolled back the emerged skill"
+                self._memory_store.set_emerged_skill_status(
+                    skill_name,
+                    "rolled_back",
+                    reason=reason,
+                    evidence=summary.evidence,
+                )
+                self._memory_store.record_skill_lifecycle_event(
+                    skill_name,
+                    "rollback",
+                    status="rolled_back",
+                    path=emerged.get("path", ""),
+                    reason=reason,
+                    evidence=summary.evidence,
+                )
+                rolled_back = True
+        return {
+            "ok": ok,
+            "execution_id": execution_id,
+            "signals": existing,
+            "rolled_back": rolled_back,
+        }
 
     # --- Conversation management ---
 

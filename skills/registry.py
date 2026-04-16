@@ -39,6 +39,10 @@ class SkillRegistry:
         """Register a skill instance directly (e.g. for emerged skills)."""
         self._skills[skill.name] = skill
 
+    def unregister(self, name: str) -> bool:
+        """Remove a skill from the live registry if it exists."""
+        return self._skills.pop(name, None) is not None
+
     # --- Lookup ---
 
     def get(self, name: str) -> Skill | None:

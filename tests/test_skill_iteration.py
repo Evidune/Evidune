@@ -1,8 +1,8 @@
 """End-to-end integration tests for skill self-iteration.
 
 Verifies Aiflay's core differentiator: SKILL.md files with outcome_metrics: true
-get their Reference Data section auto-updated by the iteration loop, based on
-real-world business metrics.
+can be rewritten and rolled back by the iteration loop, based on
+real-world business metrics and execution evidence.
 """
 
 from pathlib import Path
@@ -11,6 +11,7 @@ import yaml
 
 from core.config import load_config
 from core.loop import run_iteration
+from memory.store import MemoryStore
 
 
 def _write(path: Path, content: str) -> Path:
@@ -109,9 +110,10 @@ class TestSkillSelfIteration:
         # Placeholder text is gone
         assert "(placeholder — will be replaced by aiflay)" not in skill_content
 
-        # Other sections are preserved
+        # Instructions are rewritten with a managed adjustment block
         assert "## Instructions" in skill_content
         assert "Write good stuff." in skill_content
+        assert "### Outcome-Backed Adjustments" in skill_content
         assert "## Footer" in skill_content
         assert "Do not touch this section." in skill_content
 
@@ -202,3 +204,28 @@ class TestSkillSelfIteration:
 
         # Default "## Reference Data" section was NOT touched
         assert "This one should NOT be updated." in skill_content
+
+    def test_rolls_back_previous_rewrite_after_negative_feedback(self, tmp_path: Path):
+        cfg_path = _setup_project(tmp_path)
+        config = load_config(cfg_path)
+
+        run_iteration(config, base_dir=tmp_path)
+
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            store.record_execution(
+                skill_name="write-article",
+                user_input="write me an article",
+                assistant_output="bad output",
+                signals={"thumbs_down": True},
+                cross_model_score=0.1,
+            )
+        finally:
+            store.close()
+
+        run_iteration(config, base_dir=tmp_path)
+        skill_content = (tmp_path / "skills" / "write-article" / "SKILL.md").read_text()
+
+        assert "Write good stuff." in skill_content
+        assert "### Outcome-Backed Adjustments" not in skill_content
+        assert "Auto-updated by aiflay" in skill_content
