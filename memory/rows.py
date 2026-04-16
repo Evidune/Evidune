@@ -105,3 +105,32 @@ def row_to_harness_artifact(row) -> dict[str, Any]:
         "meta": json.loads(row["meta_json"] or "{}"),
         "created_at": row["created_at"],
     }
+
+
+def row_to_skill_state(row) -> dict[str, Any]:
+    return {
+        "skill_name": row["skill_name"],
+        "origin": row["origin"],
+        "path": row["path"],
+        "status": row["status"],
+        "reason": row["reason"],
+        "evidence": json.loads(row["evidence_json"] or "{}"),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def row_to_skill_lifecycle_event(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "skill_name": row["skill_name"],
+        "action": row["action"],
+        "status": row["status"],
+        "path": row["path"],
+        "harness_task_id": row["harness_task_id"] or "",
+        "reason": row["reason"],
+        "evidence": json.loads(row["evidence_json"] or "{}"),
+        "content_before": row["content_before"],
+        "content_after": row["content_after"],
+        "created_at": row["created_at"],
+    }

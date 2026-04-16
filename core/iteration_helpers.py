@@ -43,6 +43,24 @@ def update_outcome_skills(
     if config.agent is not None:
         workflow_enabled = getattr(config.agent.harness, "iteration_workflow_enabled", True)
     for skill in registry.get_outcome_skills():
+        origin = "emerged" if memory.get_emerged_skill(skill.name) else "base"
+        memory.upsert_skill_state(
+            skill.name,
+            origin=origin,
+            path=str(skill.path),
+            status=memory.resolve_skill_status(skill.name),
+        )
+        if memory.resolve_skill_status(skill.name) != "active":
+            skill_updates.append(
+                UpdateResult(
+                    path=str(skill.path),
+                    strategy="skill_skipped",
+                    has_changes=False,
+                    old_content="",
+                    new_content="",
+                )
+            )
+            continue
         feedback = summarise_skill_feedback(memory.get_skill_executions(skill.name, limit=20))
         if workflow_enabled:
             update = _update_outcome_skill(skill, result, feedback, memory)
@@ -59,15 +77,20 @@ def update_outcome_skills(
 
 
 def _update_outcome_skill(skill, result, feedback: SkillFeedbackSummary, memory) -> UpdateResult:
-    from core.iteration_harness import IterationHarness
+    from core.iteration_harness import IterationHarness, build_decision_packet
 
     current = skill.path.read_text(encoding="utf-8")
     workflow = IterationHarness(memory)
     decision = workflow.run(
-        skill=skill,
-        result=result,
-        feedback=feedback,
-        current=current,
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=current,
+            feedback=feedback,
+            result=result,
+            surface="run",
+            task_kind="skill_iteration",
+        ),
     )
     return decision.update
 

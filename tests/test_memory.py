@@ -383,6 +383,10 @@ class TestEmergedSkills:
         assert skill["status"] == "rolled_back"
         assert skill["reason"] == "Negative feedback"
         assert skill["evidence"] == {"combined_confidence": -1.0}
+        state = store.get_skill_state("a")
+        assert state is not None
+        assert state["status"] == "rolled_back"
+        assert state["origin"] == "emerged"
 
     def test_record_and_list_lifecycle_events(self, store: MemoryStore):
         event_id = store.record_skill_lifecycle_event(
@@ -390,6 +394,7 @@ class TestEmergedSkills:
             "activate",
             status="active",
             path="/tmp/a/SKILL.md",
+            harness_task_id="task-1",
             reason="Auto activated",
             evidence={"pattern_confidence": 0.8},
             content_after="skill body",
@@ -399,10 +404,66 @@ class TestEmergedSkills:
         assert len(events) == 1
         assert events[0]["action"] == "activate"
         assert events[0]["status"] == "active"
+        assert events[0]["harness_task_id"] == "task-1"
         assert events[0]["evidence"] == {"pattern_confidence": 0.8}
         latest = store.get_latest_skill_lifecycle_event("a", action="activate")
         assert latest is not None
         assert latest["id"] == event_id
+
+
+class TestSkillStates:
+    def test_upsert_and_get_base_skill_state(self, store: MemoryStore):
+        store.upsert_skill_state(
+            "writer",
+            origin="base",
+            path="/tmp/writer/SKILL.md",
+            status="disabled",
+            reason="Operator hold",
+            evidence={"signal": "thumbs_down"},
+        )
+        state = store.get_skill_state("writer")
+        assert state is not None
+        assert state["skill_name"] == "writer"
+        assert state["origin"] == "base"
+        assert state["status"] == "disabled"
+        assert state["path"] == "/tmp/writer/SKILL.md"
+        assert state["reason"] == "Operator hold"
+        assert state["evidence"] == {"signal": "thumbs_down"}
+
+    def test_set_skill_state_updates_existing_row(self, store: MemoryStore):
+        store.upsert_skill_state("writer", origin="base", path="/tmp/writer/SKILL.md")
+        assert (
+            store.set_skill_state(
+                "writer",
+                "rolled_back",
+                reason="Negative evidence",
+                evidence={"combined_confidence": -0.8},
+            )
+            is True
+        )
+        state = store.get_skill_state("writer")
+        assert state["status"] == "rolled_back"
+        assert state["reason"] == "Negative evidence"
+        assert state["evidence"] == {"combined_confidence": -0.8}
+
+    def test_resolve_skill_status_defaults_to_active(self, store: MemoryStore):
+        assert store.resolve_skill_status("missing") == "active"
+
+    def test_register_emerged_skill_mirrors_skill_state(self, store: MemoryStore):
+        store.register_emerged_skill(
+            name="emerged", status="pending_review", path="/tmp/e/SKILL.md"
+        )
+        state = store.get_skill_state("emerged")
+        assert state is not None
+        assert state["origin"] == "emerged"
+        assert state["status"] == "pending_review"
+
+    def test_list_skill_states_filters_by_status(self, store: MemoryStore):
+        store.upsert_skill_state("a", origin="base", status="active")
+        store.upsert_skill_state("b", origin="emerged", status="disabled")
+        disabled = store.list_skill_states(status="disabled")
+        assert len(disabled) == 1
+        assert disabled[0]["skill_name"] == "b"
 
 
 class TestIterationRuns:

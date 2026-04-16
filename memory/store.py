@@ -22,6 +22,8 @@ from memory.rows import (
     row_to_harness_step,
     row_to_harness_task,
     row_to_iteration_run,
+    row_to_skill_lifecycle_event,
+    row_to_skill_state,
 )
 from memory.schema import init_schema
 from memory.store_models import Fact, Message  # noqa: F401 — re-exported
@@ -31,6 +33,7 @@ __all__ = ["MemoryStore", "Fact", "Message"]
 _PLAN_STATUSES = {"pending", "in_progress", "completed"}
 _CONVERSATION_MODES = {"plan", "execute"}
 _EMERGED_SKILL_STATUSES = {"active", "pending_review", "disabled", "rolled_back"}
+_SKILL_STATE_ORIGINS = {"base", "emerged"}
 
 
 class MemoryStore:
@@ -115,6 +118,12 @@ class MemoryStore:
             valid = ", ".join(sorted(_EMERGED_SKILL_STATUSES))
             raise ValueError(f"Invalid emerged skill status {status!r}; expected one of {valid}")
         return status
+
+    def _normalise_skill_state_origin(self, origin: str) -> str:
+        if origin not in _SKILL_STATE_ORIGINS:
+            valid = ", ".join(sorted(_SKILL_STATE_ORIGINS))
+            raise ValueError(f"Invalid skill state origin {origin!r}; expected one of {valid}")
+        return origin
 
     def _normalise_iteration_updates(
         self, updates: list[dict[str, Any]] | None
@@ -875,6 +884,134 @@ class MemoryStore:
             rows = self._conn.execute(query, params).fetchall()
         return [row_to_harness_artifact(row) for row in rows]
 
+    # --- Skill State API ---
+
+    def upsert_skill_state(
+        self,
+        skill_name: str,
+        *,
+        origin: str,
+        path: str = "",
+        status: str = "active",
+        reason: str = "",
+        evidence: dict[str, Any] | None = None,
+        mirror_emerged: bool = True,
+    ) -> None:
+        normalised_origin = self._normalise_skill_state_origin(origin)
+        normalised_status = self._normalise_emerged_skill_status(status)
+        with self._lock:
+            now = self._now()
+            self._conn.execute(
+                """INSERT INTO skill_states
+                   (skill_name, origin, path, status, reason, evidence_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(skill_name) DO UPDATE SET
+                     origin = excluded.origin,
+                     path = CASE
+                       WHEN excluded.path != '' THEN excluded.path
+                       ELSE skill_states.path
+                     END,
+                     status = excluded.status,
+                     reason = excluded.reason,
+                     evidence_json = excluded.evidence_json,
+                     updated_at = excluded.updated_at""",
+                (
+                    skill_name,
+                    normalised_origin,
+                    path,
+                    normalised_status,
+                    reason,
+                    self._json_dump(evidence or {}),
+                    now,
+                    now,
+                ),
+            )
+            if mirror_emerged and normalised_origin == "emerged":
+                self._conn.execute(
+                    """UPDATE emerged_skills
+                       SET status = ?, reason = ?, evidence_json = ?, updated_at = ?,
+                           path = CASE WHEN ? != '' THEN ? ELSE path END
+                       WHERE name = ?""",
+                    (
+                        normalised_status,
+                        reason,
+                        self._json_dump(evidence or {}),
+                        now,
+                        path,
+                        path,
+                        skill_name,
+                    ),
+                )
+            self._conn.commit()
+
+    def get_skill_state(self, skill_name: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM skill_states WHERE skill_name = ?",
+                (skill_name,),
+            ).fetchone()
+        return row_to_skill_state(row) if row else None
+
+    def list_skill_states(self, status: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            if status is not None:
+                normalised_status = self._normalise_emerged_skill_status(status)
+                rows = self._conn.execute(
+                    """SELECT * FROM skill_states
+                       WHERE status = ?
+                       ORDER BY updated_at DESC""",
+                    (normalised_status,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM skill_states ORDER BY updated_at DESC"
+                ).fetchall()
+        return [row_to_skill_state(row) for row in rows]
+
+    def set_skill_state(
+        self,
+        skill_name: str,
+        status: str,
+        *,
+        reason: str = "",
+        evidence: dict[str, Any] | None = None,
+        origin: str | None = None,
+        path: str | None = None,
+    ) -> bool:
+        normalised_status = self._normalise_emerged_skill_status(status)
+        existing = self.get_skill_state(skill_name)
+        emerged = self.get_emerged_skill(skill_name)
+        if existing is None and origin is None and emerged is None:
+            return False
+        resolved_origin = origin or (
+            existing["origin"]
+            if existing is not None
+            else ("emerged" if emerged is not None else "base")
+        )
+        resolved_path = path
+        if resolved_path is None:
+            if existing is not None and existing.get("path"):
+                resolved_path = existing["path"]
+            elif emerged is not None:
+                resolved_path = emerged.get("path", "")
+            else:
+                resolved_path = ""
+        self.upsert_skill_state(
+            skill_name,
+            origin=resolved_origin,
+            path=resolved_path,
+            status=normalised_status,
+            reason=reason,
+            evidence=evidence,
+        )
+        return True
+
+    def resolve_skill_status(self, skill_name: str, default: str = "active") -> str:
+        state = self.get_skill_state(skill_name)
+        if state is None:
+            return default
+        return state["status"]
+
     # --- Emerged Skill API ---
 
     def register_emerged_skill(
@@ -923,6 +1060,15 @@ class MemoryStore:
                 ),
             )
             self._conn.commit()
+        self.upsert_skill_state(
+            name,
+            origin="emerged",
+            path=path,
+            status=normalised_status,
+            reason=reason,
+            evidence=evidence,
+            mirror_emerged=False,
+        )
 
     def get_emerged_skill(self, name: str) -> dict | None:
         with self._lock:
@@ -964,6 +1110,10 @@ class MemoryStore:
         """Update lifecycle state for an emerged skill."""
         normalised_status = self._normalise_emerged_skill_status(status)
         with self._lock:
+            row = self._conn.execute(
+                "SELECT path FROM emerged_skills WHERE name = ?",
+                (name,),
+            ).fetchone()
             cursor = self._conn.execute(
                 """UPDATE emerged_skills
                    SET status = ?, reason = ?, evidence_json = ?, updated_at = ?
@@ -977,7 +1127,18 @@ class MemoryStore:
                 ),
             )
             self._conn.commit()
-            return cursor.rowcount > 0
+        if cursor.rowcount > 0:
+            self.upsert_skill_state(
+                name,
+                origin="emerged",
+                path=row["path"] if row else "",
+                status=normalised_status,
+                reason=reason,
+                evidence=evidence,
+                mirror_emerged=False,
+            )
+            return True
+        return False
 
     def record_skill_lifecycle_event(
         self,
@@ -986,6 +1147,7 @@ class MemoryStore:
         *,
         status: str = "",
         path: str = "",
+        harness_task_id: str = "",
         reason: str = "",
         evidence: dict[str, Any] | None = None,
         content_before: str = "",
@@ -995,14 +1157,15 @@ class MemoryStore:
         with self._lock:
             cursor = self._conn.execute(
                 """INSERT INTO skill_lifecycle_events
-                   (skill_name, action, status, path, reason, evidence_json,
+                   (skill_name, action, status, path, harness_task_id, reason, evidence_json,
                     content_before, content_after, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     skill_name,
                     action,
                     status,
                     path,
+                    harness_task_id,
                     reason,
                     self._json_dump(evidence or {}),
                     content_before,
@@ -1033,12 +1196,7 @@ class MemoryStore:
                        LIMIT ?""",
                     (limit,),
                 ).fetchall()
-        events = []
-        for row in rows:
-            payload = dict(row)
-            payload["evidence"] = self._json_load_dict(payload.pop("evidence_json", ""))
-            events.append(payload)
-        return events
+        return [row_to_skill_lifecycle_event(row) for row in rows]
 
     def get_latest_skill_lifecycle_event(
         self, skill_name: str, action: str | None = None
@@ -1063,9 +1221,7 @@ class MemoryStore:
                 ).fetchone()
         if not row:
             return None
-        payload = dict(row)
-        payload["evidence"] = self._json_load_dict(payload.pop("evidence_json", ""))
-        return payload
+        return row_to_skill_lifecycle_event(row)
 
     # --- Iteration Run API ---
 

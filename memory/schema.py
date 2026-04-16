@@ -50,12 +50,24 @@ CREATE TABLE IF NOT EXISTS emerged_skills (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS skill_states (
+    skill_name TEXT PRIMARY KEY,
+    origin TEXT NOT NULL DEFAULT 'base',
+    path TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
+    reason TEXT DEFAULT '',
+    evidence_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS skill_lifecycle_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     skill_name TEXT NOT NULL,
     action TEXT NOT NULL,
     status TEXT DEFAULT '',
     path TEXT DEFAULT '',
+    harness_task_id TEXT DEFAULT '',
     reason TEXT DEFAULT '',
     evidence_json TEXT DEFAULT '{}',
     content_before TEXT DEFAULT '',
@@ -189,6 +201,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _migrate_conversations_metadata(conn)
     _migrate_skill_executions(conn)
     _migrate_emerged_skills(conn)
+    _migrate_skill_states(conn)
+    _migrate_skill_lifecycle_events(conn)
     _ensure_indexes(conn)
     conn.commit()
 
@@ -242,6 +256,25 @@ def _migrate_emerged_skills(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE emerged_skills ADD COLUMN evidence_json TEXT DEFAULT '{}'")
 
 
+def _migrate_skill_states(conn: sqlite3.Connection) -> None:
+    """Seed unified skill-state rows from emerged-skill metadata."""
+    conn.execute(
+        """INSERT OR IGNORE INTO skill_states
+           (skill_name, origin, path, status, reason, evidence_json, created_at, updated_at)
+           SELECT name, 'emerged', path, status, reason, evidence_json, created_at, updated_at
+           FROM emerged_skills"""
+    )
+
+
+def _migrate_skill_lifecycle_events(conn: sqlite3.Connection) -> None:
+    """Older DBs do not track harness_task_id on lifecycle events."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(skill_lifecycle_events)").fetchall()]
+    if "harness_task_id" not in cols:
+        conn.execute(
+            "ALTER TABLE skill_lifecycle_events ADD COLUMN harness_task_id TEXT DEFAULT ''"
+        )
+
+
 def _ensure_indexes(conn: sqlite3.Connection) -> None:
     """Create indexes only after legacy-column migrations have completed."""
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status)")
@@ -260,8 +293,13 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_iteration_updates_run ON iteration_run_updates(run_id)"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_skill_states_status ON skill_states(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_skill_states_origin ON skill_states(origin)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_skill ON skill_lifecycle_events(skill_name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_task ON skill_lifecycle_events(harness_task_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_harness_tasks_conv ON harness_tasks(conversation_id)"

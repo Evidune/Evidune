@@ -12,7 +12,7 @@ from agent.llm import LLMClient
 from agent.skill_feedback import SkillFeedbackSummary
 from agent.tools.base import CompletionResult, Tool
 from agent.tools.registry import ToolRegistry
-from core.iteration_harness import IterationHarness
+from core.iteration_harness import IterationHarness, build_decision_packet
 from gateway.base import InboundMessage
 from memory.store import MemoryStore
 from skills.registry import SkillRegistry
@@ -218,13 +218,19 @@ def test_iteration_harness_rewrites_skill(tmp_path: Path, memory: MemoryStore):
 
     workflow = IterationHarness(memory)
     decision = workflow.run(
-        skill=skill,
-        result=result,
-        feedback=feedback,
-        current=skill_path.read_text(encoding="utf-8"),
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            feedback=feedback,
+            result=result,
+            surface="run",
+            task_kind="skill_iteration",
+        )
     )
 
     assert decision.decision == "rewrite"
+    assert decision.skill_status == "active"
     updated = skill_path.read_text(encoding="utf-8")
     assert "Outcome-Backed Adjustments" in updated
     assert "Auto-updated by aiflay" in updated
@@ -256,11 +262,141 @@ def test_iteration_harness_disables_negative_emerged_skill(tmp_path: Path, memor
 
     workflow = IterationHarness(memory)
     decision = workflow.run(
-        skill=skill,
-        result=result,
-        feedback=feedback,
-        current=skill_path.read_text(encoding="utf-8"),
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            feedback=feedback,
+            result=result,
+            surface="run",
+            task_kind="skill_iteration",
+        )
     )
 
     assert decision.decision == "disable"
+    assert decision.skill_status == "disabled"
     assert memory.get_emerged_skill("emerged")["status"] == "disabled"
+    assert memory.get_skill_state("emerged")["status"] == "disabled"
+
+
+def test_iteration_harness_disables_base_skill_without_rewrite_history(
+    tmp_path: Path, memory: MemoryStore
+):
+    skill_path = _write(
+        tmp_path / "skills" / "base-writer" / "SKILL.md",
+        "---\nname: base-writer\ndescription: Base\noutcome_metrics: true\n---\n"
+        "## Instructions\nWrite carefully.\n\n## Reference Data\nplaceholder\n",
+    )
+    registry = SkillRegistry()
+    registry.load_directory(tmp_path / "skills")
+    skill = registry.get("base-writer")
+    memory.upsert_skill_state(
+        "base-writer",
+        origin="base",
+        path=str(skill_path),
+        status="active",
+    )
+
+    result = SimpleNamespace(top_performers=[], patterns=[])
+    feedback = SkillFeedbackSummary(
+        signal_confidence=-0.8,
+        signal_samples=3,
+        has_strong_signal=True,
+        average_score=0.1,
+        score_samples=2,
+        combined_confidence=-0.8,
+        should_rewrite=False,
+        should_disable=True,
+        evidence={"average_score": 0.1},
+    )
+
+    workflow = IterationHarness(memory)
+    before = skill_path.read_text(encoding="utf-8")
+    decision = workflow.run(
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=before,
+            feedback=feedback,
+            result=result,
+            surface="run",
+            task_kind="skill_iteration",
+        )
+    )
+
+    assert decision.decision == "disable"
+    assert decision.skill_status == "disabled"
+    assert decision.update.has_changes is False
+    assert skill_path.read_text(encoding="utf-8") == before
+    assert memory.get_skill_state("base-writer")["status"] == "disabled"
+
+
+def test_iteration_harness_rolls_back_after_negative_feedback_on_rewritten_skill(
+    tmp_path: Path, memory: MemoryStore
+):
+    skill_path = _write(
+        tmp_path / "skills" / "writer" / "SKILL.md",
+        "---\nname: writer\ndescription: Write\noutcome_metrics: true\n---\n"
+        "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
+    )
+    registry = SkillRegistry()
+    registry.load_directory(tmp_path / "skills")
+    skill = registry.get("writer")
+    positive = SimpleNamespace(
+        top_performers=[
+            SimpleNamespace(title="A", metrics={"reads": 100}),
+            SimpleNamespace(title="B", metrics={"reads": 90}),
+        ],
+        patterns=["Use concrete examples"],
+    )
+    positive_feedback = SkillFeedbackSummary(
+        signal_confidence=0.8,
+        signal_samples=3,
+        has_strong_signal=True,
+        average_score=0.9,
+        score_samples=2,
+        combined_confidence=0.8,
+        should_rewrite=True,
+        should_disable=False,
+        evidence={"average_score": 0.9},
+    )
+    workflow = IterationHarness(memory)
+    first = workflow.run(
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            feedback=positive_feedback,
+            result=positive,
+            surface="run",
+            task_kind="skill_iteration",
+        )
+    )
+
+    negative = SkillFeedbackSummary(
+        signal_confidence=-0.8,
+        signal_samples=3,
+        has_strong_signal=True,
+        average_score=0.1,
+        score_samples=2,
+        combined_confidence=-0.8,
+        should_rewrite=False,
+        should_disable=True,
+        evidence={"average_score": 0.1},
+    )
+    second = workflow.run(
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            feedback=negative,
+            result=positive,
+            surface="run",
+            task_kind="skill_iteration",
+        )
+    )
+
+    assert first.decision == "rewrite"
+    assert second.decision == "rollback"
+    assert second.skill_status == "rolled_back"
+    assert memory.get_skill_state("writer")["status"] == "rolled_back"
