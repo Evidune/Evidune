@@ -20,6 +20,8 @@ from memory.store_models import Fact, Message  # noqa: F401 — re-exported
 
 __all__ = ["MemoryStore", "Fact", "Message"]
 
+_PLAN_STATUSES = {"pending", "in_progress", "completed"}
+
 
 class MemoryStore:
     """SQLite-backed cross-session memory.
@@ -44,6 +46,41 @@ class MemoryStore:
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _decode_plan(self, raw: str) -> dict | None:
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        explanation = payload.get("explanation", "")
+        items = payload.get("items", [])
+        if not isinstance(explanation, str) or not isinstance(items, list):
+            return None
+        return {"explanation": explanation, "items": items}
+
+    def _normalise_plan_items(self, items: list[dict]) -> list[dict[str, str]]:
+        normalised: list[dict[str, str]] = []
+        in_progress = 0
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("Plan items must be objects with step and status")
+            step = item.get("step")
+            status = item.get("status")
+            if not isinstance(step, str) or not step.strip():
+                raise ValueError("Each plan item must include a non-empty step")
+            if status not in _PLAN_STATUSES:
+                valid = ", ".join(sorted(_PLAN_STATUSES))
+                raise ValueError(f"Invalid plan status {status!r}; expected one of {valid}")
+            if status == "in_progress":
+                in_progress += 1
+            normalised.append({"step": step.strip(), "status": status})
+        if in_progress > 1:
+            raise ValueError("Only one plan item can be in_progress")
+        return normalised
 
     # --- Conversation / Message API ---
 
@@ -144,7 +181,7 @@ class MemoryStore:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                f"""SELECT c.id, c.channel, c.identity, c.title, c.status,
+                f"""SELECT c.id, c.channel, c.identity, c.plan_json, c.title, c.status,
                            c.created_at, c.updated_at,
                            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id)
                              AS message_count,
@@ -168,6 +205,7 @@ class MemoryStore:
                     "id": r["id"],
                     "channel": r["channel"],
                     "identity": r["identity"] or "",
+                    "has_plan": bool(r["plan_json"]),
                     "title": r["title"] or "",
                     "status": r["status"],
                     "created_at": r["created_at"],
@@ -182,11 +220,15 @@ class MemoryStore:
         """Get a conversation's metadata (without history)."""
         with self._lock:
             row = self._conn.execute(
-                """SELECT id, channel, identity, title, status, created_at, updated_at
+                """SELECT id, channel, identity, plan_json, title, status, created_at, updated_at
                    FROM conversations WHERE id = ?""",
                 (conversation_id,),
             ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        meta = dict(row)
+        meta["plan"] = self._decode_plan(meta.pop("plan_json", ""))
+        return meta
 
     def set_conversation_title(self, conversation_id: str, title: str) -> bool:
         with self._lock:
@@ -215,6 +257,50 @@ class MemoryStore:
             cursor = self._conn.execute(
                 "UPDATE conversations SET identity = ?, updated_at = ? WHERE id = ?",
                 (identity, self._now(), conversation_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def get_conversation_plan(self, conversation_id: str) -> dict | None:
+        """Return the structured plan for a conversation, if any."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT plan_json FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._decode_plan(row["plan_json"] or "")
+
+    def update_conversation_plan(
+        self,
+        conversation_id: str,
+        items: list[dict],
+        explanation: str = "",
+    ) -> bool:
+        """Replace the structured plan for a conversation."""
+        if not isinstance(explanation, str):
+            raise ValueError("Plan explanation must be a string")
+        normalised_items = self._normalise_plan_items(items)
+        payload = json.dumps(
+            {"explanation": explanation.strip(), "items": normalised_items},
+            ensure_ascii=False,
+        )
+        with self._lock:
+            self.ensure_conversation(conversation_id)
+            cursor = self._conn.execute(
+                "UPDATE conversations SET plan_json = ?, updated_at = ? WHERE id = ?",
+                (payload, self._now(), conversation_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def clear_conversation_plan(self, conversation_id: str) -> bool:
+        """Clear the current plan for a conversation."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE conversations SET plan_json = '', updated_at = ? WHERE id = ?",
+                (self._now(), conversation_id),
             )
             self._conn.commit()
             return cursor.rowcount > 0

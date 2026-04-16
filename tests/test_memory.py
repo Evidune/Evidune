@@ -223,6 +223,47 @@ class TestConversationManagement:
         assert store.set_conversation_identity("c1", "zhihu-writer") is True
         assert store.get_conversation("c1")["identity"] == "zhihu-writer"
 
+    def test_update_and_get_plan(self, store: MemoryStore):
+        assert (
+            store.update_conversation_plan(
+                "c1",
+                items=[
+                    {"step": "Inspect the tool registry", "status": "completed"},
+                    {"step": "Add plan tools", "status": "in_progress"},
+                ],
+                explanation="Ship plan support in small steps.",
+            )
+            is True
+        )
+        plan = store.get_conversation_plan("c1")
+        assert plan == {
+            "explanation": "Ship plan support in small steps.",
+            "items": [
+                {"step": "Inspect the tool registry", "status": "completed"},
+                {"step": "Add plan tools", "status": "in_progress"},
+            ],
+        }
+        meta = store.get_conversation("c1")
+        assert meta["plan"] == plan
+
+    def test_clear_plan(self, store: MemoryStore):
+        store.update_conversation_plan(
+            "c1",
+            items=[{"step": "Do the work", "status": "pending"}],
+        )
+        assert store.clear_conversation_plan("c1") is True
+        assert store.get_conversation_plan("c1") is None
+
+    def test_update_plan_rejects_multiple_in_progress_items(self, store: MemoryStore):
+        with pytest.raises(ValueError, match="Only one plan item can be in_progress"):
+            store.update_conversation_plan(
+                "c1",
+                items=[
+                    {"step": "A", "status": "in_progress"},
+                    {"step": "B", "status": "in_progress"},
+                ],
+            )
+
     def test_set_status_invalid_raises(self, store: MemoryStore):
         store.add_message("c1", "user", "x")
         with pytest.raises(ValueError):

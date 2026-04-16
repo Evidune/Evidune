@@ -8,6 +8,7 @@ from agent.pattern_detector import PatternDetector
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
+from agent.tools.internal import conversation_tools, memory_tools, plan_tools
 from agent.tools.registry import ToolRegistry
 from gateway.base import InboundMessage, OutboundMessage
 from identities.loader import Identity
@@ -62,7 +63,29 @@ class AgentCore:
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
 
-    async def _run_llm(self, messages: list[dict]) -> tuple[str, list[dict]]:
+    def _tool_registry_for_turn(
+        self,
+        conversation_id: str,
+        identity: Identity | None,
+    ) -> ToolRegistry | None:
+        if self.tool_registry is None:
+            return None
+
+        registry = ToolRegistry()
+        registry.register_many(self.tool_registry.all())
+        namespace = identity.namespace if identity is not None else ""
+        registry.register_many(memory_tools(self.memory, namespace=namespace))
+        registry.register_many(
+            conversation_tools(self.memory, current_conversation_id=conversation_id)
+        )
+        registry.register_many(plan_tools(self.memory, current_conversation_id=conversation_id))
+        return registry
+
+    async def _run_llm(
+        self,
+        messages: list[dict],
+        tool_registry: ToolRegistry | None = None,
+    ) -> tuple[str, list[dict]]:
         """Run the LLM, looping through tool calls until we get a final text.
 
         Returns (final_response_text, tool_trace) where tool_trace is a
@@ -72,11 +95,11 @@ class AgentCore:
         If no ToolRegistry is configured, falls back to a single
         plain-text completion (legacy path).
         """
-        if not self.tool_registry or len(self.tool_registry) == 0:
+        if not tool_registry or len(tool_registry) == 0:
             text = await self.llm.complete(messages)
             return text, []
 
-        tools = self.tool_registry.all()
+        tools = tool_registry.all()
         tool_trace: list[dict] = []
         working: list[dict] = list(messages)
 
@@ -105,7 +128,7 @@ class AgentCore:
 
             # Execute each call and append its result
             for tc in result.tool_calls:
-                tr = await self.tool_registry.execute(tc)
+                tr = await tool_registry.execute(tc)
                 tool_trace.append(
                     {
                         "name": tc.name,
@@ -200,7 +223,8 @@ class AgentCore:
         messages = self._build_messages(identity, relevant_skills, facts, history, message)
 
         # 6. Call LLM — with optional tool-use loop
-        response_text, tool_trace = await self._run_llm(messages)
+        turn_tools = self._tool_registry_for_turn(message.conversation_id, identity)
+        response_text, tool_trace = await self._run_llm(messages, tool_registry=turn_tools)
 
         # 7. Store in memory (only user input + final assistant response;
         #    intermediate tool calls stay in the per-turn working messages)

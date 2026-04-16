@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     channel TEXT DEFAULT '',
     identity TEXT DEFAULT '',
+    plan_json TEXT DEFAULT '',
     title TEXT DEFAULT '',
     status TEXT DEFAULT 'active',
     created_at TEXT NOT NULL,
@@ -113,6 +114,8 @@ def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE conversations SET identity = persona WHERE identity = '' AND persona != ''"
         )
+    if "plan_json" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN plan_json TEXT DEFAULT ''")
     if "title" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT ''")
     if "status" not in cols:

@@ -6,7 +6,7 @@ import pytest
 
 from agent.tools.base import CompletionResult, Tool, ToolCall, ToolResult
 from agent.tools.external import ExternalToolsConfig, external_tools
-from agent.tools.internal import conversation_tools, memory_tools, skill_tools
+from agent.tools.internal import conversation_tools, memory_tools, plan_tools, skill_tools
 from agent.tools.registry import ToolRegistry
 from memory.store import MemoryStore
 from skills.loader import Skill
@@ -162,6 +162,31 @@ class TestConversationTools:
         ids = {c["id"] for c in listing}
         assert ids == {"c1", "c2"}
         assert any(c["is_current"] for c in listing)
+
+
+class TestPlanTools:
+    @pytest.mark.asyncio
+    async def test_get_plan_defaults_to_empty(self, memory: MemoryStore):
+        tools = {t.name: t for t in plan_tools(memory, current_conversation_id="c1")}
+        result = await tools["get_plan"].handler()
+        assert result == {"conversation_id": "c1", "explanation": "", "items": []}
+
+    @pytest.mark.asyncio
+    async def test_update_and_clear_plan(self, memory: MemoryStore):
+        tools = {t.name: t for t in plan_tools(memory, current_conversation_id="c1")}
+        updated = await tools["update_plan"].handler(
+            explanation="Ship the change safely.",
+            plan=[
+                {"step": "Inspect the current implementation", "status": "completed"},
+                {"step": "Add plan tools", "status": "in_progress"},
+            ],
+        )
+        assert updated["ok"] is True
+        assert updated["items"][1]["status"] == "in_progress"
+
+        cleared = await tools["clear_plan"].handler()
+        assert cleared["ok"] is True
+        assert memory.get_conversation_plan("c1") is None
 
 
 # --- External tools ---

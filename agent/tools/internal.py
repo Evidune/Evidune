@@ -194,3 +194,94 @@ def conversation_tools(memory: MemoryStore, current_conversation_id: str) -> lis
             handler=read_conversation,
         ),
     ]
+
+
+def plan_tools(memory: MemoryStore, current_conversation_id: str) -> list[Tool]:
+    """Let the LLM maintain a structured plan for the current conversation."""
+
+    async def get_plan() -> dict:
+        plan = memory.get_conversation_plan(current_conversation_id)
+        if plan is None:
+            return {
+                "conversation_id": current_conversation_id,
+                "explanation": "",
+                "items": [],
+            }
+        return {
+            "conversation_id": current_conversation_id,
+            "explanation": plan.get("explanation", ""),
+            "items": plan.get("items", []),
+        }
+
+    async def update_plan(plan: list[dict], explanation: str = "") -> dict:
+        memory.update_conversation_plan(
+            current_conversation_id,
+            items=plan,
+            explanation=explanation,
+        )
+        saved = memory.get_conversation_plan(current_conversation_id) or {
+            "explanation": "",
+            "items": [],
+        }
+        return {
+            "ok": True,
+            "conversation_id": current_conversation_id,
+            "explanation": saved["explanation"],
+            "items": saved["items"],
+        }
+
+    async def clear_plan() -> dict:
+        ok = memory.clear_conversation_plan(current_conversation_id)
+        return {
+            "ok": ok,
+            "conversation_id": current_conversation_id,
+            "explanation": "",
+            "items": [],
+        }
+
+    return [
+        Tool(
+            name="get_plan",
+            description="Get the current structured plan for this conversation.",
+            parameters={"type": "object", "properties": {}},
+            handler=get_plan,
+        ),
+        Tool(
+            name="update_plan",
+            description=(
+                "Replace the current structured plan for this conversation. "
+                "Each item must include a step and a status."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "explanation": {
+                        "type": "string",
+                        "description": "Optional short summary of the current plan state.",
+                    },
+                    "plan": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "step": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "completed"],
+                                },
+                            },
+                            "required": ["step", "status"],
+                        },
+                    },
+                },
+                "required": ["plan"],
+            },
+            handler=update_plan,
+        ),
+        Tool(
+            name="clear_plan",
+            description="Clear the current structured plan for this conversation.",
+            parameters={"type": "object", "properties": {}},
+            handler=clear_plan,
+        ),
+    ]

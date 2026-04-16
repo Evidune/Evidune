@@ -6,6 +6,8 @@ import pytest
 
 from agent.core import AgentCore
 from agent.llm import LLMClient
+from agent.tools.base import CompletionResult, Tool, ToolCall
+from agent.tools.registry import ToolRegistry
 from gateway.base import InboundMessage
 from memory.store import MemoryStore
 from skills.registry import SkillRegistry
@@ -19,6 +21,39 @@ class MockLLM(LLMClient):
     async def complete(self, messages, **kwargs):
         self.last_messages = messages
         return self.response
+
+
+class MockToolLLM(LLMClient):
+    def __init__(self):
+        self.calls = 0
+        self.tool_names: list[str] = []
+
+    async def complete(self, messages, **kwargs):
+        return "done"
+
+    async def complete_with_tools(self, messages, tools, **kwargs):
+        self.tool_names = [tool.name for tool in tools]
+        if self.calls == 0:
+            self.calls += 1
+            return CompletionResult(
+                tool_calls=[
+                    ToolCall(
+                        id="1",
+                        name="update_plan",
+                        arguments={
+                            "explanation": "Implement plan support safely.",
+                            "plan": [
+                                {
+                                    "step": "Inspect the current tool registry",
+                                    "status": "completed",
+                                },
+                                {"step": "Add plan tools", "status": "in_progress"},
+                            ],
+                        },
+                    )
+                ]
+            )
+        return CompletionResult(text="done")
 
 
 def _write_skill(path: Path, content: str) -> Path:
@@ -146,6 +181,48 @@ class TestAgentCore:
         await agent.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "formal tone" in system_content
+
+    @pytest.mark.asyncio
+    async def test_turn_scoped_plan_tools_are_available(
+        self,
+        skill_registry: SkillRegistry,
+        memory: MemoryStore,
+    ):
+        llm = MockToolLLM()
+        tool_registry = ToolRegistry()
+        tool_registry.register(
+            Tool(
+                name="noop",
+                description="Keeps tool mode enabled for the test.",
+                parameters={"type": "object", "properties": {}},
+                handler=lambda: None,
+            )
+        )
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            tool_registry=tool_registry,
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="please make a plan",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-plan",
+            )
+        )
+
+        assert "update_plan" in llm.tool_names
+        assert memory.get_conversation_plan("c-plan") == {
+            "explanation": "Implement plan support safely.",
+            "items": [
+                {"step": "Inspect the current tool registry", "status": "completed"},
+                {"step": "Add plan tools", "status": "in_progress"},
+            ],
+        }
+        assert response.metadata["tool_trace"][0]["name"] == "update_plan"
 
 
 class TestAgentWithIdentity:
