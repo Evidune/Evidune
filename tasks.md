@@ -34,6 +34,8 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Progressive skill disclosure default with compatibility mode
 - [x] Replace monolithic personas with OpenClaw-style identity packages
 - [x] Add conversation-scoped plan tools with persistent state
+- [x] Add persisted `plan` / `execute` conversation modes
+- [x] Surface conversation mode and plan state in the web UI
 
 ## Notes
 

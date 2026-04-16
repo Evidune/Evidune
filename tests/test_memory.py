@@ -168,6 +168,7 @@ class TestConversationManagement:
         ids = {i["id"] for i in items}
         assert ids == {"c1", "c2"}
         assert all("identity" in item for item in items)
+        assert all(item["mode"] == "execute" for item in items)
 
     def test_list_includes_preview(self, store: MemoryStore):
         store.add_message("c1", "user", "first")
@@ -223,6 +224,17 @@ class TestConversationManagement:
         assert store.set_conversation_identity("c1", "zhihu-writer") is True
         assert store.get_conversation("c1")["identity"] == "zhihu-writer"
 
+    def test_default_mode_is_execute(self, store: MemoryStore):
+        store.ensure_conversation("c1")
+        assert store.get_conversation("c1")["mode"] == "execute"
+        assert store.get_conversation_mode("c1") == "execute"
+
+    def test_set_mode(self, store: MemoryStore):
+        store.ensure_conversation("c1", channel="web")
+        assert store.set_conversation_mode("c1", "plan") is True
+        assert store.get_conversation("c1")["mode"] == "plan"
+        assert store.get_conversation_mode("c1") == "plan"
+
     def test_update_and_get_plan(self, store: MemoryStore):
         assert (
             store.update_conversation_plan(
@@ -246,6 +258,14 @@ class TestConversationManagement:
         meta = store.get_conversation("c1")
         assert meta["plan"] == plan
 
+    def test_list_conversations_marks_has_plan(self, store: MemoryStore):
+        store.update_conversation_plan(
+            "c1",
+            items=[{"step": "Inspect the system", "status": "pending"}],
+        )
+        items = store.list_conversations()
+        assert items[0]["has_plan"] is True
+
     def test_clear_plan(self, store: MemoryStore):
         store.update_conversation_plan(
             "c1",
@@ -263,6 +283,11 @@ class TestConversationManagement:
                     {"step": "B", "status": "in_progress"},
                 ],
             )
+
+    def test_set_mode_rejects_unknown_value(self, store: MemoryStore):
+        store.ensure_conversation("c1")
+        with pytest.raises(ValueError, match="Invalid conversation mode"):
+            store.set_conversation_mode("c1", "draft")
 
     def test_set_status_invalid_raises(self, store: MemoryStore):
         store.add_message("c1", "user", "x")

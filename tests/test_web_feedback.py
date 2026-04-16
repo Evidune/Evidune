@@ -88,10 +88,17 @@ class TestConversationEndpoints:
 
     def test_conversation_history_found(self, gateway: WebGateway, store: MemoryStore):
         store.ensure_conversation("c1", channel="web")
+        store.set_conversation_mode("c1", "plan")
+        store.update_conversation_plan(
+            "c1",
+            items=[{"step": "Inspect the request", "status": "completed"}],
+        )
         store.add_message("c1", "user", "hello")
         store.add_message("c1", "assistant", "world")
         result = gateway._conversation_history("c1")
         assert result["conversation"]["id"] == "c1"
+        assert result["conversation"]["mode"] == "plan"
+        assert result["conversation"]["plan"]["items"][0]["step"] == "Inspect the request"
         assert [m["role"] for m in result["messages"]] == ["user", "assistant"]
 
     def test_conversation_history_missing(self, gateway: WebGateway):

@@ -1,5 +1,6 @@
 import type {
   ChatResponse,
+  ConversationMode,
   ConversationHistory,
   ConversationSummary,
   FeedbackRequest,
@@ -19,6 +20,7 @@ export async function sendMessage(
   text: string,
   conversationId: string,
   identity?: string,
+  mode?: ConversationMode,
 ): Promise<ChatResponse> {
   const resp = await fetch(`${BASE}/api/chat`, {
     method: 'POST',
@@ -27,6 +29,7 @@ export async function sendMessage(
       text,
       conversation_id: conversationId,
       ...(identity ? { identity } : {}),
+      ...(mode ? { mode } : {}),
     }),
   })
   if (!resp.ok) {

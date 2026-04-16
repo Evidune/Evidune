@@ -1,4 +1,15 @@
 export type SignalType = 'thumbs_up' | 'thumbs_down' | 'copied' | 'regenerated'
+export type ConversationMode = 'plan' | 'execute'
+
+export interface PlanItem {
+  step: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+export interface ConversationPlan {
+  explanation: string
+  items: PlanItem[]
+}
 
 export interface ToolTraceEntry {
   name: string
@@ -31,6 +42,8 @@ export interface ChatResponse {
   emerged_skill?: string | null
   facts_extracted?: number
   identity?: string | null
+  mode?: ConversationMode | null
+  plan?: ConversationPlan | null
   new_title?: string | null
   tool_trace?: ToolTraceEntry[]
   error?: string
@@ -40,6 +53,9 @@ export interface ConversationSummary {
   id: string
   channel: string
   identity?: string
+  mode: ConversationMode
+  has_plan?: boolean
+  plan?: ConversationPlan | null
   title: string
   status: 'active' | 'archived'
   created_at: string

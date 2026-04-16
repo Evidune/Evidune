@@ -77,7 +77,15 @@
         onkeydown={e => e.key === 'Enter' && onSelect(c.id)}
       >
         <div class="row-top">
-          <span class="label">{c.title || 'Untitled'}</span>
+          <div class="label-group">
+            <span class="label">{c.title || 'Untitled'}</span>
+            {#if c.mode === 'plan'}
+              <span class="badge mode">plan</span>
+            {/if}
+            {#if c.has_plan}
+              <span class="badge plan">plan</span>
+            {/if}
+          </div>
           <span class="when">{fmtWhen(c.updated_at)}</span>
         </div>
         {#if c.preview}
@@ -89,7 +97,13 @@
           onclick={e => toggleMenu(c.id, e)}
         >⋯</button>
         {#if menuOpenId === c.id}
-          <div class="menu" onclick={e => e.stopPropagation()} role="menu">
+          <div
+            class="menu"
+            onclick={e => e.stopPropagation()}
+            onkeydown={e => e.stopPropagation()}
+            role="menu"
+            tabindex="-1"
+          >
             <button onclick={e => handleArchive(c.id, e)}>Archive</button>
             <button class="danger" onclick={e => handleDelete(c.id, e)}>Delete</button>
           </div>
@@ -180,6 +194,14 @@
     gap: 8px;
   }
 
+  .label-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+  }
+
   .label {
     font-size: 13px;
     font-weight: 500;
@@ -188,6 +210,26 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
+  }
+
+  .badge {
+    flex-shrink: 0;
+    border-radius: 999px;
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .badge.mode {
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.14);
+  }
+
+  .badge.plan {
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.14);
   }
 
   .when {

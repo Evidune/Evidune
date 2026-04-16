@@ -12,7 +12,7 @@ from memory.store import MemoryStore
 from skills.registry import SkillRegistry
 
 
-def memory_tools(memory: MemoryStore, namespace: str = "") -> list[Tool]:
+def memory_tools(memory: MemoryStore, namespace: str = "", allow_write: bool = True) -> list[Tool]:
     """Tools that let the LLM inspect and persist facts."""
 
     async def get_fact(key: str) -> str:
@@ -31,7 +31,7 @@ def memory_tools(memory: MemoryStore, namespace: str = "") -> list[Tool]:
         results = memory.get_facts(prefix=prefix or None, namespace=namespace)
         return [{"key": f.key, "value": f.value} for f in results]
 
-    return [
+    tools = [
         Tool(
             name="get_fact",
             description="Get the value of a persistent memory fact by key.",
@@ -43,22 +43,6 @@ def memory_tools(memory: MemoryStore, namespace: str = "") -> list[Tool]:
                 "required": ["key"],
             },
             handler=get_fact,
-        ),
-        Tool(
-            name="set_fact",
-            description=(
-                "Persist a fact to memory. Use for stable user info, preferences, "
-                "project context — not for transient chat details."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string"},
-                    "value": {"type": "string"},
-                },
-                "required": ["key", "value"],
-            },
-            handler=set_fact,
         ),
         Tool(
             name="search_facts",
@@ -85,6 +69,27 @@ def memory_tools(memory: MemoryStore, namespace: str = "") -> list[Tool]:
             handler=list_facts,
         ),
     ]
+    if allow_write:
+        tools.insert(
+            1,
+            Tool(
+                name="set_fact",
+                description=(
+                    "Persist a fact to memory. Use for stable user info, preferences, "
+                    "project context — not for transient chat details."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "value": {"type": "string"},
+                    },
+                    "required": ["key", "value"],
+                },
+                handler=set_fact,
+            ),
+        )
+    return tools
 
 
 def skill_tools(skills: SkillRegistry) -> list[Tool]:

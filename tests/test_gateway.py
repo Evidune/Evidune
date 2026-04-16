@@ -47,3 +47,28 @@ class TestWebGatewayChat:
         result = await gw._handle_chat("hello", "conv1", identity="formal-helper")
         assert seen["metadata"] == {"identity": "formal-helper"}
         assert result["identity"] == "formal-helper"
+
+    @pytest.mark.asyncio
+    async def test_handle_chat_passes_mode_and_plan_through_metadata(self):
+        gw = WebGateway()
+        seen: dict[str, object] = {}
+
+        async def handler(message: InboundMessage) -> OutboundMessage:
+            seen["metadata"] = message.metadata
+            return OutboundMessage(
+                text="plan ready",
+                conversation_id=message.conversation_id,
+                metadata={
+                    "mode": message.metadata.get("mode"),
+                    "plan": {
+                        "explanation": "Ship this in two steps.",
+                        "items": [{"step": "Write the plan", "status": "completed"}],
+                    },
+                },
+            )
+
+        gw._handler = handler
+        result = await gw._handle_chat("make a plan", "conv2", mode="plan")
+        assert seen["metadata"] == {"mode": "plan"}
+        assert result["mode"] == "plan"
+        assert result["plan"]["items"][0]["step"] == "Write the plan"

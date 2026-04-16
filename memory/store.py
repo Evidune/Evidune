@@ -21,6 +21,7 @@ from memory.store_models import Fact, Message  # noqa: F401 — re-exported
 __all__ = ["MemoryStore", "Fact", "Message"]
 
 _PLAN_STATUSES = {"pending", "in_progress", "completed"}
+_CONVERSATION_MODES = {"plan", "execute"}
 
 
 class MemoryStore:
@@ -82,6 +83,12 @@ class MemoryStore:
             raise ValueError("Only one plan item can be in_progress")
         return normalised
 
+    def _normalise_mode(self, mode: str) -> str:
+        if mode not in _CONVERSATION_MODES:
+            valid = ", ".join(sorted(_CONVERSATION_MODES))
+            raise ValueError(f"Invalid conversation mode {mode!r}; expected one of {valid}")
+        return mode
+
     # --- Conversation / Message API ---
 
     def ensure_conversation(
@@ -92,8 +99,8 @@ class MemoryStore:
             now = self._now()
             self._conn.execute(
                 """INSERT OR IGNORE INTO conversations
-                   (id, channel, identity, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?)""",
+                   (id, channel, identity, mode, created_at, updated_at)
+                   VALUES (?, ?, ?, 'execute', ?, ?)""",
                 (conversation_id, channel, identity, now, now),
             )
             # Backfill the channel for legacy rows that were created before
@@ -181,7 +188,7 @@ class MemoryStore:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                f"""SELECT c.id, c.channel, c.identity, c.plan_json, c.title, c.status,
+                f"""SELECT c.id, c.channel, c.identity, c.mode, c.plan_json, c.title, c.status,
                            c.created_at, c.updated_at,
                            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id)
                              AS message_count,
@@ -205,6 +212,7 @@ class MemoryStore:
                     "id": r["id"],
                     "channel": r["channel"],
                     "identity": r["identity"] or "",
+                    "mode": r["mode"] or "execute",
                     "has_plan": bool(r["plan_json"]),
                     "title": r["title"] or "",
                     "status": r["status"],
@@ -220,13 +228,14 @@ class MemoryStore:
         """Get a conversation's metadata (without history)."""
         with self._lock:
             row = self._conn.execute(
-                """SELECT id, channel, identity, plan_json, title, status, created_at, updated_at
+                """SELECT id, channel, identity, mode, plan_json, title, status, created_at, updated_at
                    FROM conversations WHERE id = ?""",
                 (conversation_id,),
             ).fetchone()
         if not row:
             return None
         meta = dict(row)
+        meta["mode"] = meta.get("mode") or "execute"
         meta["plan"] = self._decode_plan(meta.pop("plan_json", ""))
         return meta
 
@@ -260,6 +269,28 @@ class MemoryStore:
             )
             self._conn.commit()
             return cursor.rowcount > 0
+
+    def set_conversation_mode(self, conversation_id: str, mode: str) -> bool:
+        """Persist the current operating mode for a conversation."""
+        normalised = self._normalise_mode(mode)
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE conversations SET mode = ?, updated_at = ? WHERE id = ?",
+                (normalised, self._now(), conversation_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def get_conversation_mode(self, conversation_id: str) -> str | None:
+        """Return the stored mode for a conversation."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT mode FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return row["mode"] or "execute"
 
     def get_conversation_plan(self, conversation_id: str) -> dict | None:
         """Return the structured plan for a conversation, if any."""

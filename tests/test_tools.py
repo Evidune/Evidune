@@ -131,6 +131,10 @@ class TestMemoryTools:
         assert await alice_tools["get_fact"].handler(key="x") == "A"
         assert await bob_tools["get_fact"].handler(key="x") == "B"
 
+    def test_read_only_memory_tools_omit_set_fact(self, memory: MemoryStore):
+        tools = {t.name: t for t in memory_tools(memory, allow_write=False)}
+        assert "set_fact" not in tools
+
 
 class TestSkillTools:
     @pytest.mark.asyncio

@@ -6,8 +6,12 @@
   let { message, onRegenerate }: { message: Message; onRegenerate?: () => void } = $props()
 
   const isUser = $derived(message.role === 'user')
-  let feedback: Partial<Record<SignalType, boolean>> = $state(message.feedback ?? {})
+  let feedback: Partial<Record<SignalType, boolean>> = $state({})
   let copiedJustNow = $state(false)
+
+  $effect(() => {
+    feedback = message.feedback ?? {}
+  })
 
   async function send(signal: SignalType, value: boolean | number = true) {
     if (!message.executionIds || message.executionIds.length === 0) return

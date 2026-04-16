@@ -9,10 +9,12 @@
     fetchSkills,
     sendMessage,
   } from './lib/api'
-  import type { ConversationSummary, Message } from './lib/types'
+  import type { ConversationMode, ConversationPlan, ConversationSummary, Message } from './lib/types'
   import ChatMessage from './components/ChatMessage.svelte'
   import ChatInput from './components/ChatInput.svelte'
   import ConversationList from './components/ConversationList.svelte'
+  import ModeToggle from './components/ModeToggle.svelte'
+  import PlanPanel from './components/PlanPanel.svelte'
   import SkillsBar from './components/SkillsBar.svelte'
   import TypingIndicator from './components/TypingIndicator.svelte'
   import Toast from './components/Toast.svelte'
@@ -24,6 +26,8 @@
   let toast: { message: string; kind: 'info' | 'success' | 'error' } | null = $state(null)
   let conversations: ConversationSummary[] = $state([])
   let activeConvId = $state('')
+  let currentMode: ConversationMode = $state('execute')
+  let currentPlan: ConversationPlan | null = $state(null)
 
   messages.subscribe(v => (messageList = v))
   skills.subscribe(v => (skillsList = v))
@@ -60,6 +64,8 @@
     conversationId.set(freshConversationId())
     resetWelcome()
     activeSkills.set([])
+    currentMode = 'execute'
+    currentPlan = null
     await scrollToBottom()
   }
 
@@ -76,7 +82,13 @@
     }))
     messages.set(mapped)
     activeSkills.set([])
+    currentMode = history.conversation.mode ?? 'execute'
+    currentPlan = history.conversation.plan ?? null
     await scrollToBottom()
+  }
+
+  function handleModeChange(mode: ConversationMode) {
+    currentMode = mode
   }
 
   async function handleDelete(id: string) {
@@ -128,7 +140,7 @@
     activeSkills.set([])
     await scrollToBottom()
 
-    const resp = await sendMessage(text, activeConvId)
+    const resp = await sendMessage(text, activeConvId, undefined, currentMode)
     isLoading.set(false)
 
     const botMsg: Message = {
@@ -145,6 +157,11 @@
     if (resp.skills?.length) {
       activeSkills.set(resp.skills)
     }
+
+    if (resp.mode) {
+      currentMode = resp.mode
+    }
+    currentPlan = resp.plan ?? null
 
     if (resp.emerged_skill) {
       showToast(`✨ New skill emerged: ${resp.emerged_skill}`, 'success')
@@ -199,12 +216,17 @@
     <header>
       <h1><span class="dot">●</span> Aiflay</h1>
       <div class="header-meta">
+        <ModeToggle mode={currentMode} onChange={handleModeChange} disabled={loading} />
         <div class="status-dot" class:thinking={loading}></div>
         <span>{loading ? 'Thinking...' : 'Ready'}</span>
       </div>
     </header>
 
     <SkillsBar skills={skillsList} />
+
+    {#if currentMode === 'plan' || currentPlan}
+      <PlanPanel mode={currentMode} plan={currentPlan} />
+    {/if}
 
     <div class="messages" bind:this={messagesEl}>
       {#each messageList as msg, i (msg.id)}

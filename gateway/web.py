@@ -120,10 +120,20 @@ class WebGateway(Gateway):
                         return
                     identity = identity.strip() if isinstance(identity, str) else None
 
+                    mode = data.get("mode")
+                    if mode is not None and not isinstance(mode, str):
+                        self._json_resp(400, {"error": "mode must be a string"})
+                        return
+                    mode = mode.strip() if isinstance(mode, str) else None
+                    if mode not in (None, "plan", "execute"):
+                        self._json_resp(400, {"error": "mode must be 'plan' or 'execute'"})
+                        return
+
                     conv_id = data.get("conversation_id", f"web-{uuid.uuid4().hex[:8]}")
 
                     future = asyncio.run_coroutine_threadsafe(
-                        gateway._handle_chat(text, conv_id, identity=identity), gateway._loop
+                        gateway._handle_chat(text, conv_id, identity=identity, mode=mode),
+                        gateway._loop,
                     )
                     try:
                         result = future.result(timeout=120)
@@ -235,17 +245,27 @@ class WebGateway(Gateway):
             self._server = None
 
     async def _handle_chat(
-        self, text: str, conversation_id: str, identity: str | None = None
+        self,
+        text: str,
+        conversation_id: str,
+        identity: str | None = None,
+        mode: str | None = None,
     ) -> dict[str, Any]:
         if not self._handler:
             return {"error": "Agent not ready"}
+
+        metadata: dict[str, Any] = {}
+        if identity:
+            metadata["identity"] = identity
+        if mode:
+            metadata["mode"] = mode
 
         message = InboundMessage(
             text=text,
             sender_id="web-user",
             channel="web",
             conversation_id=conversation_id,
-            metadata={"identity": identity} if identity else {},
+            metadata=metadata,
         )
 
         response = await self._handler(message)
@@ -257,6 +277,8 @@ class WebGateway(Gateway):
             "emerged_skill": response.metadata.get("emerged_skill"),
             "facts_extracted": response.metadata.get("facts_extracted", 0),
             "identity": response.metadata.get("identity"),
+            "mode": response.metadata.get("mode"),
+            "plan": response.metadata.get("plan"),
             "new_title": response.metadata.get("new_title"),
             "tool_trace": response.metadata.get("tool_trace", []),
         }

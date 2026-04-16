@@ -56,6 +56,22 @@ class MockToolLLM(LLMClient):
         return CompletionResult(text="done")
 
 
+class InspectingToolListLLM(LLMClient):
+    def __init__(self, response: str = "ok"):
+        self.response = response
+        self.tool_names: list[str] = []
+        self.last_messages: list[dict] = []
+
+    async def complete(self, messages, **kwargs):
+        self.last_messages = messages
+        return self.response
+
+    async def complete_with_tools(self, messages, tools, **kwargs):
+        self.last_messages = messages
+        self.tool_names = [tool.name for tool in tools]
+        return CompletionResult(text=self.response)
+
+
 def _write_skill(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -215,6 +231,8 @@ class TestAgentCore:
         )
 
         assert "update_plan" in llm.tool_names
+        assert response.metadata["mode"] == "execute"
+        assert response.metadata["plan"]["items"][1]["step"] == "Add plan tools"
         assert memory.get_conversation_plan("c-plan") == {
             "explanation": "Implement plan support safely.",
             "items": [
@@ -223,6 +241,105 @@ class TestAgentCore:
             ],
         }
         assert response.metadata["tool_trace"][0]["name"] == "update_plan"
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_exposes_planning_tools_only(
+        self,
+        skill_registry: SkillRegistry,
+        memory: MemoryStore,
+    ):
+        llm = InspectingToolListLLM()
+        tool_registry = ToolRegistry()
+        tool_registry.register(
+            Tool(
+                name="noop",
+                description="Execution-only tool for test coverage.",
+                parameters={"type": "object", "properties": {}},
+                handler=lambda: None,
+            )
+        )
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            tool_registry=tool_registry,
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="plan this task",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-plan-mode",
+                metadata={"mode": "plan"},
+            )
+        )
+
+        assert response.metadata["mode"] == "plan"
+        assert memory.get_conversation("c-plan-mode")["mode"] == "plan"
+        assert "update_plan" in llm.tool_names
+        assert "set_fact" not in llm.tool_names
+        assert "noop" not in llm.tool_names
+        assert "Operating Mode: Plan" in llm.last_messages[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_execute_mode_exposes_execution_tools(
+        self,
+        skill_registry: SkillRegistry,
+        memory: MemoryStore,
+    ):
+        llm = InspectingToolListLLM()
+        tool_registry = ToolRegistry()
+        tool_registry.register(
+            Tool(
+                name="noop",
+                description="Execution-only tool for test coverage.",
+                parameters={"type": "object", "properties": {}},
+                handler=lambda: None,
+            )
+        )
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            tool_registry=tool_registry,
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="execute this task",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-execute-mode",
+            )
+        )
+
+        assert response.metadata["mode"] == "execute"
+        assert "set_fact" in llm.tool_names
+        assert "noop" in llm.tool_names
+        assert "Operating Mode: Execute" in llm.last_messages[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_reuses_stored_conversation_mode(self, agent: AgentCore, memory: MemoryStore):
+        first = InboundMessage(
+            text="plan first",
+            sender_id="u",
+            channel="cli",
+            conversation_id="c-mode-reuse",
+            metadata={"mode": "plan"},
+        )
+        await agent.handle(first)
+
+        second = InboundMessage(
+            text="follow up",
+            sender_id="u",
+            channel="cli",
+            conversation_id="c-mode-reuse",
+        )
+        response = await agent.handle(second)
+
+        assert response.metadata["mode"] == "plan"
+        assert memory.get_conversation("c-mode-reuse")["mode"] == "plan"
 
 
 class TestAgentWithIdentity:

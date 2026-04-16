@@ -8,7 +8,7 @@ from agent.pattern_detector import PatternDetector
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
-from agent.tools.internal import conversation_tools, memory_tools, plan_tools
+from agent.tools.internal import conversation_tools, memory_tools, plan_tools, skill_tools
 from agent.tools.registry import ToolRegistry
 from gateway.base import InboundMessage, OutboundMessage
 from identities.loader import Identity
@@ -16,6 +16,8 @@ from identities.registry import IdentityRegistry
 from memory.store import MemoryStore
 from skills.loader import parse_skill
 from skills.registry import SkillRegistry
+
+_CONVERSATION_MODES = {"plan", "execute"}
 
 
 class AgentCore:
@@ -67,18 +69,27 @@ class AgentCore:
         self,
         conversation_id: str,
         identity: Identity | None,
+        mode: str,
     ) -> ToolRegistry | None:
         if self.tool_registry is None:
             return None
 
         registry = ToolRegistry()
-        registry.register_many(self.tool_registry.all())
         namespace = identity.namespace if identity is not None else ""
-        registry.register_many(memory_tools(self.memory, namespace=namespace))
+        registry.register_many(skill_tools(self.skills))
+        registry.register_many(
+            memory_tools(
+                self.memory,
+                namespace=namespace,
+                allow_write=mode == "execute",
+            )
+        )
         registry.register_many(
             conversation_tools(self.memory, current_conversation_id=conversation_id)
         )
         registry.register_many(plan_tools(self.memory, current_conversation_id=conversation_id))
+        if mode == "execute":
+            registry.register_many(self.tool_registry.all())
         return registry
 
     async def _run_llm(
@@ -180,6 +191,18 @@ class AgentCore:
 
         return self.identities.resolve(None)
 
+    def _resolve_mode(self, message: InboundMessage, conversation_meta: dict | None = None) -> str:
+        """Pick the operating mode for this turn."""
+        requested = message.metadata.get("mode") if message.metadata else None
+        if requested in _CONVERSATION_MODES:
+            return requested
+
+        stored = (conversation_meta or {}).get("mode")
+        if stored in _CONVERSATION_MODES:
+            return stored
+
+        return "execute"
+
     async def handle(self, message: InboundMessage) -> OutboundMessage:
         """Process an inbound message and return a response.
 
@@ -197,11 +220,13 @@ class AgentCore:
         # before any later reads or writes. Web UI lists are channel-scoped.
         self.memory.ensure_conversation(message.conversation_id, channel=message.channel)
 
-        # 1. Identity
+        # 1. Identity + mode
         conversation_meta = self.memory.get_conversation(message.conversation_id)
         identity = self._resolve_identity(message, conversation_meta)
+        mode = self._resolve_mode(message, conversation_meta)
         if identity is not None:
             self.memory.set_conversation_identity(message.conversation_id, identity.name)
+        self.memory.set_conversation_mode(message.conversation_id, mode)
 
         # 2. History
         history = self.memory.get_history(message.conversation_id, self.max_history)
@@ -220,10 +245,10 @@ class AgentCore:
             relevant_skills = self.skills.all()
 
         # 5. Build messages
-        messages = self._build_messages(identity, relevant_skills, facts, history, message)
+        messages = self._build_messages(identity, mode, relevant_skills, facts, history, message)
 
         # 6. Call LLM — with optional tool-use loop
-        turn_tools = self._tool_registry_for_turn(message.conversation_id, identity)
+        turn_tools = self._tool_registry_for_turn(message.conversation_id, identity, mode)
         response_text, tool_trace = await self._run_llm(messages, tool_registry=turn_tools)
 
         # 7. Store in memory (only user input + final assistant response;
@@ -251,6 +276,8 @@ class AgentCore:
         # 11. Auto-title the conversation once it has enough content
         new_title = await self._maybe_generate_title(message.conversation_id)
 
+        current_plan = self.memory.get_conversation_plan(message.conversation_id)
+
         # Trim old history
         self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
 
@@ -261,6 +288,8 @@ class AgentCore:
                 "skills": [s.name for s in relevant_skills],
                 "execution_ids": execution_ids,
                 "identity": identity.name if identity else None,
+                "mode": mode,
+                "plan": current_plan,
                 "facts_extracted": extracted_count,
                 "emerged_skill": emerged_skill,
                 "new_title": new_title,
@@ -385,6 +414,7 @@ class AgentCore:
     def _build_messages(
         self,
         identity: Identity | None,
+        mode: str,
         skills: list,
         facts: list,
         history: list[dict[str, str]],
@@ -400,6 +430,31 @@ class AgentCore:
 
         if self.system_prompt:
             system_parts.append(self.system_prompt)
+
+        if mode == "plan":
+            system_parts.append(
+                "\n".join(
+                    [
+                        "# Operating Mode: Plan",
+                        "You are in plan mode.",
+                        "Focus on analysis, sequencing, risks, and a concrete next-step plan.",
+                        "Do not claim work is executed when it has not been executed.",
+                        "Use update_plan to keep the structured plan current.",
+                        "Do not use execution-only tools in this mode.",
+                    ]
+                )
+            )
+        else:
+            system_parts.append(
+                "\n".join(
+                    [
+                        "# Operating Mode: Execute",
+                        "You are in execute mode.",
+                        "Carry out the requested work when feasible instead of stopping at analysis.",
+                        "Use update_plan to keep the structured plan in sync with actual progress.",
+                    ]
+                )
+            )
 
         # Inject skills
         skill_prompt = self._build_skill_prompt(skills)
@@ -429,7 +484,7 @@ class AgentCore:
         """Render the skill prompt according to the configured disclosure mode."""
         mode = self.skill_prompt_mode
         if mode == "auto":
-            mode = "index" if self.tool_registry and len(self.tool_registry) > 0 else "full"
+            mode = "index" if self.tool_registry is not None else "full"
         if mode == "index":
             return self.skills.as_index_prompt(skills)
         return self.skills.as_full_prompt(skills)

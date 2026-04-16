@@ -8,3 +8,7 @@ Current gaps to fill:
 - feedback signal semantics
 - skill emergence review workflow
 - identity selection and memory isolation UX
+
+Implemented specs:
+
+- [Conversation Mode](conversation-mode.md): persisted `plan` / `execute` behavior and plan state

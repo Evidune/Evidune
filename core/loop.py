@@ -196,13 +196,9 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
 
     # Tool registry: internal tools always; external tools when enabled
     from agent.tools.external import ExternalToolsConfig, external_tools
-    from agent.tools.internal import conversation_tools, memory_tools, skill_tools
     from agent.tools.registry import ToolRegistry
 
     tool_registry = ToolRegistry()
-    tool_registry.register_many(memory_tools(memory))
-    tool_registry.register_many(skill_tools(skill_registry))
-    tool_registry.register_many(conversation_tools(memory, current_conversation_id=""))
     if config.agent.tools.external_enabled:
         ext_cfg = ExternalToolsConfig(
             shell_timeout_s=config.agent.tools.shell_timeout_s,
