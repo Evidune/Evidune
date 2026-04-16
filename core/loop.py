@@ -18,6 +18,12 @@ from core.iteration_history import (
     record_iteration_report,
 )
 from core.metrics import get_adapter
+from core.project_init import init_project
+from core.runtime_paths import (
+    resolve_emergence_output_dir,
+    resolve_memory_path,
+    resolve_metrics_config,
+)
 from core.updater import update_reference
 
 
@@ -41,12 +47,13 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
         base_dir = Path.cwd()
 
     # 1. Fetch metrics
+    metrics_config = resolve_metrics_config(config, base_dir)
     adapter = get_adapter(config.metrics.adapter)
-    snapshot = adapter.fetch(config.metrics.config)
+    snapshot = adapter.fetch(metrics_config)
     snapshot.domain = config.domain
 
     # 2. Analyze
-    sort_metric = config.metrics.config.get("sort_metric", "reads")
+    sort_metric = metrics_config.get("sort_metric", "reads")
     result = analyze(
         snapshot,
         sort_metric=sort_metric,
@@ -98,7 +105,7 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
 
     from memory.store import MemoryStore
 
-    memory = MemoryStore(config.memory.path)
+    memory = MemoryStore(resolve_memory_path(config, base_dir))
     try:
         run_id = record_iteration_report(memory, config, snapshot, report, sort_metric)
     finally:
@@ -107,10 +114,12 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
 
     # 6. Send via channels
     for ch_config in config.channels:
+        channel_kwargs = dict(ch_config.config)
+        if ch_config.webhook is not None:
+            channel_kwargs["webhook"] = ch_config.webhook
         channel = create_channel(
             ch_config.type,
-            webhook=ch_config.webhook,
-            **ch_config.config,
+            **channel_kwargs,
         )
         channel.send_report(report)
 
@@ -130,11 +139,11 @@ def _handle_docs_command(base_dir: Path, subcommand: str | None) -> int:
 
 
 def _handle_iterations_command(
-    config: AiflayConfig, subcommand: str | None, target: str | None
+    config: AiflayConfig, base_dir: Path, subcommand: str | None, target: str | None
 ) -> int:
     from memory.store import MemoryStore
 
-    memory = MemoryStore(config.memory.path)
+    memory = MemoryStore(resolve_memory_path(config, base_dir))
     try:
         if subcommand in (None, "list"):
             print(format_iteration_runs(memory.list_iteration_runs()))
@@ -151,6 +160,22 @@ def _handle_iterations_command(
         raise ValueError("iterations only supports 'list' and 'show'")
     finally:
         memory.close()
+
+
+def _handle_init_command(target: str | None, subcommand: str | None) -> int:
+    if subcommand:
+        raise ValueError("init does not support subcommands; use --path if needed")
+    result = init_project(target or ".")
+    print(f"Initialized starter project at {result.root}")
+    print("Created:")
+    for path in result.created_files:
+        print(f"  - {path.relative_to(result.root)}")
+    print("")
+    print("Next steps:")
+    print(f"  cd {result.root}")
+    print("  aiflay run --config aiflay.yaml")
+    print("  aiflay serve --config aiflay.yaml")
+    return 0
 
 
 async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
@@ -185,7 +210,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         temperature=config.agent.temperature,
     )
 
-    memory = MemoryStore(config.memory.path)
+    memory = MemoryStore(resolve_memory_path(config, base_dir))
 
     skill_registry = SkillRegistry()
     for skill_dir in config.skills.directories:
@@ -236,7 +261,8 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         emerge_judge = _build_judge() if config.agent.emergence.use_evaluator else llm
         pattern_detector = PatternDetector(judge=emerge_judge)
         skill_synthesizer = SkillSynthesizer(
-            judge=emerge_judge, output_dir=config.agent.emergence.output_dir
+            judge=emerge_judge,
+            output_dir=resolve_emergence_output_dir(config, base_dir),
         )
 
     # Title generator (always on when agent is configured — cheap, high value)
@@ -314,19 +340,20 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point: aiflay run|serve|docs|iterations."""
+    """CLI entry point: aiflay run|serve|docs|iterations|init."""
     import asyncio
 
     parser = argparse.ArgumentParser(description="Aiflay — outcome-driven skill self-iteration")
     parser.add_argument(
         "command",
-        choices=["run", "serve", "docs", "iterations"],
+        choices=["run", "serve", "docs", "iterations", "init"],
         help="Command to execute",
     )
     parser.add_argument("subcommand", nargs="?", help="Subcommand for the selected command")
     parser.add_argument("target", nargs="?", help="Optional target for the selected subcommand")
     parser.add_argument("--config", "-c", default="aiflay.yaml", help="Path to aiflay.yaml")
     parser.add_argument("--base-dir", "-d", default=None, help="Base directory for resolving paths")
+    parser.add_argument("--path", help="Target path for 'init'")
 
     args = parser.parse_args(argv)
     base_dir = Path(args.base_dir) if args.base_dir else Path(args.config).parent
@@ -337,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.base_dir) if args.base_dir else Path.cwd(),
                 args.subcommand,
             )
+        if args.command == "init":
+            return _handle_init_command(args.path, args.subcommand)
 
         config = load_config(args.config)
 
@@ -349,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
             asyncio.run(serve(config, base_dir))
             return 0
         if args.command == "iterations":
-            return _handle_iterations_command(config, args.subcommand, args.target)
+            return _handle_iterations_command(config, base_dir, args.subcommand, args.target)
     except ValueError as exc:
         parser.error(str(exc))
     return 0

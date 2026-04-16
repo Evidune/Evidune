@@ -16,6 +16,7 @@ agents working in Aiflay.
 - [Completed Plans](exec-plans/completed/README.md): archived execution records
 - [Product Specs](product-specs/index.md): user-facing behavior and UX intent
 - [References](references/index.md): stable reference material for humans and agents
+- [Local Iteration](references/local-iteration.md): starter flow and runtime path semantics
 - [Generated](generated/README.md): generated or mechanically maintained repo artifacts
 
 ## Maintenance Rules

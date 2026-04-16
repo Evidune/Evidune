@@ -7,5 +7,6 @@ build/
 *.db
 .env
 .claude/
+.aiflay/
 web/node_modules/
 web/dist/

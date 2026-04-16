@@ -23,5 +23,5 @@ When frontend behavior changes, also run:
 ## Next Reliability Milestones
 
 - Add browser-driven validation for the web gateway.
-- Add worktree-local run artifacts for reproducible debugging.
 - Expose logs and metrics to the agent through stable local interfaces.
+- Keep starter scaffolds and bundled examples runnable in CI-style local checks.

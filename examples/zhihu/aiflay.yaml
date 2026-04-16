@@ -29,7 +29,7 @@ agent:
     enabled: false # 默认关闭，需要 evaluator 或 main LLM 可用
     every_n_turns: 10 # 检测频率（比 fact_extraction 慢，因为生成成本更高）
     min_confidence: 0.7 # 低于此置信度不创建新 skill
-    output_dir: ~/.aiflay/emerged_skills # 浮现 skill 落盘位置
+    output_dir: .aiflay/emerged_skills # 浮现 skill 落盘位置（相对 aiflay.yaml）
     use_evaluator: true # 用 evaluator LLM 做检测/合成
 
 # === Skill 配置 ===
@@ -46,7 +46,7 @@ identities:
 
 # === 记忆 ===
 memory:
-  path: ~/.aiflay/zhihu-memory.db
+  path: .aiflay/zhihu-memory.db
   max_messages_per_conversation: 50
 
 # === 渠道网关（双向消息） ===
@@ -82,11 +82,11 @@ analysis:
 
 iteration:
   schedule: '0 21 * * *'
-  git_commit: true
+  git_commit: false
   commit_prefix: 'chore(zhihu-review): '
 
 # === 通知渠道（单向报告） ===
 channels:
   - type: stdout
-  - type: feishu
-    webhook: ${FEISHU_WEBHOOK_URL}
+  # - type: feishu
+  #   webhook: ${FEISHU_WEBHOOK_URL}

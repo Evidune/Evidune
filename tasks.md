@@ -8,9 +8,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 
 ## Pending
 
-- [ ] Add `aiflay init` CLI command to scaffold starter `aiflay.yaml`
 - [ ] Browser-driven validation harness for the web gateway
-- [ ] Worktree-local runtime artifacts and validation commands
 - [ ] Agent-visible logs, metrics, and traces for local runs
 - [ ] Streaming responses for the web gateway (SSE)
 - [ ] Markdown rendering + code highlighting in the chat UI
@@ -37,6 +35,8 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Add persisted `plan` / `execute` conversation modes
 - [x] Surface conversation mode and plan state in the web UI
 - [x] Persist iteration run ledger and CLI inspection commands
+- [x] Add `aiflay init` CLI command to scaffold starter `aiflay.yaml`
+- [x] Add worktree-local runtime artifacts and runnable local examples
 
 ## Notes
 

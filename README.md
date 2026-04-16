@@ -13,10 +13,36 @@ pip install aiflay
 
 ## Quick Start
 
+Scaffold a local starter project:
+
+```bash
+aiflay init --path demo
+cd demo
+aiflay run --config aiflay.yaml
+```
+
+Run the bundled Zhihu example from the repo root:
+
+```bash
+python -m core.loop run --config examples/zhihu/aiflay.yaml
+python -m core.loop iterations list --config examples/zhihu/aiflay.yaml
+```
+
+Start the interactive agent:
+
 ```bash
 aiflay run --config aiflay.yaml
 aiflay serve --config aiflay.yaml
 ```
+
+## Local Iteration
+
+- `aiflay init` creates a runnable local loop with sample metrics, one identity, one
+  outcome-tracked skill, and worktree-local runtime artifacts under `.aiflay/`.
+- `aiflay run` now records each iteration cycle into SQLite so you can inspect recent
+  runs with `aiflay iterations list` and `aiflay iterations show <id>`.
+- Relative runtime paths like `memory.path`, `agent.emergence.output_dir`, and
+  `metrics.config.file` are resolved relative to the active `aiflay.yaml`.
 
 ## Repository Docs
 
