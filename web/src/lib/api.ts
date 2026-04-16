@@ -6,6 +6,7 @@ import type {
   FeedbackRequest,
   FeedbackResponse,
   Skill,
+  TaskEvent,
 } from './types'
 
 const BASE = ''
@@ -36,6 +37,38 @@ export async function sendMessage(
     return { text: '', conversation_id: conversationId, error: `HTTP ${resp.status}` }
   }
   return resp.json()
+}
+
+export function streamMessage(
+  text: string,
+  conversationId: string,
+  handlers: {
+    onTask: (event: TaskEvent) => void
+    onDone: (response: ChatResponse) => void
+    onError: (message: string) => void
+  },
+  identity?: string,
+  mode?: ConversationMode,
+): () => void {
+  const params = new URLSearchParams({
+    text,
+    conversation_id: conversationId,
+  })
+  if (identity) params.set('identity', identity)
+  if (mode) params.set('mode', mode)
+  const source = new EventSource(`${BASE}/api/chat/stream?${params.toString()}`)
+  source.addEventListener('task', event => {
+    handlers.onTask(JSON.parse(event.data) as TaskEvent)
+  })
+  source.addEventListener('done', event => {
+    source.close()
+    handlers.onDone(JSON.parse(event.data) as ChatResponse)
+  })
+  source.addEventListener('error', () => {
+    source.close()
+    handlers.onError('Streaming failed')
+  })
+  return () => source.close()
 }
 
 export async function sendFeedback(req: FeedbackRequest): Promise<FeedbackResponse> {

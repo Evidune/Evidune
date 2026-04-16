@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Message, SignalType } from '../lib/types'
   import { sendFeedback } from '../lib/api'
+  import TaskTimeline from './TaskTimeline.svelte'
   import ToolTrace from './ToolTrace.svelte'
 
   let { message, onRegenerate }: { message: Message; onRegenerate?: () => void } = $props()
@@ -56,6 +57,16 @@
 
   {#if !isUser && message.toolTrace && message.toolTrace.length > 0}
     <ToolTrace trace={message.toolTrace} />
+  {/if}
+
+  {#if !isUser && message.taskEvents && message.taskEvents.length > 0}
+    <TaskTimeline
+      squad={message.squad}
+      status={message.taskStatus}
+      events={message.taskEvents}
+      convergence={message.convergenceSummary}
+      budget={message.budgetSummary}
+    />
   {/if}
 
   <div class="msg-body">{message.content}</div>

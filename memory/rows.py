@@ -28,6 +28,7 @@ def row_to_execution(row) -> dict[str, Any]:
         "id": row["id"],
         "skill_name": row["skill_name"],
         "conversation_id": row["conversation_id"],
+        "harness_task_id": row["harness_task_id"] or "",
         "user_input": row["user_input"],
         "assistant_output": row["assistant_output"],
         "signals": json.loads(row["signals_json"] or "{}"),
@@ -53,4 +54,54 @@ def row_to_iteration_run(row, updates: list[dict[str, Any]] | None = None) -> di
         "commit_sha": row["commit_sha"],
         "created_at": row["created_at"],
         "updates": updates or [],
+    }
+
+
+def row_to_harness_task(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "conversation_id": row["conversation_id"],
+        "surface": row["surface"],
+        "squad_profile": row["squad_profile"],
+        "status": row["status"],
+        "task_kind": row["task_kind"],
+        "user_input": row["user_input"],
+        "selected_skills": json.loads(row["selected_skills_json"] or "[]"),
+        "role_roster": json.loads(row["role_roster_json"] or "[]"),
+        "budget": json.loads(row["budget_json"] or "{}"),
+        "summary": row["summary"],
+        "convergence": json.loads(row["convergence_json"] or "{}"),
+        "final_output": row["final_output"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def row_to_harness_step(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "phase": row["phase"],
+        "role": row["role"],
+        "status": row["status"],
+        "summary": row["summary"],
+        "tool_trace": json.loads(row["tool_trace_json"] or "[]"),
+        "budget": json.loads(row["budget_json"] or "{}"),
+        "created_at": row["created_at"],
+    }
+
+
+def row_to_harness_artifact(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "task_id": row["task_id"],
+        "step_id": row["step_id"],
+        "phase": row["phase"],
+        "role": row["role"],
+        "kind": row["kind"],
+        "summary": row["summary"],
+        "content": row["content"],
+        "accepted": bool(row["accepted"]),
+        "meta": json.loads(row["meta_json"] or "{}"),
+        "created_at": row["created_at"],
     }

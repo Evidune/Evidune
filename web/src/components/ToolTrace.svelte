@@ -23,6 +23,7 @@
       <div class="entry" class:error={t.is_error}>
         <button class="head" onclick={() => toggle(i)}>
           <span class="icon">{t.is_error ? '⚠' : '🔧'}</span>
+          {#if t.role}<span class="role">{t.role}</span>{/if}
           <span class="name">{t.name}</span>
           <span class="args-preview">{argsPreview(t.arguments)}</span>
           <span class="chev">{expanded[i] ? '▾' : '▸'}</span>
@@ -91,6 +92,13 @@
   .name {
     font-weight: 600;
     color: var(--accent2);
+  }
+
+  .role {
+    font-size: 10px;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
   .entry.error .name {

@@ -23,6 +23,10 @@ agent:
   temperature: 0.7
   system_prompt: |
     You are a practical assistant helping the user improve content with reusable skills.
+  harness:
+    strategy: swarm
+    default_squad: general
+    stream_events: true
   emergence:
     enabled: false
     output_dir: .aiflay/emerged_skills

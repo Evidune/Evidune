@@ -380,6 +380,7 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         emergence_min_confidence=config.agent.emergence.min_confidence,
         title_generator=title_generator,
         tool_registry=tool_registry,
+        harness_config=config.agent.harness,
     )
 
     # Create gateways

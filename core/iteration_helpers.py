@@ -39,35 +39,37 @@ def update_outcome_skills(
         registry.load_directory(base_dir / skill_dir)
 
     skill_updates: list[UpdateResult] = []
+    workflow_enabled = True
+    if config.agent is not None:
+        workflow_enabled = getattr(config.agent.harness, "iteration_workflow_enabled", True)
     for skill in registry.get_outcome_skills():
         feedback = summarise_skill_feedback(memory.get_skill_executions(skill.name, limit=20))
-        update = _update_outcome_skill(skill, result, feedback, memory)
+        if workflow_enabled:
+            update = _update_outcome_skill(skill, result, feedback, memory)
+        else:
+            reference_content = build_skill_reference_content(skill.update_section, result)
+            update = update_reference(
+                path=skill.path,
+                strategy="replace_section",
+                new_content=reference_content,
+                section=skill.update_section,
+            )
         skill_updates.append(update)
     return skill_updates
 
 
 def _update_outcome_skill(skill, result, feedback: SkillFeedbackSummary, memory) -> UpdateResult:
+    from core.iteration_harness import IterationHarness
+
     current = skill.path.read_text(encoding="utf-8")
-    if feedback.should_disable:
-        rollback = _rollback_skill(skill, current, result, feedback, memory)
-        if rollback is not None:
-            return rollback
-
-    has_metric_evidence = bool(result.top_performers) and (
-        len(result.top_performers) >= 2 or bool(result.patterns)
+    workflow = IterationHarness(memory)
+    decision = workflow.run(
+        skill=skill,
+        result=result,
+        feedback=feedback,
+        current=current,
     )
-    if has_metric_evidence and feedback.should_rewrite:
-        rewritten = _rewrite_skill(skill, current, result, feedback, memory)
-        if rewritten is not None:
-            return rewritten
-
-    reference_content = build_skill_reference_content(skill.update_section, result)
-    return update_reference(
-        path=skill.path,
-        strategy="replace_section",
-        new_content=reference_content,
-        section=skill.update_section,
-    )
+    return decision.update
 
 
 def _rewrite_skill(

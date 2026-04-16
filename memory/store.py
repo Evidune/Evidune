@@ -15,7 +15,14 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from memory.rows import row_to_execution, row_to_fact, row_to_iteration_run
+from memory.rows import (
+    row_to_execution,
+    row_to_fact,
+    row_to_harness_artifact,
+    row_to_harness_step,
+    row_to_harness_task,
+    row_to_iteration_run,
+)
 from memory.schema import init_schema
 from memory.store_models import Fact, Message  # noqa: F401 — re-exported
 
@@ -141,8 +148,8 @@ class MemoryStore:
             now = self._now()
             self._conn.execute(
                 """INSERT OR IGNORE INTO conversations
-                   (id, channel, identity, mode, created_at, updated_at)
-                   VALUES (?, ?, ?, 'execute', ?, ?)""",
+                   (id, channel, identity, squad_profile, mode, created_at, updated_at)
+                   VALUES (?, ?, ?, '', 'execute', ?, ?)""",
                 (conversation_id, channel, identity, now, now),
             )
             # Backfill the channel for legacy rows that were created before
@@ -230,7 +237,8 @@ class MemoryStore:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                f"""SELECT c.id, c.channel, c.identity, c.mode, c.plan_json, c.title, c.status,
+                f"""SELECT c.id, c.channel, c.identity, c.squad_profile,
+                           c.mode, c.plan_json, c.title, c.status,
                            c.created_at, c.updated_at,
                            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id)
                              AS message_count,
@@ -254,6 +262,7 @@ class MemoryStore:
                     "id": r["id"],
                     "channel": r["channel"],
                     "identity": r["identity"] or "",
+                    "squad_profile": r["squad_profile"] or "",
                     "mode": r["mode"] or "execute",
                     "has_plan": bool(r["plan_json"]),
                     "title": r["title"] or "",
@@ -270,7 +279,8 @@ class MemoryStore:
         """Get a conversation's metadata (without history)."""
         with self._lock:
             row = self._conn.execute(
-                """SELECT id, channel, identity, mode, plan_json, title, status, created_at, updated_at
+                """SELECT id, channel, identity, squad_profile,
+                          mode, plan_json, title, status, created_at, updated_at
                    FROM conversations WHERE id = ?""",
                 (conversation_id,),
             ).fetchone()
@@ -311,6 +321,27 @@ class MemoryStore:
             )
             self._conn.commit()
             return cursor.rowcount > 0
+
+    def set_conversation_squad_profile(self, conversation_id: str, squad_profile: str) -> bool:
+        """Persist the selected squad profile for a conversation."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE conversations SET squad_profile = ?, updated_at = ? WHERE id = ?",
+                (squad_profile, self._now(), conversation_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def get_conversation_squad_profile(self, conversation_id: str) -> str | None:
+        """Return the stored squad profile name for a conversation."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT squad_profile FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return row["squad_profile"] or None
 
     def set_conversation_mode(self, conversation_id: str, mode: str) -> bool:
         """Persist the current operating mode for a conversation."""
@@ -387,6 +418,18 @@ class MemoryStore:
             self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
             self._conn.execute(
                 "DELETE FROM skill_executions WHERE conversation_id = ?", (conversation_id,)
+            )
+            task_rows = self._conn.execute(
+                "SELECT id FROM harness_tasks WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchall()
+            task_ids = [row["id"] for row in task_rows]
+            for task_id in task_ids:
+                self._conn.execute("DELETE FROM harness_steps WHERE task_id = ?", (task_id,))
+                self._conn.execute("DELETE FROM harness_artifacts WHERE task_id = ?", (task_id,))
+            self._conn.execute(
+                "DELETE FROM harness_tasks WHERE conversation_id = ?",
+                (conversation_id,),
             )
             cursor = self._conn.execute(
                 "DELETE FROM conversations WHERE id = ?", (conversation_id,)
@@ -488,6 +531,7 @@ class MemoryStore:
         user_input: str,
         assistant_output: str,
         conversation_id: str | None = None,
+        harness_task_id: str | None = None,
         signals: dict | None = None,
         cross_model_score: float | None = None,
         evaluator_reasoning: str | None = None,
@@ -497,12 +541,13 @@ class MemoryStore:
             now = self._now()
             cursor = self._conn.execute(
                 """INSERT INTO skill_executions
-                   (skill_name, conversation_id, user_input, assistant_output,
+                   (skill_name, conversation_id, harness_task_id, user_input, assistant_output,
                     signals_json, cross_model_score, evaluator_reasoning, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     skill_name,
                     conversation_id,
+                    harness_task_id or "",
                     user_input,
                     assistant_output,
                     json.dumps(signals or {}, ensure_ascii=False),
@@ -548,7 +593,7 @@ class MemoryStore:
         """Get recent executions for a skill (newest first)."""
         with self._lock:
             rows = self._conn.execute(
-                """SELECT id, skill_name, conversation_id, user_input, assistant_output,
+                """SELECT id, skill_name, conversation_id, harness_task_id, user_input, assistant_output,
                           signals_json, cross_model_score, evaluator_reasoning, created_at
                    FROM skill_executions
                    WHERE skill_name = ?
@@ -557,6 +602,278 @@ class MemoryStore:
                 (skill_name, limit),
             ).fetchall()
         return [row_to_execution(r) for r in rows]
+
+    # --- Squad / Harness API ---
+
+    def save_squad_profile(
+        self,
+        name: str,
+        *,
+        roles: list[str] | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        """Upsert a squad profile snapshot for audit and UI continuity."""
+        with self._lock:
+            now = self._now()
+            self._conn.execute(
+                """INSERT INTO squad_profiles
+                   (name, roles_json, config_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET
+                     roles_json = ?,
+                     config_json = ?,
+                     updated_at = ?""",
+                (
+                    name,
+                    self._json_dump(roles or []),
+                    self._json_dump(config or {}),
+                    now,
+                    now,
+                    self._json_dump(roles or []),
+                    self._json_dump(config or {}),
+                    now,
+                ),
+            )
+            self._conn.commit()
+
+    def get_squad_profile(self, name: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM squad_profiles WHERE name = ?",
+                (name,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "name": row["name"],
+            "roles": json.loads(row["roles_json"] or "[]"),
+            "config": self._json_load_dict(row["config_json"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def create_harness_task(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str = "",
+        surface: str = "serve",
+        squad_profile: str = "",
+        status: str = "running",
+        task_kind: str = "conversation",
+        user_input: str = "",
+        selected_skills: list[str] | None = None,
+        role_roster: list[str] | None = None,
+        budget: dict[str, Any] | None = None,
+    ) -> str:
+        """Create or replace a persisted harness task record."""
+        with self._lock:
+            now = self._now()
+            self._conn.execute(
+                """INSERT OR REPLACE INTO harness_tasks
+                   (id, conversation_id, surface, squad_profile, status, task_kind,
+                    user_input, selected_skills_json, role_roster_json, budget_json,
+                    summary, convergence_json, final_output, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '{}', '', ?, ?)""",
+                (
+                    task_id,
+                    conversation_id,
+                    surface,
+                    squad_profile,
+                    status,
+                    task_kind,
+                    user_input,
+                    self._json_dump(selected_skills or []),
+                    self._json_dump(role_roster or []),
+                    self._json_dump(budget or {}),
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return task_id
+
+    def update_harness_task(
+        self,
+        task_id: str,
+        *,
+        status: str | None = None,
+        summary: str | None = None,
+        convergence: dict[str, Any] | None = None,
+        final_output: str | None = None,
+        budget: dict[str, Any] | None = None,
+    ) -> bool:
+        """Update status and output fields for an existing harness task."""
+        updates = []
+        params: list[Any] = []
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if summary is not None:
+            updates.append("summary = ?")
+            params.append(summary)
+        if convergence is not None:
+            updates.append("convergence_json = ?")
+            params.append(self._json_dump(convergence))
+        if final_output is not None:
+            updates.append("final_output = ?")
+            params.append(final_output)
+        if budget is not None:
+            updates.append("budget_json = ?")
+            params.append(self._json_dump(budget))
+        updates.append("updated_at = ?")
+        params.append(self._now())
+        params.append(task_id)
+        with self._lock:
+            cursor = self._conn.execute(
+                f"UPDATE harness_tasks SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def get_harness_task(self, task_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM harness_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+        return row_to_harness_task(row) if row else None
+
+    def list_harness_tasks(
+        self,
+        conversation_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            if conversation_id:
+                rows = self._conn.execute(
+                    """SELECT * FROM harness_tasks
+                       WHERE conversation_id = ?
+                       ORDER BY updated_at DESC
+                       LIMIT ?""",
+                    (conversation_id, limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """SELECT * FROM harness_tasks
+                       ORDER BY updated_at DESC
+                       LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+        return [row_to_harness_task(row) for row in rows]
+
+    def record_harness_step(
+        self,
+        task_id: str,
+        *,
+        phase: str,
+        role: str,
+        status: str = "completed",
+        summary: str = "",
+        tool_trace: list[dict[str, Any]] | None = None,
+        budget: dict[str, Any] | None = None,
+    ) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO harness_steps
+                   (task_id, phase, role, status, summary, tool_trace_json, budget_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    phase,
+                    role,
+                    status,
+                    summary,
+                    self._json_dump(tool_trace or []),
+                    self._json_dump(budget or {}),
+                    self._now(),
+                ),
+            )
+            self._conn.commit()
+            return cursor.lastrowid or 0
+
+    def list_harness_steps(self, task_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT * FROM harness_steps
+                   WHERE task_id = ?
+                   ORDER BY id ASC""",
+                (task_id,),
+            ).fetchall()
+        return [row_to_harness_step(row) for row in rows]
+
+    def record_harness_artifact(
+        self,
+        task_id: str,
+        *,
+        step_id: int = 0,
+        phase: str,
+        role: str,
+        kind: str,
+        summary: str,
+        content: str,
+        accepted: bool = False,
+        meta: dict[str, Any] | None = None,
+    ) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                """INSERT INTO harness_artifacts
+                   (task_id, step_id, phase, role, kind, summary, content, accepted, meta_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id,
+                    step_id,
+                    phase,
+                    role,
+                    kind,
+                    summary,
+                    content,
+                    int(accepted),
+                    self._json_dump(meta or {}),
+                    self._now(),
+                ),
+            )
+            self._conn.commit()
+            return cursor.lastrowid or 0
+
+    def set_harness_artifact_accepted(
+        self,
+        artifact_id: int,
+        *,
+        accepted: bool,
+        meta: dict[str, Any] | None = None,
+    ) -> bool:
+        with self._lock:
+            if meta is not None:
+                cursor = self._conn.execute(
+                    "UPDATE harness_artifacts SET accepted = ?, meta_json = ? WHERE id = ?",
+                    (int(accepted), self._json_dump(meta), artifact_id),
+                )
+            else:
+                cursor = self._conn.execute(
+                    "UPDATE harness_artifacts SET accepted = ? WHERE id = ?",
+                    (int(accepted), artifact_id),
+                )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def list_harness_artifacts(
+        self,
+        task_id: str,
+        *,
+        accepted_only: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM harness_artifacts WHERE task_id = ?"
+        params: list[Any] = [task_id]
+        if accepted_only is True:
+            query += " AND accepted = 1"
+        elif accepted_only is False:
+            query += " AND accepted = 0"
+        query += " ORDER BY id ASC"
+        with self._lock:
+            rows = self._conn.execute(query, params).fetchall()
+        return [row_to_harness_artifact(row) for row in rows]
 
     # --- Emerged Skill API ---
 

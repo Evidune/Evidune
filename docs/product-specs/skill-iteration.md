@@ -1,8 +1,7 @@
 # Skill Iteration
 
-This spec defines the target behavior for Aiflay's skill self-iteration system.
-It intentionally describes the desired end state and calls out where the current
-implementation still falls short.
+This spec defines the behavior of Aiflay's skill self-iteration system after the
+first harness-backed closure pass.
 
 Skill iteration has two loops:
 
@@ -24,6 +23,9 @@ evidence layer and the skill definition itself.
   signals, evaluator scores, and the recent performance history of the skill
 - The loop may decide to keep the current skill unchanged, rewrite it, or roll
   it back to a previous version when newer edits underperform
+- The decision workflow is recorded as a harness task with the roles
+  `evidence_collector`, `rewrite_proposer`, `safety_reviewer`, and
+  `lifecycle_arbiter`
 
 ### Conversation Emergence
 
@@ -50,6 +52,7 @@ Skill self-iteration needs a durable lifecycle model instead of one-off writes.
 - `rolled_back` records skills or rewrites reverted after negative evidence
 - Every activation, rewrite, disable, and rollback must store the reason and
   evidence used to make that decision
+- Runtime state, stored lifecycle state, and restart reload behavior must agree
 
 ### Unified Decision Inputs
 
@@ -71,21 +74,15 @@ Feedback and evaluation signals must feed the same decision loop.
   reference section
 - Every automatic change leaves an auditable record that explains why it
   happened
+- Each outcome iteration run persists a harness task, step, and artifact trail
 
-## Current Implementation Gap
+## Current Gaps
 
-The current codebase only partially closes this loop.
+The core loop is now closed, but a few product gaps remain:
 
-- `aiflay run` updates `Reference Data`-style sections but does not rewrite the
-  core skill definition
-- Outcome analysis is currently limited to simple heuristics, so direct skill
-  rewrites are not yet evidence-backed
-- Feedback signals and evaluator scores are stored, but they are not consumed by
-  any runtime decision engine
-- Emerged skills are recorded as `pending_review`, yet they are also injected
-  into the live in-process registry immediately, which makes status and runtime
-  behavior diverge
-- Startup loads skills from configured skill directories, but it does not
-  automatically reload active emerged skills from `agent.emergence.output_dir`
-- There is no implemented audit, disable, or rollback flow for automatic skill
-  changes beyond raw metadata storage
+- `pending_review` exists as lifecycle state, but there is no operator-facing UI
+  for manual hold and resume flows yet
+- The iteration workflow is deterministic and evidence-backed, but it does not
+  yet use an LLM-driven reviewer or arbiter
+- Disable semantics are strongest for emerged skills; non-emerged base skills
+  still default to keep-or-rollback instead of a hard disable path

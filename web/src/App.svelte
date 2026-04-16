@@ -8,8 +8,16 @@
     fetchConversations,
     fetchSkills,
     sendMessage,
+    streamMessage,
   } from './lib/api'
-  import type { ConversationMode, ConversationPlan, ConversationSummary, Message } from './lib/types'
+  import type {
+    ChatResponse,
+    ConversationMode,
+    ConversationPlan,
+    ConversationSummary,
+    Message,
+    TaskEvent,
+  } from './lib/types'
   import ChatMessage from './components/ChatMessage.svelte'
   import ChatInput from './components/ChatInput.svelte'
   import ConversationList from './components/ConversationList.svelte'
@@ -139,51 +147,103 @@
     isLoading.set(true)
     activeSkills.set([])
     await scrollToBottom()
+    const botId = crypto.randomUUID()
+    messages.update(m => [
+      ...m,
+      {
+        id: botId,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+        taskEvents: [],
+      },
+    ])
 
-    const resp = await sendMessage(text, activeConvId, undefined, currentMode)
-    isLoading.set(false)
-
-    const botMsg: Message = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: resp.error ? `[Error] ${resp.error}` : resp.text,
-      timestamp: Date.now(),
-      skills: resp.skills,
-      executionIds: resp.execution_ids,
-      toolTrace: resp.tool_trace,
-    }
-
-    messages.update(m => [...m, botMsg])
-    if (resp.skills?.length) {
-      activeSkills.set(resp.skills)
-    }
-
-    if (resp.mode) {
-      currentMode = resp.mode
-    }
-    currentPlan = resp.plan ?? null
-
-    if (resp.emerged_skill) {
-      showToast(`✨ New skill emerged: ${resp.emerged_skill}`, 'success')
-      const updated = await fetchSkills()
-      skills.set(updated)
-    }
-
-    if (resp.facts_extracted && resp.facts_extracted > 0) {
-      showToast(
-        `Learned ${resp.facts_extracted} new fact${resp.facts_extracted > 1 ? 's' : ''}`,
-        'info',
+    const applyResponse = async (resp: ChatResponse) => {
+      messages.update(m =>
+        m.map(msg =>
+          msg.id === botId
+            ? {
+                ...msg,
+                content: resp.error ? `[Error] ${resp.error}` : resp.text,
+                skills: resp.skills,
+                executionIds: resp.execution_ids,
+                toolTrace: resp.tool_trace,
+                taskId: resp.task_id,
+                squad: resp.squad,
+                taskStatus: resp.task_status,
+                taskEvents: resp.task_events ?? msg.taskEvents,
+                convergenceSummary: resp.convergence_summary ?? null,
+                budgetSummary: resp.budget_summary ?? null,
+              }
+            : msg,
+        ),
       )
+      isLoading.set(false)
+
+      if (resp.skills?.length) {
+        activeSkills.set(resp.skills)
+      }
+
+      if (resp.mode) {
+        currentMode = resp.mode
+      }
+      currentPlan = resp.plan ?? null
+
+      if (resp.emerged_skill) {
+        showToast(`✨ New skill emerged: ${resp.emerged_skill}`, 'success')
+        const updated = await fetchSkills()
+        skills.set(updated)
+      }
+
+      if (resp.facts_extracted && resp.facts_extracted > 0) {
+        showToast(
+          `Learned ${resp.facts_extracted} new fact${resp.facts_extracted > 1 ? 's' : ''}`,
+          'info',
+        )
+      }
+
+      if (resp.new_title) {
+        showToast(`Titled: ${resp.new_title}`, 'info')
+      }
+
+      await refreshConversations()
+      await scrollToBottom()
     }
 
-    if (resp.new_title) {
-      showToast(`Titled: ${resp.new_title}`, 'info')
+    const updateTask = (event: TaskEvent) => {
+      messages.update(m =>
+        m.map(msg =>
+          msg.id === botId
+            ? {
+                ...msg,
+                taskEvents: [...(msg.taskEvents ?? []), event],
+              }
+            : msg,
+        ),
+      )
+      scrollToBottom()
     }
 
-    // Refresh sidebar so the just-used conversation bubbles up
-    await refreshConversations()
-
-    await scrollToBottom()
+    let finished = false
+    streamMessage(
+      text,
+      activeConvId,
+      {
+        onTask: event => updateTask(event),
+        onDone: resp => {
+          finished = true
+          applyResponse(resp)
+        },
+        onError: async () => {
+          if (finished) return
+          const resp = await sendMessage(text, activeConvId, undefined, currentMode)
+          await applyResponse(resp)
+        },
+      },
+      undefined,
+      currentMode,
+    )
   }
 
   function handleRegenerate(originalUserMsg: Message) {

@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     channel TEXT DEFAULT '',
     identity TEXT DEFAULT '',
+    squad_profile TEXT DEFAULT '',
     mode TEXT DEFAULT 'execute',
     plan_json TEXT DEFAULT '',
     title TEXT DEFAULT '',
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS skill_executions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     skill_name TEXT NOT NULL,
     conversation_id TEXT,
+    harness_task_id TEXT DEFAULT '',
     user_input TEXT NOT NULL,
     assistant_output TEXT NOT NULL,
     signals_json TEXT DEFAULT '{}',
@@ -59,6 +61,60 @@ CREATE TABLE IF NOT EXISTS skill_lifecycle_events (
     content_before TEXT DEFAULT '',
     content_after TEXT DEFAULT '',
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS squad_profiles (
+    name TEXT PRIMARY KEY,
+    roles_json TEXT DEFAULT '[]',
+    config_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS harness_tasks (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT DEFAULT '',
+    surface TEXT DEFAULT 'serve',
+    squad_profile TEXT DEFAULT '',
+    status TEXT DEFAULT 'running',
+    task_kind TEXT DEFAULT 'conversation',
+    user_input TEXT DEFAULT '',
+    selected_skills_json TEXT DEFAULT '[]',
+    role_roster_json TEXT DEFAULT '[]',
+    budget_json TEXT DEFAULT '{}',
+    summary TEXT DEFAULT '',
+    convergence_json TEXT DEFAULT '{}',
+    final_output TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS harness_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT DEFAULT 'completed',
+    summary TEXT DEFAULT '',
+    tool_trace_json TEXT DEFAULT '[]',
+    budget_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES harness_tasks(id)
+);
+
+CREATE TABLE IF NOT EXISTS harness_artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    step_id INTEGER DEFAULT 0,
+    phase TEXT NOT NULL,
+    role TEXT NOT NULL,
+    kind TEXT DEFAULT 'note',
+    summary TEXT DEFAULT '',
+    content TEXT DEFAULT '',
+    accepted INTEGER NOT NULL DEFAULT 0,
+    meta_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES harness_tasks(id)
 );
 
 CREATE TABLE IF NOT EXISTS iteration_runs (
@@ -131,6 +187,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _migrate_facts_namespace(conn)
     _migrate_conversations_metadata(conn)
+    _migrate_skill_executions(conn)
     _migrate_emerged_skills(conn)
     _ensure_indexes(conn)
     conn.commit()
@@ -149,6 +206,8 @@ def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()]
     if "identity" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN identity TEXT DEFAULT ''")
+    if "squad_profile" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN squad_profile TEXT DEFAULT ''")
     if "persona" in cols:
         conn.execute(
             "UPDATE conversations SET identity = persona WHERE identity = '' AND persona != ''"
@@ -161,6 +220,13 @@ def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT ''")
     if "status" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN status TEXT DEFAULT 'active'")
+
+
+def _migrate_skill_executions(conn: sqlite3.Connection) -> None:
+    """Older DBs do not track harness_task_id on executions."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(skill_executions)").fetchall()]
+    if "harness_task_id" not in cols:
+        conn.execute("ALTER TABLE skill_executions ADD COLUMN harness_task_id TEXT DEFAULT ''")
 
 
 def _migrate_emerged_skills(conn: sqlite3.Connection) -> None:
@@ -179,7 +245,13 @@ def _migrate_emerged_skills(conn: sqlite3.Connection) -> None:
 def _ensure_indexes(conn: sqlite3.Connection) -> None:
     """Create indexes only after legacy-column migrations have completed."""
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_squad ON conversations(squad_profile)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_executions_task ON skill_executions(harness_task_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_source ON facts(source)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_namespace ON facts(namespace)")
     conn.execute(
@@ -190,4 +262,11 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_skill ON skill_lifecycle_events(skill_name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_harness_tasks_conv ON harness_tasks(conversation_id)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_harness_steps_task ON harness_steps(task_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_harness_artifacts_task ON harness_artifacts(task_id)"
     )

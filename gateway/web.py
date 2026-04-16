@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import queue
 import re
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from gateway.base import Gateway, InboundMessage, MessageHandler
 
@@ -54,11 +55,16 @@ class WebGateway(Gateway):
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                path = urlparse(self.path).path
+                parsed = urlparse(self.path)
+                path = parsed.path
 
                 # API routes
                 if path == "/api/skills":
                     self._json_resp(200, json.loads(gateway._skills_json))
+                    return
+
+                if path == "/api/chat/stream":
+                    self._stream_chat(parsed.query)
                     return
 
                 if path == "/api/conversations":
@@ -176,6 +182,64 @@ class WebGateway(Gateway):
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _stream_chat(self, raw_query: str):
+                params = parse_qs(raw_query, keep_blank_values=True)
+                text = (params.get("text", [""])[0] or "").strip()
+                if not text:
+                    self._json_resp(400, {"error": "Empty message"})
+                    return
+                identity = (params.get("identity", [""])[0] or "").strip() or None
+                mode = (params.get("mode", [""])[0] or "").strip() or None
+                if mode not in (None, "plan", "execute"):
+                    self._json_resp(400, {"error": "mode must be 'plan' or 'execute'"})
+                    return
+                conv_id = (params.get("conversation_id", [""])[0] or "").strip()
+                if not conv_id:
+                    conv_id = f"web-{uuid.uuid4().hex[:8]}"
+
+                events: queue.Queue[dict[str, Any]] = queue.Queue()
+
+                def sink(event) -> None:
+                    events.put(event.to_dict())
+
+                future = asyncio.run_coroutine_threadsafe(
+                    gateway._handle_chat(
+                        text,
+                        conv_id,
+                        identity=identity,
+                        mode=mode,
+                        event_sink=sink,
+                    ),
+                    gateway._loop,
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+
+                while True:
+                    if future.done() and events.empty():
+                        break
+                    try:
+                        payload = events.get(timeout=0.2)
+                    except queue.Empty:
+                        payload = None
+                    if payload is not None:
+                        self._sse("task", payload)
+                try:
+                    result = future.result(timeout=5)
+                    self._sse("done", result)
+                except Exception as exc:
+                    self._sse("error", {"error": str(exc)})
+
+            def _sse(self, event: str, data: Any):
+                payload = json.dumps(data, ensure_ascii=False)
+                body = f"event: {event}\ndata: {payload}\n\n".encode()
+                self.wfile.write(body)
+                self.wfile.flush()
+
             def _serve_static(self, path: str):
                 if path == "/" or path == "":
                     path = "/index.html"
@@ -250,6 +314,7 @@ class WebGateway(Gateway):
         conversation_id: str,
         identity: str | None = None,
         mode: str | None = None,
+        event_sink: Any = None,
     ) -> dict[str, Any]:
         if not self._handler:
             return {"error": "Agent not ready"}
@@ -259,6 +324,8 @@ class WebGateway(Gateway):
             metadata["identity"] = identity
         if mode:
             metadata["mode"] = mode
+        if callable(event_sink):
+            metadata["event_sink"] = event_sink
 
         message = InboundMessage(
             text=text,
@@ -281,6 +348,12 @@ class WebGateway(Gateway):
             "plan": response.metadata.get("plan"),
             "new_title": response.metadata.get("new_title"),
             "tool_trace": response.metadata.get("tool_trace", []),
+            "task_id": response.metadata.get("task_id"),
+            "squad": response.metadata.get("squad"),
+            "task_status": response.metadata.get("task_status"),
+            "task_events": response.metadata.get("task_events", []),
+            "convergence_summary": response.metadata.get("convergence_summary"),
+            "budget_summary": response.metadata.get("budget_summary"),
         }
 
     def _handle_feedback(self, payload: dict[str, Any]) -> dict[str, Any]:

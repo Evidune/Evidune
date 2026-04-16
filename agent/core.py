@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from agent.fact_extractor import FactExtractor
+from agent.harness import TaskBrief
+from agent.harness.profiles import get_squad_profile
+from agent.harness.swarm import SwarmHarness
 from agent.llm import LLMClient
 from agent.pattern_detector import PatternDetector
 from agent.self_evaluator import SelfEvaluator
@@ -46,6 +49,7 @@ class AgentCore:
         title_after_turns: int = 3,
         tool_registry: ToolRegistry | None = None,
         max_tool_iterations: int = 8,
+        harness_config: object | None = None,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -66,6 +70,7 @@ class AgentCore:
         self.title_after_turns = title_after_turns
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
+        self.harness_config = harness_config
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
 
@@ -207,6 +212,184 @@ class AgentCore:
 
         return "execute"
 
+    def _harness_value(self, key: str, default):
+        if self.harness_config is None:
+            return default
+        return getattr(self.harness_config, key, default)
+
+    def _use_swarm_harness(
+        self,
+        message: InboundMessage,
+        mode: str,
+        relevant_skills: list,
+    ) -> bool:
+        if self._harness_value("strategy", "single") != "swarm":
+            return False
+        if mode == "plan":
+            return True
+        lower = message.text.lower()
+        if len(relevant_skills) > 1:
+            return True
+        if any(
+            token in lower
+            for token in (
+                "plan",
+                "step by step",
+                "compare",
+                "research",
+                "debug",
+                "implement",
+                "build",
+                "fix",
+                "search",
+                "analyze",
+                "investigate",
+                "write tests",
+            )
+        ):
+            return True
+        if self.tool_registry is not None and any(
+            token in lower for token in ("file", "code", "test", "shell", "http", "run", "grep")
+        ):
+            return True
+        return len(message.text.split()) > int(self._harness_value("simple_turn_threshold", 18))
+
+    def _resolve_squad(
+        self,
+        message: InboundMessage,
+        conversation_meta: dict | None,
+        identity: Identity | None,
+        relevant_skills: list,
+    ):
+        stored = (conversation_meta or {}).get(
+            "squad_profile"
+        ) or self.memory.get_conversation_squad_profile(message.conversation_id)
+        if stored:
+            return get_squad_profile(stored)
+
+        lower = message.text.lower()
+        if any(token in lower for token in ("research", "compare", "investigate", "survey")):
+            return get_squad_profile("research")
+        if any(token in lower for token in ("implement", "fix", "build", "run", "test", "debug")):
+            return get_squad_profile("execution")
+        if identity is not None and "research" in (identity.name or "").lower():
+            return get_squad_profile("research")
+        if len(relevant_skills) > 1:
+            return get_squad_profile("research")
+        return get_squad_profile(self._harness_value("default_squad", "general"))
+
+    def _identity_prompt(self, identity: Identity | None) -> str:
+        if identity is None or not identity.prompt:
+            return ""
+        return "\n".join(
+            [f"# Identity Package: {identity.display_name or identity.name}", identity.prompt]
+        )
+
+    def _facts_payload(self, facts: list) -> list[dict[str, str]]:
+        return [{"key": fact.key, "value": fact.value} for fact in facts]
+
+    def _worker_skill_groups(self, relevant_skills: list, branches: int) -> list[list]:
+        if branches <= 0:
+            return []
+        groups: list[list] = [[] for _ in range(branches)]
+        if not relevant_skills:
+            return groups
+        for skill in relevant_skills[: branches * 2]:
+            target = min(range(branches), key=lambda idx: len(groups[idx]))
+            groups[target].append(skill)
+        return groups
+
+    def _swarm_tool_registries(
+        self,
+        conversation_id: str,
+        identity: Identity | None,
+        mode: str,
+    ) -> dict[str, ToolRegistry | None]:
+        namespace = identity.namespace if identity is not None else ""
+
+        def base_registry(*, allow_write: bool, include_external: bool, include_tools: bool = True):
+            registry = ToolRegistry()
+            if include_tools:
+                registry.register_many(
+                    memory_tools(
+                        self.memory,
+                        namespace=namespace,
+                        allow_write=allow_write,
+                    )
+                )
+                registry.register_many(
+                    conversation_tools(self.memory, current_conversation_id=conversation_id)
+                )
+                registry.register_many(
+                    plan_tools(self.memory, current_conversation_id=conversation_id)
+                )
+            if include_external and self.tool_registry is not None and mode == "execute":
+                registry.register_many(self.tool_registry.all())
+            return registry if len(registry) > 0 else None
+
+        worker_write = mode == "execute"
+        return {
+            "planner": base_registry(allow_write=False, include_external=False),
+            "worker": base_registry(
+                allow_write=worker_write,
+                include_external=worker_write,
+            ),
+            "critic": base_registry(allow_write=False, include_external=False),
+            "synthesizer": None,
+        }
+
+    def _swarm_tool_trace(self, task_id: str) -> list[dict]:
+        trace: list[dict] = []
+        for step in self.memory.list_harness_steps(task_id):
+            for item in step["tool_trace"]:
+                trace.append(item)
+        return trace
+
+    async def _run_swarm(
+        self,
+        *,
+        message: InboundMessage,
+        identity: Identity | None,
+        mode: str,
+        facts: list,
+        history: list[dict[str, str]],
+        relevant_skills: list,
+        squad,
+    ):
+        event_sink = message.metadata.get("event_sink") if message.metadata else None
+        if not callable(event_sink) or not self._harness_value("stream_events", True):
+            event_sink = None
+        harness = SwarmHarness(
+            llm=self.llm,
+            memory=self.memory,
+            system_prompt=self.system_prompt,
+            max_tool_iterations=self.max_tool_iterations,
+            max_rounds=int(self._harness_value("max_rounds", 2)),
+            max_worker_branches=int(self._harness_value("max_worker_branches", 2)),
+            token_budget=int(self._harness_value("token_budget", 20_000)),
+            tool_call_budget=int(self._harness_value("tool_call_budget", 16)),
+            wall_clock_budget_s=int(self._harness_value("wall_clock_budget_s", 120)),
+        )
+        return await harness.run(
+            brief=TaskBrief(
+                user_input=message.text,
+                conversation_id=message.conversation_id,
+                mode=mode,
+                identity_name=identity.name if identity else "",
+                history=history,
+                facts=self._facts_payload(facts),
+                selected_skills=[skill.name for skill in relevant_skills],
+            ),
+            squad=squad,
+            identity_prompt=self._identity_prompt(identity),
+            worker_skill_groups=self._worker_skill_groups(relevant_skills, squad.worker_branches),
+            tool_registry_by_role=self._swarm_tool_registries(
+                message.conversation_id, identity, mode
+            ),
+            event_sink=event_sink,
+            surface="serve",
+        )
+
     async def handle(self, message: InboundMessage) -> OutboundMessage:
         """Process an inbound message and return a response.
 
@@ -245,17 +428,50 @@ class AgentCore:
             facts = self.memory.get_facts()
 
         # 4. Relevant skills
-        relevant_skills = self.skills.find_relevant(message.text)
-        used_skill_fallback = not relevant_skills
-        if used_skill_fallback:
-            relevant_skills = self.skills.all()
+        matched_skills = self.skills.find_relevant(message.text)
+        relevant_skills = matched_skills if matched_skills else self.skills.all()
+        execution_skills = matched_skills if matched_skills else []
 
-        # 5. Build messages
-        messages = self._build_messages(identity, mode, relevant_skills, facts, history, message)
+        task_id: str | None = None
+        squad_name: str | None = None
+        task_status: str | None = None
+        task_events: list[dict] = []
+        convergence_summary: dict | None = None
+        budget_summary: dict | None = None
+        if self._use_swarm_harness(message, mode, matched_skills):
+            squad = self._resolve_squad(message, conversation_meta, identity, matched_skills)
+            self.memory.save_squad_profile(
+                squad.name,
+                roles=squad.role_roster(),
+                config=squad.to_dict(),
+            )
+            self.memory.set_conversation_squad_profile(message.conversation_id, squad.name)
+            swarm_task = await self._run_swarm(
+                message=message,
+                identity=identity,
+                mode=mode,
+                facts=facts,
+                history=history,
+                relevant_skills=matched_skills,
+                squad=squad,
+            )
+            response_text = swarm_task.final_output
+            task_id = swarm_task.id
+            squad_name = swarm_task.squad.name
+            task_status = swarm_task.status
+            task_events = [event.to_dict() for event in swarm_task.events]
+            convergence_summary = swarm_task.convergence_summary
+            budget_summary = swarm_task.budget_summary.to_dict()
+            tool_trace = self._swarm_tool_trace(swarm_task.id)
+        else:
+            # 5. Build messages
+            messages = self._build_messages(
+                identity, mode, relevant_skills, facts, history, message
+            )
 
-        # 6. Call LLM — with optional tool-use loop
-        turn_tools = self._tool_registry_for_turn(message.conversation_id, identity, mode)
-        response_text, tool_trace = await self._run_llm(messages, tool_registry=turn_tools)
+            # 6. Call LLM — with optional tool-use loop
+            turn_tools = self._tool_registry_for_turn(message.conversation_id, identity, mode)
+            response_text, tool_trace = await self._run_llm(messages, tool_registry=turn_tools)
 
         # 7. Store in memory (only user input + final assistant response;
         #    intermediate tool calls stay in the per-turn working messages)
@@ -264,21 +480,22 @@ class AgentCore:
 
         # 8. Record skill execution(s) for outcome iteration / feedback
         execution_ids: list[int] = []
-        for skill in relevant_skills:
+        for skill in execution_skills:
             eid = self.memory.record_execution(
                 skill_name=skill.name,
                 user_input=message.text,
                 assistant_output=response_text,
                 conversation_id=message.conversation_id,
+                harness_task_id=task_id,
             )
             execution_ids.append(eid)
         evaluated_count = await self._maybe_evaluate_executions(
-            relevant_skills if not used_skill_fallback else [],
+            execution_skills,
             message.text,
             response_text,
             execution_ids,
         )
-        lifecycle_updates = self._maybe_reconcile_skill_feedback(relevant_skills)
+        lifecycle_updates = self._maybe_reconcile_skill_feedback(execution_skills)
 
         # 9. Auto fact extraction (every N turns, when enabled)
         extracted_count = await self._maybe_extract_facts(message, identity)
@@ -298,7 +515,7 @@ class AgentCore:
             text=response_text,
             conversation_id=message.conversation_id,
             metadata={
-                "skills": [s.name for s in relevant_skills],
+                "skills": [s.name for s in execution_skills],
                 "execution_ids": execution_ids,
                 "identity": identity.name if identity else None,
                 "mode": mode,
@@ -309,6 +526,12 @@ class AgentCore:
                 "skill_lifecycle_updates": lifecycle_updates,
                 "new_title": new_title,
                 "tool_trace": tool_trace,
+                "task_id": task_id,
+                "squad": squad_name,
+                "task_status": task_status,
+                "task_events": task_events,
+                "convergence_summary": convergence_summary,
+                "budget_summary": budget_summary,
             },
         )
 

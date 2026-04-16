@@ -12,10 +12,40 @@ export interface ConversationPlan {
 }
 
 export interface ToolTraceEntry {
+  role?: string
   name: string
   arguments: Record<string, unknown>
   result: string
   is_error: boolean
+}
+
+export interface TaskEvent {
+  sequence: number
+  type: string
+  phase?: string
+  role?: string
+  message: string
+  data?: Record<string, unknown>
+  created_at?: string
+}
+
+export interface BudgetSummary {
+  token_budget?: number
+  token_used?: number
+  tool_call_budget?: number
+  tool_calls_used?: number
+  wall_clock_budget_s?: number
+  elapsed_ms?: number
+  max_rounds?: number
+  rounds_used?: number
+  stopped_reason?: string
+}
+
+export interface ConvergenceSummary {
+  decision?: string
+  accepted_artifacts?: number[]
+  rejected_artifacts?: number[]
+  rationale?: string
 }
 
 export interface Message {
@@ -27,6 +57,12 @@ export interface Message {
   executionIds?: number[]
   feedback?: Partial<Record<SignalType, boolean>>
   toolTrace?: ToolTraceEntry[]
+  taskId?: string
+  squad?: string | null
+  taskStatus?: string | null
+  taskEvents?: TaskEvent[]
+  convergenceSummary?: ConvergenceSummary | null
+  budgetSummary?: BudgetSummary | null
 }
 
 export interface Skill {
@@ -46,6 +82,12 @@ export interface ChatResponse {
   plan?: ConversationPlan | null
   new_title?: string | null
   tool_trace?: ToolTraceEntry[]
+  task_id?: string | null
+  squad?: string | null
+  task_status?: string | null
+  task_events?: TaskEvent[]
+  convergence_summary?: ConvergenceSummary | null
+  budget_summary?: BudgetSummary | null
   error?: string
 }
 
@@ -54,6 +96,7 @@ export interface ConversationSummary {
   channel: string
   identity?: string
   mode: ConversationMode
+  squad_profile?: string
   has_plan?: boolean
   plan?: ConversationPlan | null
   title: string

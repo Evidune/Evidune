@@ -111,6 +111,27 @@ class ToolsConfig:
 
 
 @dataclass
+class HarnessConfig:
+    """Harness orchestration config shared by serve and run workflows."""
+
+    strategy: str = "single"  # single | swarm
+    simple_turn_threshold: int = 18
+    default_squad: str = "general"
+    max_worker_branches: int = 2
+    max_rounds: int = 2
+    token_budget: int = 20_000
+    tool_call_budget: int = 16
+    wall_clock_budget_s: int = 120
+    stream_events: bool = True
+    iteration_workflow_enabled: bool = True
+
+    def __post_init__(self) -> None:
+        valid = {"single", "swarm"}
+        if self.strategy not in valid:
+            raise ValueError(f"Invalid harness strategy '{self.strategy}', must be one of {valid}")
+
+
+@dataclass
 class EvaluatorConfig:
     """Cross-model evaluator config.
 
@@ -137,6 +158,7 @@ class AgentConfig:
     fact_extraction: FactExtractionConfig = field(default_factory=FactExtractionConfig)
     emergence: EmergenceConfig = field(default_factory=EmergenceConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    harness: HarnessConfig = field(default_factory=HarnessConfig)
 
 
 @dataclass
@@ -307,6 +329,19 @@ def load_config(path: str | Path) -> AiflayConfig:
             grep_max_hits=tools_raw.get("grep_max_hits", 200),
             glob_max_hits=tools_raw.get("glob_max_hits", 200),
         )
+        harness_raw = agent_raw.get("harness", {}) or {}
+        harness_cfg = HarnessConfig(
+            strategy=harness_raw.get("strategy", "single"),
+            simple_turn_threshold=harness_raw.get("simple_turn_threshold", 18),
+            default_squad=harness_raw.get("default_squad", "general"),
+            max_worker_branches=harness_raw.get("max_worker_branches", 2),
+            max_rounds=harness_raw.get("max_rounds", 2),
+            token_budget=harness_raw.get("token_budget", 20_000),
+            tool_call_budget=harness_raw.get("tool_call_budget", 16),
+            wall_clock_budget_s=harness_raw.get("wall_clock_budget_s", 120),
+            stream_events=harness_raw.get("stream_events", True),
+            iteration_workflow_enabled=harness_raw.get("iteration_workflow_enabled", True),
+        )
         agent = AgentConfig(
             llm_provider=agent_raw.get("llm_provider", "openai"),
             llm_model=agent_raw.get("llm_model", "gpt-4o"),
@@ -319,6 +354,7 @@ def load_config(path: str | Path) -> AiflayConfig:
             fact_extraction=fact_extraction,
             emergence=emergence,
             tools=tools_cfg,
+            harness=harness_cfg,
         )
 
     # Skills config

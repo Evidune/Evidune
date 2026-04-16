@@ -1,0 +1,266 @@
+"""Tests for swarm harness orchestration and iteration workflow."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from agent.core import AgentCore
+from agent.llm import LLMClient
+from agent.skill_feedback import SkillFeedbackSummary
+from agent.tools.base import CompletionResult, Tool
+from agent.tools.registry import ToolRegistry
+from core.iteration_harness import IterationHarness
+from gateway.base import InboundMessage
+from memory.store import MemoryStore
+from skills.registry import SkillRegistry
+
+
+class RoleAwareLLM(LLMClient):
+    def __init__(self) -> None:
+        self.role_payloads: dict[str, list[str]] = {}
+
+    async def complete(self, messages, **kwargs):
+        system = messages[0]["content"]
+        role = self._extract_role(system)
+        self.role_payloads.setdefault(role, []).append(messages[-1]["content"])
+        if role == "planner":
+            return "Plan: split the task into bounded work."
+        if role.startswith("worker"):
+            return f"{role} completed its branch."
+        if role == "critic":
+            return "ACCEPT\nThe worker output satisfies the brief."
+        if role == "synthesizer":
+            return "Final synthesis"
+        return "ok"
+
+    async def complete_with_tools(self, messages, tools, **kwargs):
+        text = await self.complete(messages, **kwargs)
+        return CompletionResult(text=text)
+
+    @staticmethod
+    def _extract_role(system: str) -> str:
+        for line in system.splitlines():
+            if line.startswith("# Role: "):
+                return line.split(":", 1)[1].split("(")[0].strip()
+        return "unknown"
+
+
+def _write(path: Path, content: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _registry_with_skills(tmp_path: Path, *names: str) -> SkillRegistry:
+    registry = SkillRegistry()
+    for name in names:
+        _write(
+            tmp_path / "skills" / name / "SKILL.md",
+            "---\n"
+            f"name: {name}\n"
+            f"description: {name} helper\n"
+            f"triggers: [{name.replace('-', ' ')}]\n"
+            "---\n"
+            "## Instructions\n"
+            f"Use {name} carefully.\n",
+        )
+    registry.load_directory(tmp_path / "skills")
+    return registry
+
+
+@pytest.fixture
+def memory(tmp_path: Path):
+    store = MemoryStore(tmp_path / "memory.db")
+    yield store
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_swarm_harness_persists_task_and_steps(tmp_path: Path, memory: MemoryStore):
+    llm = RoleAwareLLM()
+    registry = _registry_with_skills(tmp_path, "greet")
+    agent = AgentCore(
+        llm=llm,
+        skill_registry=registry,
+        memory=memory,
+        harness_config=SimpleNamespace(
+            strategy="swarm",
+            simple_turn_threshold=1,
+            default_squad="general",
+            max_worker_branches=2,
+            max_rounds=2,
+            token_budget=20000,
+            tool_call_budget=16,
+            wall_clock_budget_s=120,
+            stream_events=True,
+        ),
+    )
+
+    response = await agent.handle(
+        InboundMessage(
+            text="implement a greeting workflow",
+            sender_id="u",
+            channel="cli",
+            conversation_id="c-swarm",
+        )
+    )
+
+    assert response.text == "Final synthesis"
+    assert response.metadata["task_id"]
+    assert response.metadata["squad"] == "execution"
+    task = memory.get_harness_task(response.metadata["task_id"])
+    assert task is not None
+    assert task["status"] == response.metadata["task_status"]
+    steps = memory.list_harness_steps(response.metadata["task_id"])
+    assert [step["phase"] for step in steps] == ["plan", "execute", "critique", "finalise"]
+    assert response.metadata["task_events"]
+
+
+@pytest.mark.asyncio
+async def test_worker_skill_assignment_is_scoped_per_branch(tmp_path: Path, memory: MemoryStore):
+    llm = RoleAwareLLM()
+    registry = _registry_with_skills(tmp_path, "alpha-skill", "beta-skill")
+    agent = AgentCore(
+        llm=llm,
+        skill_registry=registry,
+        memory=memory,
+        harness_config=SimpleNamespace(
+            strategy="swarm",
+            simple_turn_threshold=1,
+            default_squad="general",
+            max_worker_branches=2,
+            max_rounds=2,
+            token_budget=20000,
+            tool_call_budget=16,
+            wall_clock_budget_s=120,
+            stream_events=True,
+        ),
+    )
+
+    await agent.handle(
+        InboundMessage(
+            text="research and compare alpha skill beta skill",
+            sender_id="u",
+            channel="cli",
+            conversation_id="c-research",
+        )
+    )
+
+    worker_one = "\n".join(llm.role_payloads["worker-1"])
+    worker_two = "\n".join(llm.role_payloads["worker-2"])
+    assert "alpha-skill" in worker_one
+    assert "beta-skill" not in worker_one
+    assert "beta-skill" in worker_two
+    assert "alpha-skill" not in worker_two
+
+
+def test_swarm_tool_permissions_respect_role_and_mode(tmp_path: Path, memory: MemoryStore):
+    registry = _registry_with_skills(tmp_path, "greet")
+    external = ToolRegistry()
+    external.register(
+        Tool(
+            name="run_shell",
+            description="shell",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda: None,
+        )
+    )
+    agent = AgentCore(
+        llm=RoleAwareLLM(),
+        skill_registry=registry,
+        memory=memory,
+        tool_registry=external,
+        harness_config=SimpleNamespace(strategy="swarm"),
+    )
+
+    execute_tools = agent._swarm_tool_registries("c1", None, "execute")
+    assert "run_shell" in execute_tools["worker"].names()
+    assert "set_fact" in execute_tools["worker"].names()
+    assert "run_shell" not in execute_tools["planner"].names()
+    assert "set_fact" not in execute_tools["critic"].names()
+
+    plan_tools = agent._swarm_tool_registries("c1", None, "plan")
+    assert "run_shell" not in plan_tools["worker"].names()
+    assert "set_fact" not in plan_tools["worker"].names()
+
+
+def test_iteration_harness_rewrites_skill(tmp_path: Path, memory: MemoryStore):
+    skill_path = _write(
+        tmp_path / "skills" / "writer" / "SKILL.md",
+        "---\nname: writer\ndescription: Write\noutcome_metrics: true\n---\n"
+        "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
+    )
+    registry = SkillRegistry()
+    registry.load_directory(tmp_path / "skills")
+    skill = registry.get("writer")
+
+    result = SimpleNamespace(
+        top_performers=[
+            SimpleNamespace(title="A", metrics={"reads": 100}),
+            SimpleNamespace(title="B", metrics={"reads": 90}),
+        ],
+        patterns=["Use concrete examples"],
+    )
+    feedback = SkillFeedbackSummary(
+        signal_confidence=0.8,
+        signal_samples=3,
+        has_strong_signal=True,
+        average_score=0.9,
+        score_samples=2,
+        combined_confidence=0.8,
+        should_rewrite=True,
+        should_disable=False,
+        evidence={"average_score": 0.9},
+    )
+
+    workflow = IterationHarness(memory)
+    decision = workflow.run(
+        skill=skill,
+        result=result,
+        feedback=feedback,
+        current=skill_path.read_text(encoding="utf-8"),
+    )
+
+    assert decision.decision == "rewrite"
+    updated = skill_path.read_text(encoding="utf-8")
+    assert "Outcome-Backed Adjustments" in updated
+    assert "Auto-updated by aiflay" in updated
+
+
+def test_iteration_harness_disables_negative_emerged_skill(tmp_path: Path, memory: MemoryStore):
+    skill_path = _write(
+        tmp_path / "skills" / "emerged" / "SKILL.md",
+        "---\nname: emerged\ndescription: Emerged\noutcome_metrics: true\n---\n"
+        "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
+    )
+    registry = SkillRegistry()
+    registry.load_directory(tmp_path / "skills")
+    skill = registry.get("emerged")
+    memory.register_emerged_skill(name="emerged", status="active", path=str(skill_path))
+
+    result = SimpleNamespace(top_performers=[], patterns=[])
+    feedback = SkillFeedbackSummary(
+        signal_confidence=-0.9,
+        signal_samples=2,
+        has_strong_signal=True,
+        average_score=0.1,
+        score_samples=1,
+        combined_confidence=-0.9,
+        should_rewrite=False,
+        should_disable=True,
+        evidence={"average_score": 0.1},
+    )
+
+    workflow = IterationHarness(memory)
+    decision = workflow.run(
+        skill=skill,
+        result=result,
+        feedback=feedback,
+        current=skill_path.read_text(encoding="utf-8"),
+    )
+
+    assert decision.decision == "disable"
+    assert memory.get_emerged_skill("emerged")["status"] == "disabled"
