@@ -12,8 +12,9 @@
   } = $props()
 </script>
 
-<div class="toggle" role="tablist" aria-label="Conversation mode">
+<div class="toggle" role="tablist" aria-label="Conversation mode" data-testid="mode-toggle">
   <button
+    data-testid="mode-plan"
     class="pill"
     class:active={mode === 'plan'}
     role="tab"
@@ -24,6 +25,7 @@
     Plan
   </button>
   <button
+    data-testid="mode-execute"
     class="pill"
     class:active={mode === 'execute'}
     role="tab"

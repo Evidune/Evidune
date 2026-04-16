@@ -52,7 +52,12 @@
   }
 </script>
 
-<div class="msg" class:user={isUser} class:bot={!isUser}>
+<div
+  class="msg"
+  class:user={isUser}
+  class:bot={!isUser}
+  data-testid={isUser ? 'user-message' : 'assistant-message'}
+>
   <span class="msg-label">{isUser ? 'You' : 'Aiflay'}</span>
 
   {#if !isUser && message.toolTrace && message.toolTrace.length > 0}
@@ -69,7 +74,10 @@
     />
   {/if}
 
-  <div class="msg-body">{message.content}</div>
+  <div
+    class="msg-body"
+    data-testid={isUser ? 'user-message-body' : 'assistant-message-body'}
+  >{message.content}</div>
 
   {#if !isUser && message.executionIds && message.executionIds.length > 0}
     <div class="actions">
@@ -78,6 +86,7 @@
         class:active={feedback.thumbs_up}
         title="Good response"
         onclick={thumbsUp}
+        data-testid="feedback-thumbs-up"
       >
         👍
       </button>
@@ -86,6 +95,7 @@
         class:active={feedback.thumbs_down}
         title="Bad response"
         onclick={thumbsDown}
+        data-testid="feedback-thumbs-down"
       >
         👎
       </button>

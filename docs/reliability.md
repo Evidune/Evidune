@@ -12,6 +12,15 @@ When frontend behavior changes, also run:
 
 - `cd web && npm run build`
 
+## Browser Validation
+
+Run the deterministic browser harness for the web gateway with:
+
+- `pip install -e ".[all,dev]"`
+- `python -m playwright install chromium`
+- `cd web && npm ci && npm run build`
+- `python -m pytest tests/test_web_e2e.py -v`
+
 ## Reliability Principles
 
 - Prefer deterministic local checks over manual inspection.
@@ -22,6 +31,6 @@ When frontend behavior changes, also run:
 
 ## Next Reliability Milestones
 
-- Add browser-driven validation for the web gateway.
 - Expose logs and metrics to the agent through stable local interfaces.
+- Expand browser-driven validation beyond execute / plan / feedback flows.
 - Keep starter scaffolds and bundled examples runnable in CI-style local checks.

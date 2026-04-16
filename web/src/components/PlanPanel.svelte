@@ -12,7 +12,7 @@
   const hasPlan = $derived(!!plan && plan.items.length > 0)
 </script>
 
-<section class="panel">
+<section class="panel" data-testid="plan-panel">
   <div class="panel-header">
     <div>
       <div class="eyebrow">Current Plan</div>
@@ -30,7 +30,7 @@
 
     <ol class="steps">
       {#each plan?.items ?? [] as item, index (`${index}-${item.step}`)}
-        <li class="step">
+        <li class="step" data-testid="plan-step">
           <span class="status" class:pending={item.status === 'pending'} class:progress={item.status === 'in_progress'} class:done={item.status === 'completed'}>
             {item.status}
           </span>

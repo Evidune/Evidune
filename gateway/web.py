@@ -48,6 +48,23 @@ class WebGateway(Gateway):
         """Wire a MemoryStore so /api/feedback can persist signals."""
         self._memory_store = store
 
+    @property
+    def bound_port(self) -> int:
+        """Return the OS-assigned port once the HTTP server is started."""
+        if self._server is None:
+            return 0
+        return int(self._server.server_address[1])
+
+    @property
+    def base_url(self) -> str:
+        """Read-only base URL for tests and diagnostics after startup."""
+        if self._server is None:
+            return ""
+        public_host = self.host
+        if public_host in {"0.0.0.0", "::"}:
+            public_host = "127.0.0.1"
+        return f"http://{public_host}:{self.bound_port}"
+
     async def start(self, handler: MessageHandler) -> None:
         self._handler = handler
         self._loop = asyncio.get_event_loop()
@@ -296,7 +313,7 @@ class WebGateway(Gateway):
             if (_WEB_DIST / "index.html").exists()
             else "not built (run: cd web && npm run build)"
         )
-        print(f"Aiflay Web UI: http://localhost:{self.port}  [{built}]")
+        print(f"Aiflay Web UI: {self.base_url or f'http://localhost:{self.port}'}  [{built}]")
 
         try:
             while self._server:
@@ -306,8 +323,13 @@ class WebGateway(Gateway):
 
     async def stop(self) -> None:
         if self._server:
-            self._server.shutdown()
+            server = self._server
             self._server = None
+            server.shutdown()
+            server.server_close()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        self._thread = None
 
     async def _handle_chat(
         self,

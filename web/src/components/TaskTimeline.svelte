@@ -17,18 +17,20 @@
 </script>
 
 {#if events && events.length > 0}
-  <section class="timeline">
+  <section class="timeline" data-testid="task-timeline">
     <div class="timeline-header">
       <div class="eyebrow">Swarm Task</div>
       <div class="meta">
-        {#if squad}<span class="pill">{squad}</span>{/if}
-        {#if status}<span class="pill status">{status}</span>{/if}
-        {#if convergence?.decision}<span class="pill">{convergence.decision}</span>{/if}
+        {#if squad}<span class="pill" data-testid="task-timeline-squad">{squad}</span>{/if}
+        {#if status}<span class="pill status" data-testid="task-timeline-status">{status}</span>{/if}
+        {#if convergence?.decision}
+          <span class="pill" data-testid="task-timeline-decision">{convergence.decision}</span>
+        {/if}
       </div>
     </div>
     <div class="events">
       {#each events as event (`${event.sequence}-${event.type}`)}
-        <div class="event">
+        <div class="event" data-testid="task-event">
           <div class="event-head">
             <span class="seq">#{event.sequence}</span>
             {#if event.phase}<span class="phase">{event.phase}</span>{/if}
@@ -39,7 +41,7 @@
       {/each}
     </div>
     {#if budget}
-      <div class="budget">
+      <div class="budget" data-testid="task-budget">
         rounds {budget.rounds_used ?? 0}/{budget.max_rounds ?? 0}
         · tools {budget.tool_calls_used ?? 0}/{budget.tool_call_budget ?? 0}
         · tokens ~{budget.token_used ?? 0}/{budget.token_budget ?? 0}

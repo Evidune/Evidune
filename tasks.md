@@ -8,7 +8,6 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 
 ## Pending
 
-- [ ] Browser-driven validation harness for the web gateway
 - [ ] Agent-visible logs, metrics, and traces for local runs
 - [ ] Markdown rendering + code highlighting in the chat UI
 - [ ] End-to-end smoke test with a real LLM (mocked or via OpenRouter free tier)
@@ -43,6 +42,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Extend outcome-driven iteration from evidence-only updates to direct `SKILL.md` rewrites
 - [x] Add evidence-backed rewrite guardrails to prevent automatic skill drift
 - [x] Add end-to-end coverage for skill generation, activation, reload, rewrite, and rollback
+- [x] Browser-driven validation harness for the web gateway
 
 ## Notes
 

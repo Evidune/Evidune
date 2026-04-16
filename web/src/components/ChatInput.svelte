@@ -29,6 +29,7 @@
 <div class="input-area">
   <div class="input-row">
     <textarea
+      data-testid="chat-input"
       bind:this={textarea}
       bind:value={text}
       onkeydown={handleKeydown}
@@ -37,7 +38,7 @@
       placeholder="Type a message..."
       {disabled}
     ></textarea>
-    <button onclick={handleSend} disabled={disabled || !text.trim()}>
+    <button data-testid="send-button" onclick={handleSend} disabled={disabled || !text.trim()}>
       Send
     </button>
   </div>

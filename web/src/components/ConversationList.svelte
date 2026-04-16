@@ -57,10 +57,15 @@
 
 <svelte:window onclick={close} />
 
-<aside class="sidebar">
+<aside class="sidebar" data-testid="conversation-list">
   <div class="header">
     <span class="title">Conversations</span>
-    <button class="new-btn" title="New conversation" onclick={onNew}>+ New</button>
+    <button
+      class="new-btn"
+      title="New conversation"
+      onclick={onNew}
+      data-testid="new-conversation"
+    >+ New</button>
   </div>
 
   <div class="list">
@@ -71,6 +76,8 @@
       <div
         class="item"
         class:active={c.id === activeId}
+        data-testid="conversation-item"
+        data-conversation-id={c.id}
         role="button"
         tabindex="0"
         onclick={() => onSelect(c.id)}

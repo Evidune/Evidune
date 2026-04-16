@@ -288,7 +288,7 @@
       <PlanPanel mode={currentMode} plan={currentPlan} />
     {/if}
 
-    <div class="messages" bind:this={messagesEl}>
+    <div class="messages" bind:this={messagesEl} data-testid="message-list">
       {#each messageList as msg, i (msg.id)}
         {@const prior = msg.role === 'assistant' ? getPriorUserMessage(i) : undefined}
         <ChatMessage
