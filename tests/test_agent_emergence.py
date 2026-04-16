@@ -130,6 +130,10 @@ class TestEmergenceTrigger:
         rec = memory.get_emerged_skill("explain-topic")
         assert rec is not None
         assert rec["status"] == "active"
+        state = memory.get_skill_state("explain-topic")
+        assert state is not None
+        assert state["status"] == "active"
+        assert state["origin"] == "emerged"
         assert rec["path"].endswith("explain-topic/SKILL.md")
         event = memory.get_latest_skill_lifecycle_event("explain-topic", action="activate")
         assert event is not None

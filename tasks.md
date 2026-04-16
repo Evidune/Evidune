@@ -8,15 +8,8 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 
 ## Pending
 
-- [ ] Connect feedback signals and evaluator scores into a single skill-iteration decision loop
-- [ ] Auto-activate emerged skills and reload them across restarts
-- [ ] Add audit trail, disable, and rollback flow for automatic skill activation
-- [ ] Extend outcome-driven iteration from evidence-only updates to direct `SKILL.md` rewrites
-- [ ] Add evidence-backed rewrite guardrails to prevent automatic skill drift
-- [ ] Add end-to-end coverage for skill generation, activation, reload, rewrite, and rollback
 - [ ] Browser-driven validation harness for the web gateway
 - [ ] Agent-visible logs, metrics, and traces for local runs
-- [ ] Streaming responses for the web gateway (SSE)
 - [ ] Markdown rendering + code highlighting in the chat UI
 - [ ] End-to-end smoke test with a real LLM (mocked or via OpenRouter free tier)
 - [ ] Telegram bot gateway
@@ -43,6 +36,13 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Persist iteration run ledger and CLI inspection commands
 - [x] Add `aiflay init` CLI command to scaffold starter `aiflay.yaml`
 - [x] Add worktree-local runtime artifacts and runnable local examples
+- [x] Streaming responses for the web gateway (SSE)
+- [x] Auto-activate emerged skills and reload them across restarts
+- [x] Connect feedback signals and evaluator scores into a single skill-iteration decision loop
+- [x] Add audit trail, disable, and rollback flow for automatic skill activation
+- [x] Extend outcome-driven iteration from evidence-only updates to direct `SKILL.md` rewrites
+- [x] Add evidence-backed rewrite guardrails to prevent automatic skill drift
+- [x] Add end-to-end coverage for skill generation, activation, reload, rewrite, and rollback
 
 ## Notes
 

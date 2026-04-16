@@ -11,6 +11,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -384,36 +385,55 @@ class WebGateway(Gateway):
         existing[signal_type] = value
         ok = self._memory_store.update_execution_signals(execution_id, existing)
         skill_name = execs.get("skill_name", "")
-        emerged = self._memory_store.get_emerged_skill(skill_name) if skill_name else None
+        lifecycle_decision = None
+        skill_status = (
+            self._memory_store.resolve_skill_status(skill_name) if skill_name else "active"
+        )
+        harness_task_id = ""
         rolled_back = False
-        if emerged and emerged.get("status") == "active":
-            from agent.skill_feedback import summarise_skill_feedback
+        if skill_name:
+            skill_state = self._memory_store.get_skill_state(skill_name)
+            skill_path = (skill_state or {}).get("path", "")
+            if skill_path or skill_state is not None:
+                try:
+                    from agent.iteration_harness import IterationHarness, build_decision_packet
 
-            summary = summarise_skill_feedback(
-                self._memory_store.get_skill_executions(skill_name, limit=20)
-            )
-            if summary.should_disable:
-                reason = "Negative user feedback rolled back the emerged skill"
-                self._memory_store.set_emerged_skill_status(
-                    skill_name,
-                    "rolled_back",
-                    reason=reason,
-                    evidence=summary.evidence,
-                )
-                self._memory_store.record_skill_lifecycle_event(
-                    skill_name,
-                    "rollback",
-                    status="rolled_back",
-                    path=emerged.get("path", ""),
-                    reason=reason,
-                    evidence=summary.evidence,
-                )
-                rolled_back = True
+                    skill = SimpleNamespace(
+                        name=skill_name,
+                        path=skill_path,
+                        update_section="## Reference Data",
+                    )
+                    current = (
+                        Path(skill_path).read_text(encoding="utf-8")
+                        if skill_path and Path(skill_path).is_file()
+                        else ""
+                    )
+                    workflow = IterationHarness(self._memory_store)
+                    decision = workflow.run(
+                        packet=build_decision_packet(
+                            self._memory_store,
+                            skill=skill,
+                            current=current,
+                            result=None,
+                            surface="serve",
+                            conversation_id=execs.get("conversation_id") or "",
+                            task_kind="skill_feedback",
+                        )
+                    )
+                    lifecycle_decision = decision.decision
+                    skill_status = decision.skill_status
+                    harness_task_id = decision.task.id
+                    rolled_back = decision.decision == "rollback"
+                except Exception:
+                    pass
         return {
             "ok": ok,
             "execution_id": execution_id,
             "signals": existing,
             "rolled_back": rolled_back,
+            "lifecycle_decision": lifecycle_decision,
+            "skill_status": skill_status,
+            "harness_task_id": harness_task_id,
         }
 
     # --- Conversation management ---

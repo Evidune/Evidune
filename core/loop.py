@@ -127,21 +127,23 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
     return report
 
 
-def _load_active_emerged_skills(skill_registry, memory, output_dir: str | Path) -> int:
-    """Load persisted active emerged skills into the live registry."""
+def _load_persisted_emerged_skills(skill_registry, memory, output_dir: str | Path) -> int:
+    """Load parseable emerged skills before applying unified skill-state filters."""
     from skills.loader import parse_skill
 
     root = Path(output_dir).expanduser()
     loaded = 0
 
-    for record in memory.list_emerged_skills(status="active"):
+    for record in memory.list_emerged_skills():
         skill_path = Path(record.get("path") or (root / record["name"] / "SKILL.md")).expanduser()
         if not skill_path.is_file():
             reason = "Active emerged skill path missing during startup reload"
             evidence = {"path": str(skill_path)}
-            memory.set_emerged_skill_status(
+            memory.set_skill_state(
                 record["name"],
                 "disabled",
+                origin="emerged",
+                path=str(skill_path),
                 reason=reason,
                 evidence=evidence,
             )
@@ -150,6 +152,7 @@ def _load_active_emerged_skills(skill_registry, memory, output_dir: str | Path) 
                 "disable",
                 status="disabled",
                 path=str(skill_path),
+                harness_task_id="",
                 reason=reason,
                 evidence=evidence,
             )
@@ -163,9 +166,11 @@ def _load_active_emerged_skills(skill_registry, memory, output_dir: str | Path) 
         except Exception as exc:
             reason = "Failed to parse active emerged skill during startup reload"
             evidence = {"path": str(skill_path), "error": str(exc)}
-            memory.set_emerged_skill_status(
+            memory.set_skill_state(
                 record["name"],
                 "disabled",
+                origin="emerged",
+                path=str(skill_path),
                 reason=reason,
                 evidence=evidence,
             )
@@ -174,6 +179,7 @@ def _load_active_emerged_skills(skill_registry, memory, output_dir: str | Path) 
                 "disable",
                 status="disabled",
                 path=str(skill_path),
+                harness_task_id="",
                 reason=reason,
                 evidence=evidence,
             )
@@ -183,6 +189,21 @@ def _load_active_emerged_skills(skill_registry, memory, output_dir: str | Path) 
         loaded += 1
 
     return loaded
+
+
+def _load_active_emerged_skills(skill_registry, memory, output_dir: str | Path) -> int:
+    """Backward-compatible alias for tests and older call sites."""
+    return _load_persisted_emerged_skills(skill_registry, memory, output_dir)
+
+
+def _apply_skill_state_overrides(skill_registry, memory) -> int:
+    """Remove any skill whose persisted lifecycle state is not active."""
+    removed = 0
+    for status in ("pending_review", "disabled", "rolled_back"):
+        for skill_state in memory.list_skill_states(status=status):
+            if skill_registry.unregister(skill_state["skill_name"]):
+                removed += 1
+    return removed
 
 
 def _handle_docs_command(base_dir: Path, subcommand: str | None) -> int:
@@ -329,13 +350,17 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
             judge=emerge_judge,
             output_dir=resolve_emergence_output_dir(config, base_dir),
         )
-        loaded = _load_active_emerged_skills(
+        loaded = _load_persisted_emerged_skills(
             skill_registry,
             memory,
             resolve_emergence_output_dir(config, base_dir),
         )
         if loaded > 0:
-            print(f"Loaded {loaded} active emerged skill(s)")
+            print(f"Loaded {loaded} emerged skill(s) from persistence")
+
+    filtered = _apply_skill_state_overrides(skill_registry, memory)
+    if filtered > 0:
+        print(f"Skipped {filtered} non-active skill(s) via lifecycle state")
 
     # Title generator (always on when agent is configured — cheap, high value)
     from agent.title_generator import TitleGenerator

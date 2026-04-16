@@ -8,9 +8,8 @@ examples), then writes it to disk.
 Output layout:
     <output_dir>/<skill-name>/SKILL.md
 
-The synthesised skill is registered with status "pending_review"
-in the emerged_skills table — the user is expected to inspect it
-before promoting to "active".
+The synthesised skill is activated by default. Manual review remains
+available as a separate lifecycle state rather than the default gate.
 """
 
 from __future__ import annotations

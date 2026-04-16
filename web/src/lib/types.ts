@@ -122,5 +122,8 @@ export interface FeedbackResponse {
   ok?: boolean
   execution_id?: number
   signals?: Record<string, unknown>
+  lifecycle_decision?: 'keep' | 'rewrite' | 'rollback' | 'disable' | null
+  skill_status?: 'active' | 'pending_review' | 'disabled' | 'rolled_back'
+  harness_task_id?: string
   error?: string
 }

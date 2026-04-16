@@ -405,6 +405,43 @@ class TestAgentCore:
 
         assert reg.get("rolled-back-skill") is None
 
+    @pytest.mark.asyncio
+    async def test_negative_feedback_disables_base_skill_via_shared_governance(
+        self, llm: MockLLM, tmp_path: Path, memory: MemoryStore
+    ):
+        reg = SkillRegistry()
+        skill_path = _write_skill(
+            tmp_path / "skills" / "greet" / "SKILL.md",
+            "---\nname: greet\ndescription: Greet\n---\n\n## Instructions\nSay hello.\n",
+        )
+        reg.load_directory(tmp_path / "skills")
+        agent = AgentCore(llm=llm, skill_registry=reg, memory=memory)
+
+        await agent.handle(
+            InboundMessage(
+                text="greet me",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-disable-base",
+            )
+        )
+        execution = memory.get_skill_executions("greet")[0]
+        memory.update_execution_signals(execution["id"], {"thumbs_down": True})
+        memory.update_execution_score(execution["id"], 0.1, "Poor result")
+
+        await agent.handle(
+            InboundMessage(
+                text="greet again",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-disable-base",
+            )
+        )
+
+        assert reg.get("greet") is None
+        assert memory.get_skill_state("greet")["status"] == "disabled"
+        assert skill_path.read_text(encoding="utf-8").startswith("---\nname: greet")
+
 
 class TestAgentWithIdentity:
     @pytest.fixture

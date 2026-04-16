@@ -6,10 +6,10 @@ from agent.fact_extractor import FactExtractor
 from agent.harness import TaskBrief
 from agent.harness.profiles import get_squad_profile
 from agent.harness.swarm import SwarmHarness
+from agent.iteration_harness import IterationHarness, build_decision_packet
 from agent.llm import LLMClient
 from agent.pattern_detector import PatternDetector
 from agent.self_evaluator import SelfEvaluator
-from agent.skill_feedback import summarise_skill_feedback
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
@@ -406,7 +406,7 @@ class AgentCore:
         # Ensure the conversation exists with the originating gateway/channel
         # before any later reads or writes. Web UI lists are channel-scoped.
         self.memory.ensure_conversation(message.conversation_id, channel=message.channel)
-        self._prune_inactive_emerged_skills()
+        self._prune_inactive_skills()
 
         # 1. Identity + mode
         conversation_meta = self.memory.get_conversation(message.conversation_id)
@@ -481,6 +481,13 @@ class AgentCore:
         # 8. Record skill execution(s) for outcome iteration / feedback
         execution_ids: list[int] = []
         for skill in execution_skills:
+            origin = self._skill_origin(skill.name)
+            self.memory.upsert_skill_state(
+                skill.name,
+                origin=origin,
+                path=str(skill.path),
+                status=self.memory.resolve_skill_status(skill.name),
+            )
             eid = self.memory.record_execution(
                 skill_name=skill.name,
                 user_input=message.text,
@@ -593,16 +600,20 @@ class AgentCore:
                 saved += 1
         return saved
 
-    def _prune_inactive_emerged_skills(self) -> None:
-        """Drop disabled or rolled-back emerged skills from the live registry."""
-        inactive = self.memory.list_emerged_skills(
-            status="disabled"
-        ) + self.memory.list_emerged_skills(status="rolled_back")
-        for skill_meta in inactive:
-            self.skills.unregister(skill_meta["name"])
+    def _skill_origin(self, skill_name: str) -> str:
+        state = self.memory.get_skill_state(skill_name)
+        if state is not None:
+            return state["origin"]
+        return "emerged" if self.memory.get_emerged_skill(skill_name) else "base"
+
+    def _prune_inactive_skills(self) -> None:
+        """Drop any non-active skill from the live registry."""
+        for status in ("pending_review", "disabled", "rolled_back"):
+            for skill_meta in self.memory.list_skill_states(status=status):
+                self.skills.unregister(skill_meta["skill_name"])
 
     def _maybe_reconcile_skill_feedback(self, skills: list) -> list[str]:
-        """Use stored signals and evaluator scores to retire bad emerged skills."""
+        """Use stored signals and evaluator scores through the shared governance harness."""
         updated: list[str] = []
         seen: set[str] = set()
 
@@ -610,34 +621,26 @@ class AgentCore:
             if skill.name in seen:
                 continue
             seen.add(skill.name)
-
-            emerged = self.memory.get_emerged_skill(skill.name)
-            if not emerged or emerged.get("status") != "active":
+            if self.memory.resolve_skill_status(skill.name) != "active":
                 continue
 
-            summary = summarise_skill_feedback(
-                self.memory.get_skill_executions(skill.name, limit=20)
+            current = skill.path.read_text(encoding="utf-8")
+            packet = build_decision_packet(
+                self.memory,
+                skill=skill,
+                current=current,
+                result=None,
+                surface="serve",
+                task_kind="skill_feedback",
             )
-            if not summary.should_disable:
+            summary = packet.feedback
+            if summary is None or (summary.signal_samples == 0 and summary.score_samples == 0):
                 continue
-
-            reason = "Automatic rollback after negative feedback or evaluator score"
-            self.memory.set_emerged_skill_status(
-                skill.name,
-                "rolled_back",
-                reason=reason,
-                evidence=summary.evidence,
-            )
-            self.memory.record_skill_lifecycle_event(
-                skill.name,
-                "rollback",
-                status="rolled_back",
-                path=emerged.get("path", ""),
-                reason=reason,
-                evidence=summary.evidence,
-            )
-            self.skills.unregister(skill.name)
-            updated.append(skill.name)
+            workflow = IterationHarness(self.memory)
+            decision = workflow.run(packet=packet)
+            if decision.decision in {"rollback", "disable"}:
+                self.skills.unregister(skill.name)
+                updated.append(skill.name)
 
         return updated
 
@@ -700,6 +703,7 @@ class AgentCore:
                 "activation_failed",
                 status="disabled",
                 path=str(result.path),
+                harness_task_id="",
                 reason=reason,
                 evidence=evidence,
                 content_after=result.skill_md,
@@ -725,6 +729,7 @@ class AgentCore:
             "activate",
             status="active",
             path=str(result.path),
+            harness_task_id="",
             reason="Auto-activated from conversation pattern",
             evidence=evidence,
             content_after=result.skill_md,

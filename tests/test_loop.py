@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from core.config import load_config
-from core.loop import _load_active_emerged_skills, main, run_iteration
+from core.loop import _apply_skill_state_overrides, _load_active_emerged_skills, main, run_iteration
 from memory.store import MemoryStore
 from skills.registry import SkillRegistry
 
@@ -140,3 +140,30 @@ class TestIterationLedger:
 
         assert loaded == 1
         assert registry.get("explain-topic") is not None
+
+    def test_apply_skill_state_overrides_unregisters_non_active_skills(self, tmp_path: Path):
+        base_path = _write(
+            tmp_path / "skills" / "writer" / "SKILL.md",
+            "---\nname: writer\ndescription: Write\n---\n\n## Instructions\nDo it.\n",
+        )
+        emerged_path = _write(
+            tmp_path / ".aiflay" / "emerged_skills" / "helper" / "SKILL.md",
+            "---\nname: helper\ndescription: Help\n---\n\n## Instructions\nDo it.\n",
+        )
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            store.upsert_skill_state(
+                "writer", origin="base", path=str(base_path), status="disabled"
+            )
+            store.register_emerged_skill(name="helper", status="active", path=str(emerged_path))
+            store.set_skill_state("helper", "pending_review")
+            registry = SkillRegistry()
+            registry.load_directory(tmp_path / "skills")
+            _load_active_emerged_skills(registry, store, emerged_path.parent.parent)
+            removed = _apply_skill_state_overrides(registry, store)
+        finally:
+            store.close()
+
+        assert removed == 2
+        assert registry.get("writer") is None
+        assert registry.get("helper") is None

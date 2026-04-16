@@ -70,21 +70,30 @@ class TestHandleFeedback:
         result = gw._handle_feedback({"execution_id": 1, "signal": "thumbs_up", "value": True})
         assert "error" in result
 
-    def test_negative_feedback_rolls_back_active_emerged_skill(
-        self, gateway: WebGateway, store: MemoryStore
+    def test_negative_feedback_disables_active_emerged_skill_without_rewrite_history(
+        self, gateway: WebGateway, store: MemoryStore, tmp_path: Path
     ):
+        skill_path = tmp_path / "s" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text(
+            "---\nname: s\ndescription: Test\n---\n\n## Instructions\nDo it.\n",
+            encoding="utf-8",
+        )
         eid = store.record_execution(
             skill_name="s", user_input="i", assistant_output="o", signals={}
         )
-        store.register_emerged_skill(name="s", status="active", path="/tmp/s/SKILL.md")
+        store.register_emerged_skill(name="s", status="active", path=str(skill_path))
 
         result = gateway._handle_feedback(
             {"execution_id": eid, "signal": "thumbs_down", "value": True}
         )
 
-        assert result["rolled_back"] is True
-        assert store.get_emerged_skill("s")["status"] == "rolled_back"
-        event = store.get_latest_skill_lifecycle_event("s", action="rollback")
+        assert result["rolled_back"] is False
+        assert result["lifecycle_decision"] == "disable"
+        assert result["skill_status"] == "disabled"
+        assert result["harness_task_id"].startswith("iter-s-")
+        assert store.get_emerged_skill("s")["status"] == "disabled"
+        event = store.get_latest_skill_lifecycle_event("s", action="disable")
         assert event is not None
 
 
