@@ -1,5 +1,6 @@
 """Tests for memory/store.py."""
 
+import sqlite3
 from pathlib import Path
 from threading import Thread
 
@@ -362,3 +363,127 @@ class TestEmergedSkills:
         active = store.list_emerged_skills(status="active")
         assert len(active) == 1
         assert active[0]["name"] == "a"
+
+
+class TestIterationRuns:
+    def test_record_and_get_iteration_run(self, store: MemoryStore):
+        run_id = store.record_iteration_run(
+            domain="zhihu",
+            metrics_adapter="generic_csv",
+            metrics_source="data/zhihu.csv",
+            sort_metric="reads",
+            total_records=3,
+            summary="zhihu: 3 items, total reads=1234, avg=411.",
+            patterns=["Top performers have longer titles"],
+            raw_stats={"reads": {"total": 1234, "avg": 411.3}},
+            top_performers=[{"title": "A", "metrics": {"reads": 900}, "metadata": {}}],
+            bottom_performers=[{"title": "B", "metrics": {"reads": 10}, "metadata": {}}],
+            updates=[
+                {
+                    "path": "skills/write-article/SKILL.md",
+                    "strategy": "replace_section",
+                    "has_changes": True,
+                },
+                {
+                    "path": "refs/case-studies.md",
+                    "strategy": "full_replace",
+                    "has_changes": False,
+                },
+            ],
+        )
+
+        run = store.get_iteration_run(run_id)
+        assert run is not None
+        assert run["domain"] == "zhihu"
+        assert run["metrics_adapter"] == "generic_csv"
+        assert run["patterns"] == ["Top performers have longer titles"]
+        assert run["updates"] == [
+            {
+                "path": "skills/write-article/SKILL.md",
+                "strategy": "replace_section",
+                "has_changes": True,
+            },
+            {
+                "path": "refs/case-studies.md",
+                "strategy": "full_replace",
+                "has_changes": False,
+            },
+        ]
+
+    def test_list_iteration_runs_includes_update_counts(self, store: MemoryStore):
+        first_id = store.record_iteration_run(
+            domain="zhihu",
+            metrics_adapter="generic_csv",
+            summary="first",
+            updates=[
+                {"path": "a.md", "strategy": "append_only", "has_changes": True},
+                {"path": "b.md", "strategy": "append_only", "has_changes": False},
+            ],
+        )
+        second_id = store.record_iteration_run(
+            domain="zhihu",
+            metrics_adapter="generic_csv",
+            summary="second",
+            updates=[{"path": "c.md", "strategy": "append_only", "has_changes": True}],
+        )
+
+        runs = store.list_iteration_runs()
+        assert [run["id"] for run in runs[:2]] == [second_id, first_id]
+        assert runs[0]["changed_count"] == 1
+        assert runs[0]["update_count"] == 1
+        assert runs[1]["changed_count"] == 1
+        assert runs[1]["update_count"] == 2
+
+    def test_record_iteration_run_rejects_invalid_update(self, store: MemoryStore):
+        with pytest.raises(ValueError, match="non-empty path"):
+            store.record_iteration_run(
+                domain="zhihu",
+                metrics_adapter="generic_csv",
+                summary="x",
+                updates=[{"path": "", "strategy": "append_only"}],
+            )
+
+    def test_migration_keeps_old_db_and_adds_iteration_tables(self, tmp_path: Path):
+        db_path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                channel TEXT DEFAULT '',
+                persona TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE facts (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                source TEXT DEFAULT 'agent',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        store = MemoryStore(db_path)
+        try:
+            tables = {
+                row["name"]
+                for row in store._conn.execute(  # noqa: SLF001 - migration assertion
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        finally:
+            store.close()
+
+        assert "iteration_runs" in tables
+        assert "iteration_run_updates" in tables

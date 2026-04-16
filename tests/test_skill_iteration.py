@@ -81,6 +81,7 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
             "directories": ["skills/"],
             "auto_update": auto_update,
         },
+        "memory": {"path": str(tmp_path / "memory.db")},
         "channels": [],
     }
     cfg_path = tmp_path / "aiflay.yaml"
@@ -182,6 +183,7 @@ class TestSkillSelfIteration:
             },
             "iteration": {"git_commit": False},
             "skills": {"directories": ["skills/"], "auto_update": True},
+            "memory": {"path": str(tmp_path / "memory.db")},
             "channels": [],
         }
         cfg_path = tmp_path / "aiflay.yaml"

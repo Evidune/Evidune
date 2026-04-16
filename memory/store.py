@@ -13,8 +13,9 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
+from typing import Any
 
-from memory.rows import row_to_execution, row_to_fact
+from memory.rows import row_to_execution, row_to_fact, row_to_iteration_run
 from memory.schema import init_schema
 from memory.store_models import Fact, Message  # noqa: F401 — re-exported
 
@@ -88,6 +89,31 @@ class MemoryStore:
             valid = ", ".join(sorted(_CONVERSATION_MODES))
             raise ValueError(f"Invalid conversation mode {mode!r}; expected one of {valid}")
         return mode
+
+    def _json_dump(self, value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False)
+
+    def _normalise_iteration_updates(
+        self, updates: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]]:
+        normalised: list[dict[str, Any]] = []
+        for update in updates or []:
+            if not isinstance(update, dict):
+                raise ValueError("Iteration updates must be objects")
+            path = update.get("path")
+            strategy = update.get("strategy")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("Each iteration update must include a non-empty path")
+            if not isinstance(strategy, str) or not strategy.strip():
+                raise ValueError("Each iteration update must include a non-empty strategy")
+            normalised.append(
+                {
+                    "path": path,
+                    "strategy": strategy,
+                    "has_changes": bool(update.get("has_changes", False)),
+                }
+            )
+        return normalised
 
     # --- Conversation / Message API ---
 
@@ -571,6 +597,124 @@ class MemoryStore:
                     "SELECT * FROM emerged_skills ORDER BY updated_at DESC"
                 ).fetchall()
         return [dict(r) for r in rows]
+
+    # --- Iteration Run API ---
+
+    def record_iteration_run(
+        self,
+        *,
+        domain: str,
+        metrics_adapter: str,
+        metrics_source: str = "",
+        sort_metric: str = "",
+        total_records: int = 0,
+        summary: str,
+        patterns: list[str] | None = None,
+        raw_stats: dict[str, Any] | None = None,
+        top_performers: list[dict[str, Any]] | None = None,
+        bottom_performers: list[dict[str, Any]] | None = None,
+        updates: list[dict[str, Any]] | None = None,
+        commit_sha: str | None = None,
+    ) -> int:
+        """Persist one outcome iteration run and the files it touched."""
+        if not domain.strip():
+            raise ValueError("Iteration run domain must be non-empty")
+        if not metrics_adapter.strip():
+            raise ValueError("Iteration run metrics_adapter must be non-empty")
+        if not summary.strip():
+            raise ValueError("Iteration run summary must be non-empty")
+
+        normalised_updates = self._normalise_iteration_updates(updates)
+        with self._lock:
+            now = self._now()
+            cursor = self._conn.execute(
+                """INSERT INTO iteration_runs
+                   (domain, metrics_adapter, metrics_source, sort_metric, total_records,
+                    summary, patterns_json, raw_stats_json, top_performers_json,
+                    bottom_performers_json, commit_sha, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    domain.strip(),
+                    metrics_adapter.strip(),
+                    metrics_source.strip(),
+                    sort_metric.strip(),
+                    total_records,
+                    summary.strip(),
+                    self._json_dump(patterns or []),
+                    self._json_dump(raw_stats or {}),
+                    self._json_dump(top_performers or []),
+                    self._json_dump(bottom_performers or []),
+                    commit_sha,
+                    now,
+                ),
+            )
+            run_id = cursor.lastrowid or 0
+            for update in normalised_updates:
+                self._conn.execute(
+                    """INSERT INTO iteration_run_updates
+                       (run_id, path, strategy, has_changes)
+                       VALUES (?, ?, ?, ?)""",
+                    (
+                        run_id,
+                        update["path"],
+                        update["strategy"],
+                        int(update["has_changes"]),
+                    ),
+                )
+            self._conn.commit()
+            return run_id
+
+    def list_iteration_runs(self, limit: int = 20) -> list[dict]:
+        """List recent iteration runs with compact update counts."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT ir.*,
+                          (SELECT COUNT(*) FROM iteration_run_updates WHERE run_id = ir.id)
+                            AS update_count,
+                          (SELECT COUNT(*) FROM iteration_run_updates
+                           WHERE run_id = ir.id AND has_changes = 1) AS changed_count
+                   FROM iteration_runs ir
+                   ORDER BY ir.id DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+
+        out: list[dict] = []
+        for row in rows:
+            item = row_to_iteration_run(row)
+            item["update_count"] = row["update_count"]
+            item["changed_count"] = row["changed_count"]
+            out.append(item)
+        return out
+
+    def get_iteration_run(self, run_id: int) -> dict | None:
+        """Fetch one iteration run with its file updates."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM iteration_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+            if not row:
+                return None
+            updates = self._conn.execute(
+                """SELECT path, strategy, has_changes
+                   FROM iteration_run_updates
+                   WHERE run_id = ?
+                   ORDER BY id ASC""",
+                (run_id,),
+            ).fetchall()
+
+        return row_to_iteration_run(
+            row,
+            updates=[
+                {
+                    "path": update["path"],
+                    "strategy": update["strategy"],
+                    "has_changes": bool(update["has_changes"]),
+                }
+                for update in updates
+            ],
+        )
 
     def close(self) -> None:
         with self._lock:

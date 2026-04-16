@@ -35,3 +35,22 @@ def row_to_execution(row) -> dict[str, Any]:
         "evaluator_reasoning": row["evaluator_reasoning"],
         "created_at": row["created_at"],
     }
+
+
+def row_to_iteration_run(row, updates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "domain": row["domain"],
+        "metrics_adapter": row["metrics_adapter"],
+        "metrics_source": row["metrics_source"],
+        "sort_metric": row["sort_metric"],
+        "total_records": row["total_records"],
+        "summary": row["summary"],
+        "patterns": json.loads(row["patterns_json"] or "[]"),
+        "raw_stats": json.loads(row["raw_stats_json"] or "{}"),
+        "top_performers": json.loads(row["top_performers_json"] or "[]"),
+        "bottom_performers": json.loads(row["bottom_performers_json"] or "[]"),
+        "commit_sha": row["commit_sha"],
+        "created_at": row["created_at"],
+        "updates": updates or [],
+    }

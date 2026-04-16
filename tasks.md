@@ -36,6 +36,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Add conversation-scoped plan tools with persistent state
 - [x] Add persisted `plan` / `execute` conversation modes
 - [x] Surface conversation mode and plan state in the web UI
+- [x] Persist iteration run ledger and CLI inspection commands
 
 ## Notes
 

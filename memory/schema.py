@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
 
 CREATE TABLE IF NOT EXISTS skill_executions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +45,31 @@ CREATE TABLE IF NOT EXISTS emerged_skills (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS iteration_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain TEXT NOT NULL,
+    metrics_adapter TEXT NOT NULL,
+    metrics_source TEXT DEFAULT '',
+    sort_metric TEXT DEFAULT '',
+    total_records INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL,
+    patterns_json TEXT DEFAULT '[]',
+    raw_stats_json TEXT DEFAULT '{}',
+    top_performers_json TEXT DEFAULT '[]',
+    bottom_performers_json TEXT DEFAULT '[]',
+    commit_sha TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS iteration_run_updates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    has_changes INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (run_id) REFERENCES iteration_runs(id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id TEXT NOT NULL,
@@ -64,10 +88,6 @@ CREATE TABLE IF NOT EXISTS facts (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (namespace, key)
 );
-
-CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_facts_source ON facts(source);
-CREATE INDEX IF NOT EXISTS idx_facts_namespace ON facts(namespace);
 """
 
 
@@ -95,6 +115,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _migrate_facts_namespace(conn)
     _migrate_conversations_metadata(conn)
+    _ensure_indexes(conn)
     conn.commit()
 
 
@@ -123,4 +144,17 @@ def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT ''")
     if "status" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN status TEXT DEFAULT 'active'")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status)")
+
+
+def _ensure_indexes(conn: sqlite3.Connection) -> None:
+    """Create indexes only after legacy-column migrations have completed."""
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_source ON facts(source)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_namespace ON facts(namespace)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_iteration_runs_created ON iteration_runs(created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_iteration_updates_run ON iteration_run_updates(run_id)"
+    )

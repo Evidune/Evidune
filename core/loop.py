@@ -12,6 +12,11 @@ from core.config import AiflayConfig, load_config
 from core.docs_lint import lint_repo
 from core.git_ops import commit_changes
 from core.iteration_helpers import build_reference_content, update_outcome_skills
+from core.iteration_history import (
+    format_iteration_run,
+    format_iteration_runs,
+    record_iteration_report,
+)
 from core.metrics import get_adapter
 from core.updater import update_reference
 
@@ -91,6 +96,15 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
         commit_sha=commit_sha,
     )
 
+    from memory.store import MemoryStore
+
+    memory = MemoryStore(config.memory.path)
+    try:
+        run_id = record_iteration_report(memory, config, snapshot, report, sort_metric)
+    finally:
+        memory.close()
+    report.extra["iteration_run_id"] = run_id
+
     # 6. Send via channels
     for ch_config in config.channels:
         channel = create_channel(
@@ -101,6 +115,42 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
         channel.send_report(report)
 
     return report
+
+
+def _handle_docs_command(base_dir: Path, subcommand: str | None) -> int:
+    if subcommand not in (None, "lint"):
+        raise ValueError("docs only supports the 'lint' subcommand")
+    errors = lint_repo(base_dir)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}")
+        return 1
+    print(f"Documentation lint passed for {base_dir.resolve()}")
+    return 0
+
+
+def _handle_iterations_command(
+    config: AiflayConfig, subcommand: str | None, target: str | None
+) -> int:
+    from memory.store import MemoryStore
+
+    memory = MemoryStore(config.memory.path)
+    try:
+        if subcommand in (None, "list"):
+            print(format_iteration_runs(memory.list_iteration_runs()))
+            return 0
+        if subcommand == "show":
+            if not target:
+                raise ValueError("iterations show requires a numeric run id")
+            try:
+                run_id = int(target)
+            except ValueError as exc:
+                raise ValueError("iterations show requires a numeric run id") from exc
+            print(format_iteration_run(memory.get_iteration_run(run_id)))
+            return 0
+        raise ValueError("iterations only supports 'list' and 'show'")
+    finally:
+        memory.close()
 
 
 async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
@@ -263,42 +313,47 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         memory.close()
 
 
-def main() -> None:
-    """CLI entry point: aiflay run|serve|docs."""
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: aiflay run|serve|docs|iterations."""
     import asyncio
 
     parser = argparse.ArgumentParser(description="Aiflay — outcome-driven skill self-iteration")
-    parser.add_argument("command", choices=["run", "serve", "docs"], help="Command to execute")
+    parser.add_argument(
+        "command",
+        choices=["run", "serve", "docs", "iterations"],
+        help="Command to execute",
+    )
     parser.add_argument("subcommand", nargs="?", help="Subcommand for the selected command")
+    parser.add_argument("target", nargs="?", help="Optional target for the selected subcommand")
     parser.add_argument("--config", "-c", default="aiflay.yaml", help="Path to aiflay.yaml")
     parser.add_argument("--base-dir", "-d", default=None, help="Base directory for resolving paths")
 
-    args = parser.parse_args()
-
-    if args.command == "docs":
-        if args.subcommand not in (None, "lint"):
-            parser.error("docs only supports the 'lint' subcommand")
-        base_dir = Path(args.base_dir) if args.base_dir else Path.cwd()
-        errors = lint_repo(base_dir)
-        if errors:
-            for error in errors:
-                print(f"ERROR: {error}")
-            sys.exit(1)
-        print(f"Documentation lint passed for {base_dir.resolve()}")
-        sys.exit(0)
-
-    config = load_config(args.config)
+    args = parser.parse_args(argv)
     base_dir = Path(args.base_dir) if args.base_dir else Path(args.config).parent
 
-    if args.command == "run":
-        report = run_iteration(config, base_dir)
-        if not any(ch.type == "stdout" for ch in config.channels):
-            print(report.summary_text())
-        sys.exit(0 if report.has_changes or report.analysis.total_records > 0 else 1)
+    try:
+        if args.command == "docs":
+            return _handle_docs_command(
+                Path(args.base_dir) if args.base_dir else Path.cwd(),
+                args.subcommand,
+            )
 
-    elif args.command == "serve":
-        asyncio.run(serve(config, base_dir))
+        config = load_config(args.config)
+
+        if args.command == "run":
+            report = run_iteration(config, base_dir)
+            if not any(ch.type == "stdout" for ch in config.channels):
+                print(report.summary_text())
+            return 0 if report.has_changes or report.analysis.total_records > 0 else 1
+        if args.command == "serve":
+            asyncio.run(serve(config, base_dir))
+            return 0
+        if args.command == "iterations":
+            return _handle_iterations_command(config, args.subcommand, args.target)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
