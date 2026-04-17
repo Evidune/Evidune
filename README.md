@@ -2,8 +2,11 @@
 
 Outcome-driven skill self-evolution framework for AI agents.
 
-Hermes optimizes what the agent _thinks_ worked. Evidune optimizes what
-_actually_ worked.
+[中文说明](README.zh-CN.md)
+
+Evidune turns real outcomes into skill updates. It helps agents capture what
+actually worked, rewrite reusable skills, and carry those improvements forward
+across future runs.
 
 ## Install
 
