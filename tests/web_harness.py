@@ -87,6 +87,23 @@ class DeterministicWebHandler:
                     "token_used": 120,
                     "token_budget": 1000,
                 },
+                "environment_id": "env-stream-1",
+                "environment_status": "healthy",
+                "validation_summary": {
+                    "status": "passed",
+                    "last_snapshot": {"url": "http://example.test"},
+                    "last_screenshot": {"path": "/tmp/runtime/screenshot.png"},
+                    "last_assertion": {"ok": True},
+                },
+                "delivery_summary": {
+                    "mode": "local",
+                    "branch": "codex/task-stream-1",
+                    "ci": {"status": "skipped"},
+                },
+                "artifact_manifest": {
+                    "screenshot": [{"artifact_id": 1}],
+                    "assertion": [{"artifact_id": 2}],
+                },
             },
         )
 

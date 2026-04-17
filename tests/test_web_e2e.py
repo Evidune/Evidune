@@ -79,7 +79,15 @@ def test_execute_mode_streaming_timeline(browser_page, web_harness) -> None:
     expect(assistant.get_by_test_id("task-timeline-squad")).to_have_text("general")
     expect(assistant.get_by_test_id("task-timeline-status")).to_have_text("completed")
     expect(assistant.get_by_test_id("task-timeline-decision")).to_have_text("accept")
+    expect(assistant.get_by_test_id("task-timeline-environment")).to_have_text("healthy")
     expect(assistant.get_by_test_id("task-budget")).to_contain_text("rounds 1/2")
+    expect(assistant.get_by_test_id("harness-summary")).to_be_visible()
+    expect(assistant.get_by_test_id("harness-summary-environment")).to_contain_text("env-stream-1")
+    expect(assistant.get_by_test_id("harness-summary-validation")).to_contain_text("passed")
+    expect(assistant.get_by_test_id("harness-summary-delivery")).to_contain_text(
+        "codex/task-stream-1"
+    )
+    expect(assistant.get_by_test_id("harness-summary-artifacts")).to_contain_text("screenshot × 1")
 
     convo = browser_page.get_by_test_id("conversation-item").filter(has_text="Execute validation")
     expect(convo).to_contain_text("Streaming result ready.")

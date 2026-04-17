@@ -18,7 +18,6 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [ ] Skill for Zhihu Creator Center workflows
 - [ ] Skill for Xiaohongshu metrics analysis
 - [ ] Remote CI remediation loop on top of GitHub PR checks
-- [ ] Richer web timeline UI for environment / validation / delivery summaries
 
 ## Completed
 
@@ -48,6 +47,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Playwright-backed validation tools and validation artifacts in swarm tasks
 - [x] Local-first delivery pipeline with branch / commit / optional GitHub PR flow
 - [x] Structured maintenance sweep with targeted follow-up tasks
+- [x] Richer web timeline UI for environment / validation / delivery summaries
 
 ## Notes
 

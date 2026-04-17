@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Message, SignalType } from '../lib/types'
   import { sendFeedback } from '../lib/api'
+  import HarnessSummary from './HarnessSummary.svelte'
   import TaskTimeline from './TaskTimeline.svelte'
   import ToolTrace from './ToolTrace.svelte'
 
@@ -73,6 +74,16 @@
       budget={message.budgetSummary}
       environmentId={message.environmentId}
       environmentStatus={message.environmentStatus}
+    />
+  {/if}
+
+  {#if !isUser}
+    <HarnessSummary
+      environmentId={message.environmentId}
+      environmentStatus={message.environmentStatus}
+      validationSummary={message.validationSummary}
+      deliverySummary={message.deliverySummary}
+      artifactManifest={message.artifactManifest}
     />
   {/if}
 
