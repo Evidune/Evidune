@@ -466,6 +466,41 @@ class TestSkillStates:
         assert disabled[0]["skill_name"] == "b"
 
 
+class TestHarnessTasks:
+    def test_create_and_update_harness_task_runtime_metadata(self, store: MemoryStore):
+        store.create_harness_task(
+            task_id="task-1",
+            conversation_id="conv-1",
+            environment_id="env-1",
+            environment_status="provisioned",
+            artifact_manifest={"environment": [{"artifact_id": 1}]},
+            validation_summary={"status": "pending"},
+            delivery_summary={"mode": "local"},
+            escalation_reason="",
+        )
+
+        ok = store.update_harness_task(
+            "task-1",
+            environment_status="healthy",
+            artifact_manifest={"screenshot": [{"artifact_id": 2, "path": "/tmp/x.png"}]},
+            validation_summary={"status": "passed"},
+            delivery_summary={"mode": "github", "ci": {"status": "passed"}},
+            escalation_reason="needs product input",
+        )
+        assert ok is True
+
+        task = store.get_harness_task("task-1")
+        assert task is not None
+        assert task["environment_id"] == "env-1"
+        assert task["environment_status"] == "healthy"
+        assert task["artifact_manifest"] == {
+            "screenshot": [{"artifact_id": 2, "path": "/tmp/x.png"}]
+        }
+        assert task["validation_summary"] == {"status": "passed"}
+        assert task["delivery_summary"] == {"mode": "github", "ci": {"status": "passed"}}
+        assert task["escalation_reason"] == "needs product input"
+
+
 class TestIterationRuns:
     def test_record_and_get_iteration_run(self, store: MemoryStore):
         run_id = store.record_iteration_run(

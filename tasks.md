@@ -8,7 +8,6 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 
 ## Pending
 
-- [ ] Agent-visible logs, metrics, and traces for local runs
 - [ ] Markdown rendering + code highlighting in the chat UI
 - [ ] End-to-end smoke test with a real LLM (mocked or via OpenRouter free tier)
 - [ ] Telegram bot gateway
@@ -18,6 +17,8 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [ ] `docs/architecture.md` deep dive
 - [ ] Skill for Zhihu Creator Center workflows
 - [ ] Skill for Xiaohongshu metrics analysis
+- [ ] Remote CI remediation loop on top of GitHub PR checks
+- [ ] Richer web timeline UI for environment / validation / delivery summaries
 
 ## Completed
 
@@ -43,6 +44,10 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Add evidence-backed rewrite guardrails to prevent automatic skill drift
 - [x] Add end-to-end coverage for skill generation, activation, reload, rewrite, and rollback
 - [x] Browser-driven validation harness for the web gateway
+- [x] Task-scoped harness runtime environments with structured logs / metrics / traces
+- [x] Playwright-backed validation tools and validation artifacts in swarm tasks
+- [x] Local-first delivery pipeline with branch / commit / optional GitHub PR flow
+- [x] Structured maintenance sweep with targeted follow-up tasks
 
 ## Notes
 

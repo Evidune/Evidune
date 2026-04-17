@@ -674,6 +674,12 @@ class MemoryStore:
         selected_skills: list[str] | None = None,
         role_roster: list[str] | None = None,
         budget: dict[str, Any] | None = None,
+        environment_id: str = "",
+        environment_status: str = "",
+        artifact_manifest: dict[str, Any] | None = None,
+        validation_summary: dict[str, Any] | None = None,
+        delivery_summary: dict[str, Any] | None = None,
+        escalation_reason: str = "",
     ) -> str:
         """Create or replace a persisted harness task record."""
         with self._lock:
@@ -682,8 +688,10 @@ class MemoryStore:
                 """INSERT OR REPLACE INTO harness_tasks
                    (id, conversation_id, surface, squad_profile, status, task_kind,
                     user_input, selected_skills_json, role_roster_json, budget_json,
+                    environment_id, environment_status, artifact_manifest_json,
+                    validation_summary_json, delivery_summary_json, escalation_reason,
                     summary, convergence_json, final_output, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '{}', '', ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '{}', '', ?, ?)""",
                 (
                     task_id,
                     conversation_id,
@@ -695,6 +703,12 @@ class MemoryStore:
                     self._json_dump(selected_skills or []),
                     self._json_dump(role_roster or []),
                     self._json_dump(budget or {}),
+                    environment_id,
+                    environment_status,
+                    self._json_dump(artifact_manifest or {}),
+                    self._json_dump(validation_summary or {}),
+                    self._json_dump(delivery_summary or {}),
+                    escalation_reason,
                     now,
                     now,
                 ),
@@ -711,6 +725,12 @@ class MemoryStore:
         convergence: dict[str, Any] | None = None,
         final_output: str | None = None,
         budget: dict[str, Any] | None = None,
+        environment_id: str | None = None,
+        environment_status: str | None = None,
+        artifact_manifest: dict[str, Any] | None = None,
+        validation_summary: dict[str, Any] | None = None,
+        delivery_summary: dict[str, Any] | None = None,
+        escalation_reason: str | None = None,
     ) -> bool:
         """Update status and output fields for an existing harness task."""
         updates = []
@@ -730,6 +750,24 @@ class MemoryStore:
         if budget is not None:
             updates.append("budget_json = ?")
             params.append(self._json_dump(budget))
+        if environment_id is not None:
+            updates.append("environment_id = ?")
+            params.append(environment_id)
+        if environment_status is not None:
+            updates.append("environment_status = ?")
+            params.append(environment_status)
+        if artifact_manifest is not None:
+            updates.append("artifact_manifest_json = ?")
+            params.append(self._json_dump(artifact_manifest))
+        if validation_summary is not None:
+            updates.append("validation_summary_json = ?")
+            params.append(self._json_dump(validation_summary))
+        if delivery_summary is not None:
+            updates.append("delivery_summary_json = ?")
+            params.append(self._json_dump(delivery_summary))
+        if escalation_reason is not None:
+            updates.append("escalation_reason = ?")
+            params.append(escalation_reason)
         updates.append("updated_at = ?")
         params.append(self._now())
         params.append(task_id)

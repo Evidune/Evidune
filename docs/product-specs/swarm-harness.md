@@ -24,8 +24,9 @@ Each swarm task follows these phases:
 
 1. `plan`
 2. `execute`
-3. `critique`
-4. `finalise`
+3. `validate`
+4. `critique`
+5. `finalise`
 
 The v1 role set is fixed:
 
@@ -60,6 +61,26 @@ Swarm execution is durable through these tables:
 
 Skill executions may link back to a swarm task through `harness_task_id`.
 
+Each harness task also persists:
+
+- `environment_id`
+- `environment_status`
+- `artifact_manifest`
+- `validation_summary`
+- `delivery_summary`
+- `escalation_reason`
+
+Runtime environments are task-scoped and rooted at `.aiflay/runtime/<environment_id>/`.
+They expose structured logs, metrics, and traces through harness tools rather than free-form shell output.
+
+Worker roles in execute mode receive structured harness tools for:
+
+- environment lifecycle
+- UI validation
+- observability queries
+- delivery submission
+- maintenance sweeps
+
 ## Web Surface
 
 The web gateway keeps `POST /api/chat` as the compatibility path and adds
@@ -73,6 +94,11 @@ Swarm responses expose:
 - `task_events`
 - `convergence_summary`
 - `budget_summary`
+- `environment_id`
+- `environment_status`
+- `validation_summary`
+- `delivery_summary`
+- `artifact_manifest`
 
 The chat UI shows the swarm timeline and grouped tool traces inline with the
 assistant message.

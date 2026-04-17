@@ -71,6 +71,8 @@
       events={message.taskEvents}
       convergence={message.convergenceSummary}
       budget={message.budgetSummary}
+      environmentId={message.environmentId}
+      environmentStatus={message.environmentStatus}
     />
   {/if}
 

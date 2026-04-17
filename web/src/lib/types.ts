@@ -63,6 +63,11 @@ export interface Message {
   taskEvents?: TaskEvent[]
   convergenceSummary?: ConvergenceSummary | null
   budgetSummary?: BudgetSummary | null
+  environmentId?: string | null
+  environmentStatus?: string | null
+  validationSummary?: Record<string, unknown> | null
+  deliverySummary?: Record<string, unknown> | null
+  artifactManifest?: Record<string, unknown> | null
 }
 
 export interface Skill {
@@ -88,6 +93,11 @@ export interface ChatResponse {
   task_events?: TaskEvent[]
   convergence_summary?: ConvergenceSummary | null
   budget_summary?: BudgetSummary | null
+  environment_id?: string | null
+  environment_status?: string | null
+  validation_summary?: Record<string, unknown> | null
+  delivery_summary?: Record<string, unknown> | null
+  artifact_manifest?: Record<string, unknown> | null
   error?: string
 }
 

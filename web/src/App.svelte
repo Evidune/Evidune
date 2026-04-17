@@ -175,6 +175,11 @@
                 taskEvents: resp.task_events ?? msg.taskEvents,
                 convergenceSummary: resp.convergence_summary ?? null,
                 budgetSummary: resp.budget_summary ?? null,
+                environmentId: resp.environment_id ?? null,
+                environmentStatus: resp.environment_status ?? null,
+                validationSummary: resp.validation_summary ?? null,
+                deliverySummary: resp.delivery_summary ?? null,
+                artifactManifest: resp.artifact_manifest ?? null,
               }
             : msg,
         ),

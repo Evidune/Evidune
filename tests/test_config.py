@@ -42,6 +42,13 @@ class TestLoadConfig:
             "iteration": {"schedule": "0 21 * * *", "git_commit": False},
             "channels": [{"type": "stdout"}],
             "skills": {"directories": ["skills"], "prompt_mode": "index"},
+            "agent": {
+                "harness": {
+                    "environment": {"runtime_dir": ".aiflay/runtime", "startup_timeout_s": 12},
+                    "validation": {"headless": False, "slow_mo_ms": 50},
+                    "delivery": {"branch_prefix": "feature/", "github_enabled": False},
+                }
+            },
         }
         config = load_config(_write_yaml(data, tmp_path / "aiflay.yaml"))
         assert config.domain == "zhihu"
@@ -52,6 +59,13 @@ class TestLoadConfig:
         assert config.iteration.git_commit is False
         assert len(config.channels) == 1
         assert config.skills.prompt_mode == "index"
+        assert config.agent is not None
+        assert config.agent.harness.environment.runtime_dir == ".aiflay/runtime"
+        assert config.agent.harness.environment.startup_timeout_s == 12
+        assert config.agent.harness.validation.headless is False
+        assert config.agent.harness.validation.slow_mo_ms == 50
+        assert config.agent.harness.delivery.branch_prefix == "feature/"
+        assert config.agent.harness.delivery.github_enabled is False
 
     def test_env_expansion(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TEST_WEBHOOK", "https://feishu.example.com/hook/abc")

@@ -125,6 +125,14 @@ class HarnessConfig:
     wall_clock_budget_s: int = 120
     stream_events: bool = True
     iteration_workflow_enabled: bool = True
+    environment: HarnessEnvironmentConfig = field(
+        default_factory=lambda: HarnessEnvironmentConfig()
+    )
+    observability: HarnessObservabilityConfig = field(
+        default_factory=lambda: HarnessObservabilityConfig()
+    )
+    validation: HarnessValidationConfig = field(default_factory=lambda: HarnessValidationConfig())
+    delivery: HarnessDeliveryConfig = field(default_factory=lambda: HarnessDeliveryConfig())
 
     def __post_init__(self) -> None:
         valid = {"single", "swarm"}
@@ -144,6 +152,40 @@ class EvaluatorConfig:
     llm_model: str = "claude-sonnet-4-6"
     llm_base_url: str | None = None
     api_key_env: str = "ANTHROPIC_API_KEY"
+
+
+@dataclass
+class HarnessEnvironmentConfig:
+    enabled: bool = True
+    runtime_dir: str = ".aiflay/runtime"
+    service_host: str = "127.0.0.1"
+    startup_timeout_s: int = 30
+    healthcheck_path: str = "/api/skills"
+
+
+@dataclass
+class HarnessObservabilityConfig:
+    enabled: bool = True
+    retention_days: int = 7
+    max_entries_per_kind: int = 5000
+
+
+@dataclass
+class HarnessValidationConfig:
+    enabled: bool = True
+    browser: str = "playwright"
+    headless: bool = True
+    slow_mo_ms: int = 0
+
+
+@dataclass
+class HarnessDeliveryConfig:
+    enabled: bool = True
+    github_enabled: bool = True
+    branch_prefix: str = "codex/"
+    auto_stage_tracked: bool = True
+    ci_poll_interval_s: int = 5
+    ci_timeout_s: int = 120
 
 
 @dataclass
@@ -331,6 +373,36 @@ def load_config(path: str | Path) -> AiflayConfig:
             glob_max_hits=tools_raw.get("glob_max_hits", 200),
         )
         harness_raw = agent_raw.get("harness", {}) or {}
+        env_raw = harness_raw.get("environment", {}) or {}
+        environment_cfg = HarnessEnvironmentConfig(
+            enabled=env_raw.get("enabled", True),
+            runtime_dir=env_raw.get("runtime_dir", ".aiflay/runtime"),
+            service_host=env_raw.get("service_host", "127.0.0.1"),
+            startup_timeout_s=env_raw.get("startup_timeout_s", 30),
+            healthcheck_path=env_raw.get("healthcheck_path", "/api/skills"),
+        )
+        obs_raw = harness_raw.get("observability", {}) or {}
+        observability_cfg = HarnessObservabilityConfig(
+            enabled=obs_raw.get("enabled", True),
+            retention_days=obs_raw.get("retention_days", 7),
+            max_entries_per_kind=obs_raw.get("max_entries_per_kind", 5000),
+        )
+        validation_raw = harness_raw.get("validation", {}) or {}
+        validation_cfg = HarnessValidationConfig(
+            enabled=validation_raw.get("enabled", True),
+            browser=validation_raw.get("browser", "playwright"),
+            headless=validation_raw.get("headless", True),
+            slow_mo_ms=validation_raw.get("slow_mo_ms", 0),
+        )
+        delivery_raw = harness_raw.get("delivery", {}) or {}
+        delivery_cfg = HarnessDeliveryConfig(
+            enabled=delivery_raw.get("enabled", True),
+            github_enabled=delivery_raw.get("github_enabled", True),
+            branch_prefix=delivery_raw.get("branch_prefix", "codex/"),
+            auto_stage_tracked=delivery_raw.get("auto_stage_tracked", True),
+            ci_poll_interval_s=delivery_raw.get("ci_poll_interval_s", 5),
+            ci_timeout_s=delivery_raw.get("ci_timeout_s", 120),
+        )
         harness_cfg = HarnessConfig(
             strategy=harness_raw.get("strategy", "single"),
             simple_turn_threshold=harness_raw.get("simple_turn_threshold", 18),
@@ -342,6 +414,10 @@ def load_config(path: str | Path) -> AiflayConfig:
             wall_clock_budget_s=harness_raw.get("wall_clock_budget_s", 120),
             stream_events=harness_raw.get("stream_events", True),
             iteration_workflow_enabled=harness_raw.get("iteration_workflow_enabled", True),
+            environment=environment_cfg,
+            observability=observability_cfg,
+            validation=validation_cfg,
+            delivery=delivery_cfg,
         )
         agent = AgentConfig(
             llm_provider=agent_raw.get("llm_provider", "openai"),

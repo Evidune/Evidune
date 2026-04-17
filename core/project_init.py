@@ -27,6 +27,14 @@ agent:
     strategy: swarm
     default_squad: general
     stream_events: true
+    environment:
+      runtime_dir: .aiflay/runtime
+    validation:
+      enabled: true
+      browser: playwright
+    delivery:
+      enabled: true
+      github_enabled: false
   emergence:
     enabled: false
     output_dir: .aiflay/emerged_skills

@@ -115,7 +115,13 @@ async def test_swarm_harness_persists_task_and_steps(tmp_path: Path, memory: Mem
     assert task is not None
     assert task["status"] == response.metadata["task_status"]
     steps = memory.list_harness_steps(response.metadata["task_id"])
-    assert [step["phase"] for step in steps] == ["plan", "execute", "critique", "finalise"]
+    assert [step["phase"] for step in steps] == [
+        "plan",
+        "execute",
+        "validate",
+        "critique",
+        "finalise",
+    ]
     assert response.metadata["task_events"]
 
 
@@ -176,13 +182,13 @@ def test_swarm_tool_permissions_respect_role_and_mode(tmp_path: Path, memory: Me
         harness_config=SimpleNamespace(strategy="swarm"),
     )
 
-    execute_tools = agent._swarm_tool_registries("c1", None, "execute")
+    execute_tools = agent._swarm_tool_registries("task-1", "c1", None, "execute")
     assert "run_shell" in execute_tools["worker"].names()
     assert "set_fact" in execute_tools["worker"].names()
     assert "run_shell" not in execute_tools["planner"].names()
     assert "set_fact" not in execute_tools["critic"].names()
 
-    plan_tools = agent._swarm_tool_registries("c1", None, "plan")
+    plan_tools = agent._swarm_tool_registries("task-1", "c1", None, "plan")
     assert "run_shell" not in plan_tools["worker"].names()
     assert "set_fact" not in plan_tools["worker"].names()
 

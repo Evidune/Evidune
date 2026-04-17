@@ -17,6 +17,7 @@ from agent.harness.models import (
     TaskEvent,
     WorkArtifact,
 )
+from agent.harness.runtime import RuntimeEnvironment
 from agent.tools.registry import ToolRegistry
 from skills.loader import Skill
 
@@ -61,13 +62,15 @@ class SwarmHarness:
         *,
         brief: TaskBrief,
         squad,
+        task_id: str | None = None,
+        environment: RuntimeEnvironment | None = None,
         identity_prompt: str = "",
         worker_skill_groups: list[list[Skill]] | None = None,
         tool_registry_by_role: dict[str, ToolRegistry | None] | None = None,
         event_sink: EventSink | None = None,
         surface: str = "serve",
     ) -> HarnessTask:
-        task_id = f"task-{uuid.uuid4().hex[:10]}"
+        task_id = task_id or f"task-{uuid.uuid4().hex[:10]}"
         start = time.monotonic()
         task = HarnessTask(
             id=task_id,
@@ -75,6 +78,8 @@ class SwarmHarness:
             surface=surface,
             squad=squad,
             brief=brief,
+            environment_id=environment.environment_id if environment else "",
+            environment_status="provisioned" if environment else "",
             budget_summary=BudgetSummary(
                 token_budget=self.token_budget,
                 tool_call_budget=self.tool_call_budget,
@@ -93,10 +98,24 @@ class SwarmHarness:
             selected_skills=brief.selected_skills,
             role_roster=squad.role_roster(),
             budget=task.budget_summary.to_dict(),
+            environment_id=task.environment_id,
+            environment_status=task.environment_status,
         )
 
         emit = self._build_emitter(task, event_sink)
         emit("task_started", phase="plan", message="Swarm task started", data={"squad": squad.name})
+        if environment is not None:
+            emit(
+                "environment_started",
+                phase="environment",
+                role="system",
+                message="Runtime environment provisioned",
+                data={
+                    "environment_id": environment.environment_id,
+                    "root": str(environment.root),
+                    "artifacts_dir": str(environment.artifacts_dir),
+                },
+            )
 
         tool_registry_by_role = tool_registry_by_role or {}
         skill_groups = worker_skill_groups or [[] for _ in range(squad.worker_branches)]
@@ -204,12 +223,66 @@ class SwarmHarness:
             worker_artifacts = [
                 artifact for artifact in task.artifacts if artifact.id in latest_worker_ids
             ]
+            persisted_task = self.memory.get_harness_task(task.id) or {}
+            validation_summary = dict(persisted_task.get("validation_summary") or {})
+            validation_status = validation_summary.get("status", "pending")
+            emit(
+                "validation_started",
+                phase="validate",
+                role="validator",
+                message="Recording validation evidence before critique",
+                data=validation_summary or {"status": "pending"},
+            )
+            validation_step_id = self.memory.record_harness_step(
+                task.id,
+                phase="validate",
+                role="validator",
+                status=validation_status,
+                summary=self._summarise(
+                    validation_summary.get("message")
+                    or validation_summary.get("status")
+                    or "Validation pending"
+                ),
+                tool_trace=[],
+                budget=task.budget_summary.to_dict(),
+            )
+            validation_artifact_id = self.memory.record_harness_artifact(
+                task.id,
+                step_id=validation_step_id,
+                phase="validate",
+                role="validator",
+                kind="validation",
+                summary=self._summarise(json.dumps(validation_summary or {"status": "pending"})),
+                content=json.dumps(validation_summary or {"status": "pending"}),
+                accepted=validation_status != "failed",
+                meta=validation_summary or {"status": "pending"},
+            )
+            validation_artifact = WorkArtifact(
+                id=validation_artifact_id,
+                task_id=task.id,
+                step_id=validation_step_id,
+                phase="validate",
+                role="validator",
+                kind="validation",
+                summary=self._summarise(json.dumps(validation_summary or {"status": "pending"})),
+                content=json.dumps(validation_summary or {"status": "pending"}),
+                accepted=validation_status != "failed",
+                meta=validation_summary or {"status": "pending"},
+            )
+            task.artifacts.append(validation_artifact)
+            emit(
+                "validation_failed" if validation_status == "failed" else "validation_passed",
+                phase="validate",
+                role="validator",
+                message="Validation summary recorded before critique",
+                data=validation_summary or {"status": "pending"},
+            )
             critique_result = await self._run_role(
                 role="critic",
                 phase="critique",
                 brief=brief,
                 identity_prompt=identity_prompt,
-                prior_artifacts=worker_artifacts,
+                prior_artifacts=worker_artifacts + [validation_artifact],
                 attached_skills=[],
                 tool_registry=tool_registry_by_role.get("critic"),
             )
@@ -318,6 +391,12 @@ class SwarmHarness:
         if task.status == "running":
             task.status = "completed" if last_decision.decision == "accept" else "partial"
         task.budget_summary.elapsed_ms = int((time.monotonic() - start) * 1000)
+        persisted_task = self.memory.get_harness_task(task.id) or {}
+        task.environment_status = persisted_task.get("environment_status", task.environment_status)
+        task.artifact_manifest = dict(persisted_task.get("artifact_manifest") or {})
+        task.validation_summary = dict(persisted_task.get("validation_summary") or {})
+        task.delivery_summary = dict(persisted_task.get("delivery_summary") or {})
+        task.escalation_reason = persisted_task.get("escalation_reason", "")
         self.memory.update_harness_task(
             task.id,
             status=task.status,
@@ -325,6 +404,11 @@ class SwarmHarness:
             convergence=task.convergence_summary,
             final_output=task.final_output,
             budget=task.budget_summary.to_dict(),
+            artifact_manifest=task.artifact_manifest,
+            validation_summary=task.validation_summary,
+            delivery_summary=task.delivery_summary,
+            escalation_reason=task.escalation_reason,
+            environment_status=task.environment_status,
         )
         emit(
             "task_completed",

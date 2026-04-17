@@ -23,6 +23,7 @@ from core.runtime_paths import (
     resolve_emergence_output_dir,
     resolve_memory_path,
     resolve_metrics_config,
+    resolve_runtime_dir,
 )
 from core.updater import update_reference
 
@@ -258,7 +259,195 @@ def _handle_init_command(target: str | None, subcommand: str | None) -> int:
     return 0
 
 
-async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
+def _build_harness_services(config: AiflayConfig, base_dir: Path, config_path: Path | None):
+    if not config.agent:
+        raise ValueError("agent section required for harness runtime commands")
+
+    from agent.harness.delivery import DeliveryConfig, DeliveryManager
+    from agent.harness.maintenance import MaintenanceSweepRunner
+    from agent.harness.runtime import HarnessRuntimeManager
+    from agent.harness.validation import ValidationConfig, ValidationHarness
+
+    runtime_manager = None
+    if config.agent.harness.environment.enabled:
+        runtime_manager = HarnessRuntimeManager(
+            runtime_dir=Path(resolve_runtime_dir(config, base_dir)),
+            base_dir=base_dir,
+            source_config_path=config_path,
+            service_host=config.agent.harness.environment.service_host,
+            startup_timeout_s=config.agent.harness.environment.startup_timeout_s,
+            healthcheck_path=config.agent.harness.environment.healthcheck_path,
+        )
+
+    validator = None
+    if config.agent.harness.validation.enabled:
+        validator = ValidationHarness(
+            ValidationConfig(
+                headless=config.agent.harness.validation.headless,
+                slow_mo_ms=config.agent.harness.validation.slow_mo_ms,
+            )
+        )
+
+    delivery_manager = None
+    if config.agent.harness.delivery.enabled:
+        delivery_manager = DeliveryManager(
+            base_dir,
+            DeliveryConfig(
+                branch_prefix=config.agent.harness.delivery.branch_prefix,
+                github_enabled=config.agent.harness.delivery.github_enabled,
+                auto_stage_tracked=config.agent.harness.delivery.auto_stage_tracked,
+                ci_poll_interval_s=config.agent.harness.delivery.ci_poll_interval_s,
+                ci_timeout_s=config.agent.harness.delivery.ci_timeout_s,
+            ),
+        )
+
+    return runtime_manager, validator, delivery_manager, MaintenanceSweepRunner(base_dir)
+
+
+def _print_json(payload) -> None:
+    import json
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+
+
+def _load_runtime_environment(runtime_manager, environment_id: str | None):
+    if runtime_manager is None:
+        raise ValueError("harness environment support is disabled")
+    if not environment_id:
+        raise ValueError("environment id is required for this command")
+    return runtime_manager.load_environment(environment_id)
+
+
+def _handle_env_command(
+    config: AiflayConfig,
+    base_dir: Path,
+    config_path: Path | None,
+    subcommand: str | None,
+    target: str | None,
+) -> int:
+    runtime_manager, _, _, _ = _build_harness_services(config, base_dir, config_path)
+    action = subcommand or "status"
+    if action == "up":
+        environment = runtime_manager.create_environment(target or "manual")
+        payload = environment.up()
+        _print_json({"environment_id": environment.environment_id, **payload})
+        return 0
+    environment = _load_runtime_environment(runtime_manager, target)
+    if action == "down":
+        _print_json(environment.down())
+        return 0
+    if action == "restart":
+        _print_json(environment.restart())
+        return 0
+    if action == "health":
+        _print_json(environment.health())
+        return 0
+    if action == "status":
+        _print_json(environment.status())
+        return 0
+    raise ValueError("env only supports up, down, restart, health, and status")
+
+
+async def _handle_validate_command(
+    config: AiflayConfig,
+    base_dir: Path,
+    config_path: Path | None,
+    subcommand: str | None,
+    *,
+    environment_id: str | None,
+    page_path: str,
+    contains_text: str,
+    visible_test_id: str,
+    url_contains: str,
+    session_id: str,
+) -> int:
+    if (subcommand or "run") != "run":
+        raise ValueError("validate only supports the 'run' subcommand")
+    runtime_manager, validator, _, _ = _build_harness_services(config, base_dir, config_path)
+    if validator is None or runtime_manager is None:
+        raise ValueError("validation support requires both runtime environments and validation")
+    environment = (
+        runtime_manager.load_environment(environment_id)
+        if environment_id
+        else runtime_manager.create_environment("validate")
+    )
+    opened = await validator.open_app(environment, session_id=session_id, path=page_path or "/")
+    snapshot = await validator.snapshot_ui(environment, session_id=session_id)
+    screenshot = await validator.capture_screenshot(
+        environment, session_id=session_id, name="validate-run"
+    )
+    assertion = await validator.assert_ui_state(
+        environment,
+        session_id=session_id,
+        contains_text=contains_text,
+        visible_test_id=visible_test_id,
+        url_contains=url_contains,
+    )
+    _print_json(
+        {
+            "environment_id": environment.environment_id,
+            "opened": opened,
+            "snapshot": snapshot,
+            "screenshot": screenshot,
+            "assertion": assertion,
+        }
+    )
+    return 0 if assertion["ok"] else 1
+
+
+def _handle_delivery_command(
+    config: AiflayConfig,
+    base_dir: Path,
+    config_path: Path | None,
+    subcommand: str | None,
+    *,
+    environment_id: str | None,
+    files: list[str],
+    branch: str,
+    message: str,
+    pr_title: str,
+    pr_body: str,
+) -> int:
+    if (subcommand or "submit") != "submit":
+        raise ValueError("delivery only supports the 'submit' subcommand")
+    runtime_manager, _, delivery_manager, _ = _build_harness_services(config, base_dir, config_path)
+    if delivery_manager is None or runtime_manager is None:
+        raise ValueError("delivery support requires both runtime environments and delivery")
+    environment = (
+        runtime_manager.load_environment(environment_id)
+        if environment_id
+        else runtime_manager.create_environment("delivery")
+    )
+    result = delivery_manager.submit(
+        environment,
+        files=files,
+        branch=branch,
+        message=message,
+        pr_title=pr_title,
+        pr_body=pr_body,
+    )
+    _print_json({"environment_id": environment.environment_id, **result})
+    return 0
+
+
+def _handle_maintenance_command(
+    config: AiflayConfig,
+    base_dir: Path,
+    config_path: Path | None,
+    subcommand: str | None,
+) -> int:
+    if (subcommand or "sweep") != "sweep":
+        raise ValueError("maintenance only supports the 'sweep' subcommand")
+    _, _, _, maintenance_runner = _build_harness_services(config, base_dir, config_path)
+    _print_json(maintenance_runner.sweep())
+    return 0
+
+
+async def serve(
+    config: AiflayConfig,
+    base_dir: Path | None = None,
+    config_path: Path | None = None,
+) -> None:
     """Start the agent with configured gateways.
 
     This is the interactive mode where the agent listens for messages
@@ -387,6 +576,10 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         )
         tool_registry.register_many(external_tools(base_dir=base_dir, config=ext_cfg))
 
+    runtime_manager, validation_harness, delivery_manager, maintenance_runner = (
+        _build_harness_services(config, base_dir, config_path)
+    )
+
     agent = AgentCore(
         llm=llm,
         skill_registry=skill_registry,
@@ -406,6 +599,12 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
         title_generator=title_generator,
         tool_registry=tool_registry,
         harness_config=config.agent.harness,
+        base_dir=base_dir,
+        config_path=config_path,
+        runtime_manager=runtime_manager,
+        validation_harness=validation_harness,
+        delivery_manager=delivery_manager,
+        maintenance_runner=maintenance_runner,
     )
 
     # Create gateways
@@ -439,13 +638,23 @@ async def serve(config: AiflayConfig, base_dir: Path | None = None) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point: aiflay run|serve|docs|iterations|init."""
+    """CLI entry point for run, serve, runtime, validation, delivery, and maintenance."""
     import asyncio
 
     parser = argparse.ArgumentParser(description="Aiflay — outcome-driven skill self-iteration")
     parser.add_argument(
         "command",
-        choices=["run", "serve", "docs", "iterations", "init"],
+        choices=[
+            "run",
+            "serve",
+            "docs",
+            "iterations",
+            "init",
+            "env",
+            "validate",
+            "delivery",
+            "maintenance",
+        ],
         help="Command to execute",
     )
     parser.add_argument("subcommand", nargs="?", help="Subcommand for the selected command")
@@ -453,9 +662,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", "-c", default="aiflay.yaml", help="Path to aiflay.yaml")
     parser.add_argument("--base-dir", "-d", default=None, help="Base directory for resolving paths")
     parser.add_argument("--path", help="Target path for 'init'")
+    parser.add_argument(
+        "--environment-id", help="Existing runtime environment id for validate/delivery"
+    )
+    parser.add_argument("--page-path", default="/", help="Page path for validate run")
+    parser.add_argument("--contains-text", default="", help="Required text for validate run")
+    parser.add_argument(
+        "--visible-test-id", default="", help="Visible data-testid for validate run"
+    )
+    parser.add_argument("--url-contains", default="", help="Required URL fragment for validate run")
+    parser.add_argument("--session-id", default="default", help="Validation session id")
+    parser.add_argument("--files", nargs="*", default=[], help="Files to stage for delivery submit")
+    parser.add_argument("--branch", default="", help="Branch name for delivery submit")
+    parser.add_argument("--message", default="", help="Commit message for delivery submit")
+    parser.add_argument("--pr-title", default="", help="Pull request title for delivery submit")
+    parser.add_argument("--pr-body", default="", help="Pull request body for delivery submit")
 
     args = parser.parse_args(argv)
     base_dir = Path(args.base_dir) if args.base_dir else Path(args.config).parent
+    config_path = Path(args.config).resolve()
 
     try:
         if args.command == "docs":
@@ -474,10 +699,42 @@ def main(argv: list[str] | None = None) -> int:
                 print(report.summary_text())
             return 0 if report.has_changes or report.analysis.total_records > 0 else 1
         if args.command == "serve":
-            asyncio.run(serve(config, base_dir))
+            asyncio.run(serve(config, base_dir, config_path=config_path))
             return 0
         if args.command == "iterations":
             return _handle_iterations_command(config, base_dir, args.subcommand, args.target)
+        if args.command == "env":
+            return _handle_env_command(config, base_dir, config_path, args.subcommand, args.target)
+        if args.command == "validate":
+            return asyncio.run(
+                _handle_validate_command(
+                    config,
+                    base_dir,
+                    config_path,
+                    args.subcommand,
+                    environment_id=args.environment_id,
+                    page_path=args.page_path or args.target or "/",
+                    contains_text=args.contains_text,
+                    visible_test_id=args.visible_test_id,
+                    url_contains=args.url_contains,
+                    session_id=args.session_id,
+                )
+            )
+        if args.command == "delivery":
+            return _handle_delivery_command(
+                config,
+                base_dir,
+                config_path,
+                args.subcommand,
+                environment_id=args.environment_id,
+                files=args.files,
+                branch=args.branch,
+                message=args.message,
+                pr_title=args.pr_title,
+                pr_body=args.pr_body,
+            )
+        if args.command == "maintenance":
+            return _handle_maintenance_command(config, base_dir, config_path, args.subcommand)
     except ValueError as exc:
         parser.error(str(exc))
     return 0

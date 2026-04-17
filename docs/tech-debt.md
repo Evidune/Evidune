@@ -8,7 +8,9 @@ new debt without pretending the existing debt is resolved.
 - `agent/core.py` (hard limit exception): split prompt assembly and post-response workflows into smaller modules
 - `agent/harness/swarm.py` (hard limit exception): split role scheduling, prompt construction, and budget tracking into focused modules
 - `agent/iteration_harness.py` (hard limit exception): split packet building, deterministic review policy, and mutation helpers
+- `agent/harness/runtime.py` (hard limit exception): split environment lifecycle from observability storage helpers
 - `agent/tools/external.py` (hard limit exception): split shell/file/http/python helpers from tool declarations
+- `agent/tools/harness_tools.py` (hard limit exception): split runtime, validation, delivery, and maintenance tool declarations
 - `core/config.py` (hard limit exception): split config dataclasses from YAML loading
 - `core/iteration_helpers.py` (hard limit exception): split outcome iteration orchestration from markdown transform helpers
 - `core/loop.py` (hard limit exception): split CLI parsing from runtime wiring

@@ -94,6 +94,12 @@ CREATE TABLE IF NOT EXISTS harness_tasks (
     selected_skills_json TEXT DEFAULT '[]',
     role_roster_json TEXT DEFAULT '[]',
     budget_json TEXT DEFAULT '{}',
+    environment_id TEXT DEFAULT '',
+    environment_status TEXT DEFAULT '',
+    artifact_manifest_json TEXT DEFAULT '{}',
+    validation_summary_json TEXT DEFAULT '{}',
+    delivery_summary_json TEXT DEFAULT '{}',
+    escalation_reason TEXT DEFAULT '',
     summary TEXT DEFAULT '',
     convergence_json TEXT DEFAULT '{}',
     final_output TEXT DEFAULT '',
@@ -203,6 +209,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _migrate_emerged_skills(conn)
     _migrate_skill_states(conn)
     _migrate_skill_lifecycle_events(conn)
+    _migrate_harness_tasks(conn)
     _ensure_indexes(conn)
     conn.commit()
 
@@ -273,6 +280,29 @@ def _migrate_skill_lifecycle_events(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE skill_lifecycle_events ADD COLUMN harness_task_id TEXT DEFAULT ''"
         )
+
+
+def _migrate_harness_tasks(conn: sqlite3.Connection) -> None:
+    """Older DBs lack runtime, validation, and delivery metadata on harness tasks."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(harness_tasks)").fetchall()]
+    if not cols:
+        return
+    if "environment_id" not in cols:
+        conn.execute("ALTER TABLE harness_tasks ADD COLUMN environment_id TEXT DEFAULT ''")
+    if "environment_status" not in cols:
+        conn.execute("ALTER TABLE harness_tasks ADD COLUMN environment_status TEXT DEFAULT ''")
+    if "artifact_manifest_json" not in cols:
+        conn.execute(
+            "ALTER TABLE harness_tasks ADD COLUMN artifact_manifest_json TEXT DEFAULT '{}'"
+        )
+    if "validation_summary_json" not in cols:
+        conn.execute(
+            "ALTER TABLE harness_tasks ADD COLUMN validation_summary_json TEXT DEFAULT '{}'"
+        )
+    if "delivery_summary_json" not in cols:
+        conn.execute("ALTER TABLE harness_tasks ADD COLUMN delivery_summary_json TEXT DEFAULT '{}'")
+    if "escalation_reason" not in cols:
+        conn.execute("ALTER TABLE harness_tasks ADD COLUMN escalation_reason TEXT DEFAULT ''")
 
 
 def _ensure_indexes(conn: sqlite3.Connection) -> None:

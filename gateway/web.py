@@ -377,6 +377,11 @@ class WebGateway(Gateway):
             "task_events": response.metadata.get("task_events", []),
             "convergence_summary": response.metadata.get("convergence_summary"),
             "budget_summary": response.metadata.get("budget_summary"),
+            "environment_id": response.metadata.get("environment_id"),
+            "environment_status": response.metadata.get("environment_status"),
+            "validation_summary": response.metadata.get("validation_summary"),
+            "delivery_summary": response.metadata.get("delivery_summary"),
+            "artifact_manifest": response.metadata.get("artifact_manifest"),
         }
 
     def _handle_feedback(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -4,12 +4,16 @@
   let {
     squad,
     status,
+    environmentId,
+    environmentStatus,
     events,
     convergence,
     budget,
   }: {
     squad?: string | null
     status?: string | null
+    environmentId?: string | null
+    environmentStatus?: string | null
     events?: TaskEvent[]
     convergence?: ConvergenceSummary | null
     budget?: BudgetSummary | null
@@ -23,6 +27,9 @@
       <div class="meta">
         {#if squad}<span class="pill" data-testid="task-timeline-squad">{squad}</span>{/if}
         {#if status}<span class="pill status" data-testid="task-timeline-status">{status}</span>{/if}
+        {#if environmentStatus}
+          <span class="pill" data-testid="task-timeline-environment">{environmentStatus}</span>
+        {/if}
         {#if convergence?.decision}
           <span class="pill" data-testid="task-timeline-decision">{convergence.decision}</span>
         {/if}
@@ -42,6 +49,7 @@
     </div>
     {#if budget}
       <div class="budget" data-testid="task-budget">
+        {#if environmentId}env {environmentId} · {/if}
         rounds {budget.rounds_used ?? 0}/{budget.max_rounds ?? 0}
         · tools {budget.tool_calls_used ?? 0}/{budget.tool_call_budget ?? 0}
         · tokens ~{budget.token_used ?? 0}/{budget.token_budget ?? 0}

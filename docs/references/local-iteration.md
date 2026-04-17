@@ -16,6 +16,8 @@ aiflay iterations list --config aiflay.yaml
 
 - `.aiflay/memory.db`: shared SQLite store for conversations, facts, and iteration runs
 - `.aiflay/emerged_skills/`: output directory for conversation-synthesized skills when enabled
+- `.aiflay/runtime/<environment_id>/`: task-scoped harness environments with service state,
+  structured observability, and validation artifacts
 
 ## Path Semantics
 

@@ -136,11 +136,17 @@ class HarnessTask:
     squad: SquadProfile
     brief: TaskBrief
     status: str = "running"
+    environment_id: str = ""
+    environment_status: str = ""
     events: list[TaskEvent] = field(default_factory=list)
     artifacts: list[WorkArtifact] = field(default_factory=list)
     decision: DecisionRecord | None = None
     final_output: str = ""
+    artifact_manifest: dict[str, Any] = field(default_factory=dict)
     convergence_summary: dict[str, Any] = field(default_factory=dict)
+    validation_summary: dict[str, Any] = field(default_factory=dict)
+    delivery_summary: dict[str, Any] = field(default_factory=dict)
+    escalation_reason: str = ""
     budget_summary: BudgetSummary = field(default_factory=BudgetSummary)
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,12 +155,18 @@ class HarnessTask:
             "conversation_id": self.conversation_id,
             "surface": self.surface,
             "status": self.status,
+            "environment_id": self.environment_id,
+            "environment_status": self.environment_status,
             "squad": self.squad.to_dict(),
             "brief": self.brief.to_dict(),
             "events": [event.to_dict() for event in self.events],
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
             "decision": self.decision.to_dict() if self.decision else None,
             "final_output": self.final_output,
+            "artifact_manifest": dict(self.artifact_manifest),
             "convergence_summary": dict(self.convergence_summary),
+            "validation_summary": dict(self.validation_summary),
+            "delivery_summary": dict(self.delivery_summary),
+            "escalation_reason": self.escalation_reason,
             "budget_summary": self.budget_summary.to_dict(),
         }

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
+from pathlib import Path
+
 from agent.fact_extractor import FactExtractor
 from agent.harness import TaskBrief
 from agent.harness.profiles import get_squad_profile
@@ -50,6 +53,12 @@ class AgentCore:
         tool_registry: ToolRegistry | None = None,
         max_tool_iterations: int = 8,
         harness_config: object | None = None,
+        base_dir: Path | None = None,
+        config_path: Path | None = None,
+        runtime_manager=None,
+        validation_harness=None,
+        delivery_manager=None,
+        maintenance_runner=None,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -71,6 +80,12 @@ class AgentCore:
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
         self.harness_config = harness_config
+        self.base_dir = Path(base_dir) if base_dir is not None else None
+        self.config_path = Path(config_path) if config_path is not None else None
+        self.runtime_manager = runtime_manager
+        self.validation_harness = validation_harness
+        self.delivery_manager = delivery_manager
+        self.maintenance_runner = maintenance_runner
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
 
@@ -301,11 +316,14 @@ class AgentCore:
 
     def _swarm_tool_registries(
         self,
+        task_id: str,
         conversation_id: str,
         identity: Identity | None,
         mode: str,
+        environment=None,
     ) -> dict[str, ToolRegistry | None]:
         namespace = identity.namespace if identity is not None else ""
+        from agent.tools.harness_tools import harness_tools
 
         def base_registry(*, allow_write: bool, include_external: bool, include_tools: bool = True):
             registry = ToolRegistry()
@@ -325,6 +343,18 @@ class AgentCore:
                 )
             if include_external and self.tool_registry is not None and mode == "execute":
                 registry.register_many(self.tool_registry.all())
+            if environment is not None:
+                registry.register_many(
+                    harness_tools(
+                        memory=self.memory,
+                        task_id=task_id,
+                        environment=environment,
+                        validator=self.validation_harness,
+                        delivery_manager=self.delivery_manager,
+                        maintenance_runner=self.maintenance_runner,
+                        allow_mutation=allow_write,
+                    )
+                )
             return registry if len(registry) > 0 else None
 
         worker_write = mode == "execute"
@@ -348,6 +378,7 @@ class AgentCore:
     async def _run_swarm(
         self,
         *,
+        task_id: str,
         message: InboundMessage,
         identity: Identity | None,
         mode: str,
@@ -359,6 +390,9 @@ class AgentCore:
         event_sink = message.metadata.get("event_sink") if message.metadata else None
         if not callable(event_sink) or not self._harness_value("stream_events", True):
             event_sink = None
+        environment = (
+            self.runtime_manager.create_environment(task_id) if self.runtime_manager else None
+        )
         harness = SwarmHarness(
             llm=self.llm,
             memory=self.memory,
@@ -381,10 +415,12 @@ class AgentCore:
                 selected_skills=[skill.name for skill in relevant_skills],
             ),
             squad=squad,
+            task_id=task_id,
+            environment=environment,
             identity_prompt=self._identity_prompt(identity),
             worker_skill_groups=self._worker_skill_groups(relevant_skills, squad.worker_branches),
             tool_registry_by_role=self._swarm_tool_registries(
-                message.conversation_id, identity, mode
+                task_id, message.conversation_id, identity, mode, environment=environment
             ),
             event_sink=event_sink,
             surface="serve",
@@ -438,6 +474,11 @@ class AgentCore:
         task_events: list[dict] = []
         convergence_summary: dict | None = None
         budget_summary: dict | None = None
+        environment_id: str | None = None
+        environment_status: str | None = None
+        validation_summary: dict | None = None
+        delivery_summary: dict | None = None
+        artifact_manifest: dict | None = None
         if self._use_swarm_harness(message, mode, matched_skills):
             squad = self._resolve_squad(message, conversation_meta, identity, matched_skills)
             self.memory.save_squad_profile(
@@ -446,7 +487,9 @@ class AgentCore:
                 config=squad.to_dict(),
             )
             self.memory.set_conversation_squad_profile(message.conversation_id, squad.name)
+            task_id = f"task-{uuid.uuid4().hex[:10]}"
             swarm_task = await self._run_swarm(
+                task_id=task_id,
                 message=message,
                 identity=identity,
                 mode=mode,
@@ -462,6 +505,11 @@ class AgentCore:
             task_events = [event.to_dict() for event in swarm_task.events]
             convergence_summary = swarm_task.convergence_summary
             budget_summary = swarm_task.budget_summary.to_dict()
+            environment_id = swarm_task.environment_id or None
+            environment_status = swarm_task.environment_status or None
+            validation_summary = swarm_task.validation_summary or None
+            delivery_summary = swarm_task.delivery_summary or None
+            artifact_manifest = swarm_task.artifact_manifest or None
             tool_trace = self._swarm_tool_trace(swarm_task.id)
         else:
             # 5. Build messages
@@ -539,6 +587,11 @@ class AgentCore:
                 "task_events": task_events,
                 "convergence_summary": convergence_summary,
                 "budget_summary": budget_summary,
+                "environment_id": environment_id,
+                "environment_status": environment_status,
+                "validation_summary": validation_summary,
+                "delivery_summary": delivery_summary,
+                "artifact_manifest": artifact_manifest,
             },
         )
 

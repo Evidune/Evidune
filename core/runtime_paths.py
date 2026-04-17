@@ -26,6 +26,12 @@ def resolve_emergence_output_dir(config: AiflayConfig, base_dir: Path) -> str:
     return resolve_runtime_path(config.agent.emergence.output_dir, base_dir)
 
 
+def resolve_runtime_dir(config: AiflayConfig, base_dir: Path) -> str:
+    if not config.agent:
+        return ""
+    return resolve_runtime_path(config.agent.harness.environment.runtime_dir, base_dir)
+
+
 def resolve_metrics_config(config: AiflayConfig, base_dir: Path) -> dict[str, Any]:
     """Return adapter config with relative file paths resolved for runtime use."""
     resolved = dict(config.metrics.config)
