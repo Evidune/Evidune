@@ -10,7 +10,7 @@ class StdoutChannel(Channel):
 
     def send_report(self, report: IterationReport) -> bool:
         print("=" * 60)
-        print(f"Aiflay Iteration Report — {report.domain}")
+        print(f"Evidune Iteration Report — {report.domain}")
         print("=" * 60)
         print(report.summary_text())
         print("=" * 60)

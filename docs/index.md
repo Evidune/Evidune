@@ -1,7 +1,7 @@
-# Aiflay Docs
+# Evidune Docs
 
 This directory is the repository knowledge base and the system of record for
-agents working in Aiflay.
+agents working in Evidune.
 
 ## Core Docs
 

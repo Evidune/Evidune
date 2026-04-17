@@ -35,7 +35,7 @@ class MetricsAdapter(ABC):
         """Fetch metrics from the platform.
 
         Args:
-            config: Adapter-specific configuration from aiflay.yaml.
+            config: Adapter-specific configuration from evidune.yaml.
 
         Returns:
             MetricsSnapshot containing all fetched records.

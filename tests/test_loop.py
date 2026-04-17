@@ -66,7 +66,7 @@ def _setup_iteration_project(tmp_path: Path) -> Path:
         "iteration": {"git_commit": False},
         "channels": [],
     }
-    cfg_path = tmp_path / "aiflay.yaml"
+    cfg_path = tmp_path / "evidune.yaml"
     cfg_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     return cfg_path
 
@@ -123,7 +123,7 @@ class TestIterationLedger:
 
     def test_load_active_emerged_skills_from_persisted_metadata(self, tmp_path: Path):
         emerged_path = _write(
-            tmp_path / ".aiflay" / "emerged_skills" / "explain-topic" / "SKILL.md",
+            tmp_path / ".evidune" / "emerged_skills" / "explain-topic" / "SKILL.md",
             "---\nname: explain-topic\ndescription: Explain\n---\n\n## Instructions\nDo it.\n",
         )
         store = MemoryStore(tmp_path / "memory.db")
@@ -147,7 +147,7 @@ class TestIterationLedger:
             "---\nname: writer\ndescription: Write\n---\n\n## Instructions\nDo it.\n",
         )
         emerged_path = _write(
-            tmp_path / ".aiflay" / "emerged_skills" / "helper" / "SKILL.md",
+            tmp_path / ".evidune" / "emerged_skills" / "helper" / "SKILL.md",
             "---\nname: helper\ndescription: Help\n---\n\n## Instructions\nDo it.\n",
         )
         store = MemoryStore(tmp_path / "memory.db")

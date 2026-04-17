@@ -17,7 +17,7 @@ class CLIGateway(Gateway):
 
     async def start(self, handler: MessageHandler) -> None:
         self._running = True
-        print("Aiflay Agent — type your message (Ctrl+C to quit)")
+        print("Evidune Agent — type your message (Ctrl+C to quit)")
         print("-" * 50)
 
         conversation_id = f"cli-{self.user_id}"

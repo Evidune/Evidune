@@ -1,7 +1,7 @@
 """Codex CLI auth integration.
 
 Reads `~/.codex/auth.json` (managed by OpenAI Codex CLI) and extracts
-the OAuth access_token. This lets aiflay reuse the user's existing
+the OAuth access_token. This lets evidune reuse the user's existing
 ChatGPT subscription auth without requiring a separate OPENAI_API_KEY.
 
 We intentionally do NOT refresh tokens ourselves — the Codex CLI is

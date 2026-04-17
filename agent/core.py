@@ -151,10 +151,10 @@ class AgentCore:
                     "role": "assistant",
                     "content": result.text or None,
                     "tool_calls": [self._openai_tool_call(tc) for tc in result.tool_calls],
-                    # Keep aiflay-native tool_calls alongside so CodexClient
+                    # Keep evidune-native tool_calls alongside so CodexClient
                     # can rebuild Responses API function_call items without
                     # re-parsing JSON
-                    "_aiflay_tool_calls": [
+                    "_evidune_tool_calls": [
                         {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
                         for tc in result.tool_calls
                     ],

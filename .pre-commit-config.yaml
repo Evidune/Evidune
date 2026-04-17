@@ -52,8 +52,8 @@ repos:
 
   - repo: local
     hooks:
-      - id: aiflay-docs-lint
-        name: aiflay docs lint
+      - id: evidune-docs-lint
+        name: evidune docs lint
         entry: python -m core.docs_lint
         language: system
         pass_filenames: false

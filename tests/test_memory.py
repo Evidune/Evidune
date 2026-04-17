@@ -71,7 +71,7 @@ class TestFacts:
     def test_get_facts_with_prefix(self, store: MemoryStore):
         store.set_fact("user.name", "Alice")
         store.set_fact("user.role", "dev")
-        store.set_fact("project.name", "aiflay")
+        store.set_fact("project.name", "evidune")
         facts = store.get_facts(prefix="user.")
         assert len(facts) == 2
         keys = {f.key for f in facts}

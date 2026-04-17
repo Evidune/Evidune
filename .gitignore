@@ -7,6 +7,6 @@ build/
 *.db
 .env
 .claude/
-.aiflay/
+.evidune/
 web/node_modules/
 web/dist/

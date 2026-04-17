@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "aiflay"
+name = "evidune"
 version = "0.1.0"
-description = "Outcome-driven skill self-iteration framework for AI agents"
+description = "Outcome-driven skill self-evolution framework for AI agents"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -36,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-aiflay = "core.loop:main"
+evidune = "core.loop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = [

@@ -20,7 +20,7 @@ class AnthropicClient(LLMClient):
         try:
             from anthropic import AsyncAnthropic
         except ImportError as e:
-            raise ImportError("Install anthropic: pip install aiflay[anthropic]") from e
+            raise ImportError("Install anthropic: pip install evidune[anthropic]") from e
 
         self.model = model
         self.temperature = temperature

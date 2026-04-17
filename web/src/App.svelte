@@ -62,7 +62,7 @@
       {
         id: 'welcome',
         role: 'assistant',
-        content: "Hi! I'm Aiflay. Pick a past chat from the sidebar, or start a new one.",
+        content: "Hi! I'm Evidune. Pick a past chat from the sidebar, or start a new one.",
         timestamp: Date.now(),
       },
     ])
@@ -279,7 +279,7 @@
 
   <main class="main">
     <header>
-      <h1><span class="dot">●</span> Aiflay</h1>
+      <h1><span class="dot">●</span> Evidune</h1>
       <div class="header-meta">
         <ModeToggle mode={currentMode} onChange={handleModeChange} disabled={loading} />
         <div class="status-dot" class:thinking={loading}></div>

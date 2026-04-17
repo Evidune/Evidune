@@ -1,4 +1,4 @@
-"""Built-in tools that give the LLM controlled access to aiflay state.
+"""Built-in tools that give the LLM controlled access to evidune state.
 
 These are safe-by-design (read/write to the local store only) and
 always available in tool-use mode. Pair them with external tools

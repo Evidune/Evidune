@@ -1,10 +1,10 @@
 ---
-description: Aiflay repository-wide AI collaboration rules
+description: Evidune repository-wide AI collaboration rules
 globs: ["**/*"]
 alwaysApply: true
 ---
 
-# Aiflay Repo Rules
+# Evidune Repo Rules
 
 The single source of truth is `AGENTS.md` at the repo root. Always read it before making changes.
 
@@ -20,6 +20,6 @@ Key rules (see AGENTS.md for full detail):
 Forbidden:
 
 - Force push to `main`.
-- Committing secrets (`.env`, `~/.aiflay/`, `*.db`).
+- Committing secrets (`.env`, `~/.evidune/`, `*.db`).
 - Bypassing pre-commit hooks.
 - Editing `web/dist/` or `web/node_modules/` directly.

@@ -28,13 +28,13 @@ def _write_config(path: Path) -> Path:
 
 
 def test_main_dispatches_env_command(tmp_path: Path, monkeypatch):
-    cfg = _write_config(tmp_path / "aiflay.yaml")
+    cfg = _write_config(tmp_path / "evidune.yaml")
     monkeypatch.setattr(loop, "_handle_env_command", lambda *args, **kwargs: 7)
     assert loop.main(["env", "status", "env-1", "--config", str(cfg)]) == 7
 
 
 def test_main_dispatches_validate_command(tmp_path: Path, monkeypatch):
-    cfg = _write_config(tmp_path / "aiflay.yaml")
+    cfg = _write_config(tmp_path / "evidune.yaml")
 
     async def fake_validate(*args, **kwargs):
         return 8
@@ -44,12 +44,12 @@ def test_main_dispatches_validate_command(tmp_path: Path, monkeypatch):
 
 
 def test_main_dispatches_delivery_command(tmp_path: Path, monkeypatch):
-    cfg = _write_config(tmp_path / "aiflay.yaml")
+    cfg = _write_config(tmp_path / "evidune.yaml")
     monkeypatch.setattr(loop, "_handle_delivery_command", lambda *args, **kwargs: 9)
     assert loop.main(["delivery", "submit", "--config", str(cfg)]) == 9
 
 
 def test_main_dispatches_maintenance_command(tmp_path: Path, monkeypatch):
-    cfg = _write_config(tmp_path / "aiflay.yaml")
+    cfg = _write_config(tmp_path / "evidune.yaml")
     monkeypatch.setattr(loop, "_handle_maintenance_command", lambda *args, **kwargs: 10)
     assert loop.main(["maintenance", "sweep", "--config", str(cfg)]) == 10

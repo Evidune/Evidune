@@ -74,11 +74,11 @@ class TestFormatHelpers:
     def test_format_existing_with_facts(self):
         facts = [
             Fact(key="user.name", value="Alice", source="agent"),
-            Fact(key="project", value="Aiflay", source="auto"),
+            Fact(key="project", value="Evidune", source="auto"),
         ]
         out = _format_existing(facts)
         assert "user.name: Alice" in out
-        assert "project: Aiflay" in out
+        assert "project: Evidune" in out
 
     def test_format_conversation_empty(self):
         assert _format_conversation([]) == "(empty)"

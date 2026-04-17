@@ -1,12 +1,12 @@
 # Skill Iteration
 
-This spec defines the behavior of Aiflay's shared skill governance system after
+This spec defines the behavior of Evidune's shared skill governance system after
 the swarm harness v1 and lifecycle-closure v2 passes.
 
 Skill iteration has two loops:
 
-- `aiflay run`: outcome-driven updates to existing skills
-- `aiflay serve`: conversation-driven emergence of new skills
+- `evidune run`: outcome-driven updates to existing skills
+- `evidune serve`: conversation-driven emergence of new skills
 
 ## Target Behavior
 
@@ -71,7 +71,7 @@ Feedback and evaluation signals must feed the same decision loop.
   rollback decisions
 - No signal type should be stored indefinitely without affecting a future skill
   decision
-- `aiflay run`, automatic feedback reconciliation in `serve`, and the web
+- `evidune run`, automatic feedback reconciliation in `serve`, and the web
   feedback handler must all invoke the same governance workflow rather than
   mutating lifecycle state independently
 

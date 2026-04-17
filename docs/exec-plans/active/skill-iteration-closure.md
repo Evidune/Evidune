@@ -15,8 +15,8 @@ Move skill self-iteration from a partial loop into a durable product behavior:
 
 ## Current State
 
-- `aiflay run` updates reference sections for `outcome_metrics: true` skills
-- `aiflay serve` can detect reusable patterns and synthesise new skills
+- `evidune run` updates reference sections for `outcome_metrics: true` skills
+- `evidune serve` can detect reusable patterns and synthesise new skills
 - feedback signals and evaluator scores are persisted but not consumed
 - emerged skills are marked `pending_review` in storage but are still inserted
   into the live process registry

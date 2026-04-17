@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from channels.base import IterationReport
-from core.config import AiflayConfig
+from core.config import EviduneConfig
 from core.metrics import MetricsSnapshot
 from memory.store import MemoryStore
 
@@ -18,14 +18,14 @@ def _metric_record_to_dict(record) -> dict[str, Any]:
     }
 
 
-def _metrics_source(config: AiflayConfig) -> str:
+def _metrics_source(config: EviduneConfig) -> str:
     source = config.metrics.config.get("file", "")
     return source if isinstance(source, str) else ""
 
 
 def record_iteration_report(
     memory: MemoryStore,
-    config: AiflayConfig,
+    config: EviduneConfig,
     snapshot: MetricsSnapshot,
     report: IterationReport,
     sort_metric: str,

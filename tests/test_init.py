@@ -21,24 +21,24 @@ class TestInitProject:
 
         exit_code = main(["init", "--path", str(project_dir)])
         assert exit_code == 0
-        assert (project_dir / "aiflay.yaml").exists()
+        assert (project_dir / "evidune.yaml").exists()
         assert (project_dir / "data" / "metrics.csv").exists()
         assert (project_dir / "skills" / "write-article" / "SKILL.md").exists()
 
-        config = load_config(project_dir / "aiflay.yaml")
-        assert config.memory.path == ".aiflay/memory.db"
+        config = load_config(project_dir / "evidune.yaml")
+        assert config.memory.path == ".evidune/memory.db"
         assert config.agent is not None
-        assert config.agent.emergence.output_dir == ".aiflay/emerged_skills"
+        assert config.agent.emergence.output_dir == ".evidune/emerged_skills"
 
-        exit_code = main(["run", "--config", str(project_dir / "aiflay.yaml")])
+        exit_code = main(["run", "--config", str(project_dir / "evidune.yaml")])
         assert exit_code == 0
 
         skill_content = (project_dir / "skills" / "write-article" / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        assert "Auto-updated by aiflay" in skill_content
+        assert "Auto-updated by evidune" in skill_content
 
-        store = MemoryStore(project_dir / ".aiflay" / "memory.db")
+        store = MemoryStore(project_dir / ".evidune" / "memory.db")
         try:
             runs = store.list_iteration_runs()
             assert len(runs) == 1
@@ -48,7 +48,7 @@ class TestInitProject:
     def test_init_project_refuses_to_overwrite_existing_files(self, tmp_path: Path):
         project_dir = tmp_path / "demo"
         project_dir.mkdir()
-        (project_dir / "aiflay.yaml").write_text("domain: existing\n", encoding="utf-8")
+        (project_dir / "evidune.yaml").write_text("domain: existing\n", encoding="utf-8")
 
         with pytest.raises(ValueError, match="Refusing to overwrite"):
             init_project(project_dir)
@@ -58,9 +58,9 @@ def test_bundled_zhihu_example_runs_one_iteration(tmp_path: Path):
     copied = tmp_path / "zhihu"
     shutil.copytree(ROOT / "examples" / "zhihu", copied)
 
-    exit_code = main(["run", "--config", str(copied / "aiflay.yaml")])
+    exit_code = main(["run", "--config", str(copied / "evidune.yaml")])
     assert exit_code == 0
 
-    assert (copied / ".aiflay" / "zhihu-memory.db").exists()
+    assert (copied / ".evidune" / "zhihu-memory.db").exists()
     skill_content = (copied / "skills" / "write-article" / "SKILL.md").read_text(encoding="utf-8")
-    assert "Auto-updated by aiflay" in skill_content
+    assert "Auto-updated by evidune" in skill_content

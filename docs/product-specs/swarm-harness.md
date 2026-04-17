@@ -1,7 +1,7 @@
 # Swarm Harness
 
-This spec defines the v1 swarm harness used by both `aiflay serve` and
-`aiflay run`.
+This spec defines the v1 swarm harness used by both `evidune serve` and
+`evidune run`.
 
 ## Goals
 
@@ -70,7 +70,7 @@ Each harness task also persists:
 - `delivery_summary`
 - `escalation_reason`
 
-Runtime environments are task-scoped and rooted at `.aiflay/runtime/<environment_id>/`.
+Runtime environments are task-scoped and rooted at `.evidune/runtime/<environment_id>/`.
 They expose structured logs, metrics, and traces through harness tools rather than free-form shell output.
 
 Worker roles in execute mode receive structured harness tools for:

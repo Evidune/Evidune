@@ -24,7 +24,7 @@ class OpenAIClient(LLMClient):
         try:
             from openai import AsyncOpenAI
         except ImportError as e:
-            raise ImportError("Install openai: pip install aiflay[openai]") from e
+            raise ImportError("Install openai: pip install evidune[openai]") from e
 
         self.model = model
         self.temperature = temperature

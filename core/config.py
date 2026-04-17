@@ -1,4 +1,4 @@
-"""Configuration loader for aiflay.yaml."""
+"""Configuration loader for evidune.yaml."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ class EmergenceConfig:
     enabled: bool = False
     every_n_turns: int = 10
     min_confidence: float = 0.7
-    output_dir: str = "~/.aiflay/emerged_skills"
+    output_dir: str = "~/.evidune/emerged_skills"
     use_evaluator: bool = True  # If False, use main agent LLM
 
 
@@ -157,7 +157,7 @@ class EvaluatorConfig:
 @dataclass
 class HarnessEnvironmentConfig:
     enabled: bool = True
-    runtime_dir: str = ".aiflay/runtime"
+    runtime_dir: str = ".evidune/runtime"
     service_host: str = "127.0.0.1"
     startup_timeout_s: int = 30
     healthcheck_path: str = "/api/skills"
@@ -226,7 +226,7 @@ class IdentitiesConfig:
 
 @dataclass
 class MemoryConfig:
-    path: str = "~/.aiflay/memory.db"
+    path: str = "~/.evidune/memory.db"
     max_messages_per_conversation: int = 100
 
 
@@ -237,7 +237,7 @@ class GatewayConfig:
 
 
 @dataclass
-class AiflayConfig:
+class EviduneConfig:
     domain: str
     description: str = ""
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
@@ -280,8 +280,8 @@ def _expand_env_recursive(obj: Any) -> Any:
     return obj
 
 
-def load_config(path: str | Path) -> AiflayConfig:
-    """Load and parse an aiflay.yaml configuration file."""
+def load_config(path: str | Path) -> EviduneConfig:
+    """Load and parse an evidune.yaml configuration file."""
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
@@ -355,7 +355,7 @@ def load_config(path: str | Path) -> AiflayConfig:
             enabled=em_raw.get("enabled", False),
             every_n_turns=em_raw.get("every_n_turns", 10),
             min_confidence=em_raw.get("min_confidence", 0.7),
-            output_dir=em_raw.get("output_dir", "~/.aiflay/emerged_skills"),
+            output_dir=em_raw.get("output_dir", "~/.evidune/emerged_skills"),
             use_evaluator=em_raw.get("use_evaluator", True),
         )
         tools_raw = agent_raw.get("tools", {}) or {}
@@ -376,7 +376,7 @@ def load_config(path: str | Path) -> AiflayConfig:
         env_raw = harness_raw.get("environment", {}) or {}
         environment_cfg = HarnessEnvironmentConfig(
             enabled=env_raw.get("enabled", True),
-            runtime_dir=env_raw.get("runtime_dir", ".aiflay/runtime"),
+            runtime_dir=env_raw.get("runtime_dir", ".evidune/runtime"),
             service_host=env_raw.get("service_host", "127.0.0.1"),
             startup_timeout_s=env_raw.get("startup_timeout_s", 30),
             healthcheck_path=env_raw.get("healthcheck_path", "/api/skills"),
@@ -452,7 +452,7 @@ def load_config(path: str | Path) -> AiflayConfig:
     # Memory config
     memory_raw = raw.get("memory", {})
     memory_config = MemoryConfig(
-        path=memory_raw.get("path", "~/.aiflay/memory.db"),
+        path=memory_raw.get("path", "~/.evidune/memory.db"),
         max_messages_per_conversation=memory_raw.get("max_messages_per_conversation", 100),
     )
 
@@ -465,7 +465,7 @@ def load_config(path: str | Path) -> AiflayConfig:
         for gw in raw.get("gateways", [])
     ]
 
-    return AiflayConfig(
+    return EviduneConfig(
         domain=domain,
         description=raw.get("description", ""),
         metrics=metrics,

@@ -85,11 +85,11 @@ class CodexClient(LLMClient):
                     }
                 )
                 continue
-            if role == "assistant" and (m.get("tool_calls") or m.get("_aiflay_tool_calls")):
-                # Assistant's tool-call turn — prefer the aiflay-native
+            if role == "assistant" and (m.get("tool_calls") or m.get("_evidune_tool_calls")):
+                # Assistant's tool-call turn — prefer the evidune-native
                 # representation (already parsed args) over OpenAI's
                 # string-encoded one.
-                native = m.get("_aiflay_tool_calls")
+                native = m.get("_evidune_tool_calls")
                 if native:
                     for tc in native:
                         input_items.append(

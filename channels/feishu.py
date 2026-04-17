@@ -121,7 +121,7 @@ class FeishuChannel(Channel):
             "header": {
                 "title": {
                     "tag": "plain_text",
-                    "content": f"Aiflay Daily Review — {report.domain}",
+                    "content": f"Evidune Daily Review — {report.domain}",
                 },
                 "template": "blue",
             },

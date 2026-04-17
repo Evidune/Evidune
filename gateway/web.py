@@ -313,7 +313,7 @@ class WebGateway(Gateway):
             if (_WEB_DIST / "index.html").exists()
             else "not built (run: cd web && npm run build)"
         )
-        print(f"Aiflay Web UI: {self.base_url or f'http://localhost:{self.port}'}  [{built}]")
+        print(f"Evidune Web UI: {self.base_url or f'http://localhost:{self.port}'}  [{built}]")
 
         try:
             while self._server:

@@ -570,7 +570,7 @@ class IterationHarness:
             return ""
         lines = [packet.update_section, ""]
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        lines.append(f"*Auto-updated by aiflay on {timestamp}*")
+        lines.append(f"*Auto-updated by evidune on {timestamp}*")
         lines.append("")
 
         if packet.top_performers:

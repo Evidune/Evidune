@@ -75,7 +75,7 @@ class TestFeishuChannel:
         channel = FeishuChannel(webhook="https://example.com/hook")
         report = _make_report()
         card = channel._build_card(report)
-        assert card["header"]["title"]["content"] == "Aiflay Daily Review — test"
+        assert card["header"]["title"]["content"] == "Evidune Daily Review — test"
         assert len(card["elements"]) > 0
 
     @patch("channels.feishu.httpx.post")

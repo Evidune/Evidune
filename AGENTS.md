@@ -1,4 +1,4 @@
-# Agents Guidance for Aiflay
+# Agents Guidance for Evidune
 
 This file is the agent entrypoint for this repository. Treat it as a map, not
 the full manual. Repository-local docs under `docs/` are the system of record.
@@ -16,10 +16,10 @@ Follow instructions in this order:
 
 ## Mission
 
-Aiflay is a lightweight AI agent framework with two operating modes:
+Evidune is a lightweight AI agent framework with two operating modes:
 
-- `aiflay run`: metrics -> analysis -> skill/reference updates -> optional git commit
-- `aiflay serve`: interactive agent with gateways, memory, identities, skills, and tools
+- `evidune run`: metrics -> analysis -> skill/reference updates -> optional git commit
+- `evidune serve`: interactive agent with gateways, memory, identities, skills, and tools
 
 The product differentiator is outcome-driven skill self-iteration. Preserve that
 behavior carefully.
@@ -96,8 +96,8 @@ pip install -e ".[all,dev]"
 python -m pytest tests/ -v
 python -m core.docs_lint
 pre-commit run --all-files
-aiflay run -c examples/zhihu/aiflay.yaml
-aiflay serve -c examples/zhihu/aiflay.yaml
+evidune run -c examples/zhihu/evidune.yaml
+evidune serve -c examples/zhihu/evidune.yaml
 cd web && npm install && npm run build
 ```
 

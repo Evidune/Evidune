@@ -73,6 +73,6 @@ When NOT to use this skill:
 
 ## Reference Data
 
-_This section is auto-updated by the aiflay iteration loop based on real Zhihu performance metrics._
+_This section is auto-updated by the evidune iteration loop based on real Zhihu performance metrics._
 
 (Will be populated after the first review cycle)

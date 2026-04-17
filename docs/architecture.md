@@ -2,7 +2,7 @@
 
 ## Goals
 
-- Keep Aiflay legible to both humans and coding agents.
+- Keep Evidune legible to both humans and coding agents.
 - Preserve a small number of explicit package boundaries.
 - Encode important constraints mechanically whenever possible.
 

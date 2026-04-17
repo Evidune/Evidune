@@ -8,7 +8,7 @@ agent:
   api_key_env: OPENAI_API_KEY
   temperature: 0.7
   system_prompt: |
-    你是 Aiflay 知乎写作助手。根据加载的 Skill 和知识库，
+    你是 Evidune 知乎写作助手。根据加载的 Skill 和知识库，
     帮助用户创作高质量的知乎内容。
   # === 用 Codex CLI 的 OAuth 登录（无需 API key）===
   # 1. 先 `codex login` 用 ChatGPT 账号登录一次
@@ -29,7 +29,7 @@ agent:
     enabled: false # 默认关闭，需要 evaluator 或 main LLM 可用
     every_n_turns: 10 # 检测频率（比 fact_extraction 慢，因为生成成本更高）
     min_confidence: 0.7 # 低于此置信度不创建新 skill
-    output_dir: .aiflay/emerged_skills # 浮现 skill 落盘位置（相对 aiflay.yaml）
+    output_dir: .evidune/emerged_skills # 浮现 skill 落盘位置（相对 evidune.yaml）
     use_evaluator: true # 用 evaluator LLM 做检测/合成
 
 # === Skill 配置 ===
@@ -46,7 +46,7 @@ identities:
 
 # === 记忆 ===
 memory:
-  path: .aiflay/zhihu-memory.db
+  path: .evidune/zhihu-memory.db
   max_messages_per_conversation: 50
 
 # === 渠道网关（双向消息） ===

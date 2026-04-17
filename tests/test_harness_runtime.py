@@ -65,7 +65,7 @@ async def test_validation_harness_drives_real_web_gateway(tmp_path: Path):
             environment,
             session_id="browser",
             visible_test_id="chat-input",
-            contains_text="Aiflay",
+            contains_text="Evidune",
         )
         assert opened["url"].startswith(web.base_url)
         assert "chat-input" in snapshot["test_ids"]

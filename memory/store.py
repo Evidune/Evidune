@@ -1,7 +1,7 @@
 """SQLite-backed persistent memory store.
 
 This module exposes the `MemoryStore` class — the single entrypoint for
-all persistence in aiflay. Its SQL DDL and migrations live in
+all persistence in evidune. Its SQL DDL and migrations live in
 `memory/schema.py`, and row→object conversion lives in `memory/rows.py`,
 so this file stays focused on the public API surface.
 """
@@ -41,11 +41,11 @@ class MemoryStore:
 
     Stores conversations, messages, facts (namespaced), skill
     executions, and emerged-skill metadata. All state for a single
-    aiflay instance lives in one sqlite file — simple, auditable,
+    evidune instance lives in one sqlite file — simple, auditable,
     portable.
     """
 
-    def __init__(self, db_path: str | Path = "~/.aiflay/memory.db") -> None:
+    def __init__(self, db_path: str | Path = "~/.evidune/memory.db") -> None:
         self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # WebGateway serves HTTP requests in a background thread while the

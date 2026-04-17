@@ -1,4 +1,4 @@
-"""SQLite DDL and migrations for the aiflay memory store.
+"""SQLite DDL and migrations for the evidune memory store.
 
 Kept separate from `store.py` so the table definitions are easy to
 audit and extend without scrolling past the entire API surface.

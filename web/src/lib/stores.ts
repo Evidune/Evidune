@@ -5,7 +5,7 @@ export const messages = writable<Message[]>([
   {
     id: 'welcome',
     role: 'assistant',
-    content: 'Hi! I\'m Aiflay, your AI assistant powered by skills and persistent memory.',
+    content: 'Hi! I\'m Evidune, your AI assistant powered by skills and persistent memory.',
     timestamp: Date.now(),
   },
 ])

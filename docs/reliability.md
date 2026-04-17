@@ -37,7 +37,7 @@ Run the deterministic browser harness for the web gateway with:
 
 ## Harness Runtime
 
-Task-scoped harness environments live under `.aiflay/runtime/<environment_id>/` and must include:
+Task-scoped harness environments live under `.evidune/runtime/<environment_id>/` and must include:
 
 - `memory.db`: isolated runtime memory for the environment
 - `artifacts/`: screenshots and validation outputs
@@ -46,17 +46,17 @@ Task-scoped harness environments live under `.aiflay/runtime/<environment_id>/` 
 
 Use these commands to operate the local runtime:
 
-- `aiflay env up --config aiflay.yaml`
-- `aiflay env status <environment_id> --config aiflay.yaml`
-- `aiflay env health <environment_id> --config aiflay.yaml`
-- `aiflay env restart <environment_id> --config aiflay.yaml`
-- `aiflay env down <environment_id> --config aiflay.yaml`
+- `evidune env up --config evidune.yaml`
+- `evidune env status <environment_id> --config evidune.yaml`
+- `evidune env health <environment_id> --config evidune.yaml`
+- `evidune env restart <environment_id> --config evidune.yaml`
+- `evidune env down <environment_id> --config evidune.yaml`
 
 ## Validation and Delivery
 
-- `aiflay validate run --config aiflay.yaml --page-path / --visible-test-id chat-input`
-- `aiflay delivery submit --config aiflay.yaml --message "chore(harness): deliver task"`
-- `aiflay maintenance sweep --config aiflay.yaml`
+- `evidune validate run --config evidune.yaml --page-path / --visible-test-id chat-input`
+- `evidune delivery submit --config evidune.yaml --message "chore(harness): deliver task"`
+- `evidune maintenance sweep --config evidune.yaml`
 
 Validation evidence should be recorded as harness artifacts before critique, including:
 

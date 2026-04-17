@@ -59,7 +59,7 @@
   class:bot={!isUser}
   data-testid={isUser ? 'user-message' : 'assistant-message'}
 >
-  <span class="msg-label">{isUser ? 'You' : 'Aiflay'}</span>
+  <span class="msg-label">{isUser ? 'You' : 'Evidune'}</span>
 
   {#if !isUser && message.toolTrace && message.toolTrace.length > 0}
     <ToolTrace trace={message.toolTrace} />

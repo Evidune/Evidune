@@ -28,7 +28,7 @@ agent:
     default_squad: general
     stream_events: true
     environment:
-      runtime_dir: .aiflay/runtime
+      runtime_dir: .evidune/runtime
     validation:
       enabled: true
       browser: playwright
@@ -37,7 +37,7 @@ agent:
       github_enabled: false
   emergence:
     enabled: false
-    output_dir: .aiflay/emerged_skills
+    output_dir: .evidune/emerged_skills
 
 skills:
   directories:
@@ -50,7 +50,7 @@ identities:
   default: local-writer
 
 memory:
-  path: .aiflay/memory.db
+  path: .evidune/memory.db
   max_messages_per_conversation: 50
 
 gateways:
@@ -124,7 +124,7 @@ Write a concrete article that is specific, readable, and useful:
 
 ## Reference Data
 
-This section is replaced by `aiflay run` after each iteration cycle.
+This section is replaced by `evidune run` after each iteration cycle.
 """,
     "skills/write-article/references/case-studies.md": """## Top Performers
 
@@ -136,7 +136,7 @@ This file is updated by the local iteration loop after each run.
 def init_project(target_dir: str | Path) -> InitResult:
     """Create a starter project for local outcome iteration."""
     root = Path(target_dir).expanduser().resolve()
-    planned = [root / "aiflay.yaml", *(root / rel for rel in _STARTER_FILES)]
+    planned = [root / "evidune.yaml", *(root / rel for rel in _STARTER_FILES)]
     existing = [path for path in planned if path.exists()]
     if existing:
         names = ", ".join(path.relative_to(root).as_posix() for path in existing)
@@ -145,7 +145,7 @@ def init_project(target_dir: str | Path) -> InitResult:
     root.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
 
-    config_path = root / "aiflay.yaml"
+    config_path = root / "evidune.yaml"
     domain = root.name.replace(" ", "-") or "local-demo"
     config_path.write_text(_config_template(domain), encoding="utf-8")
     created.append(config_path)

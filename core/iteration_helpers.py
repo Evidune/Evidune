@@ -12,7 +12,7 @@ from pathlib import Path
 
 from agent.skill_feedback import SkillFeedbackSummary, summarise_skill_feedback
 from core.analyzer import AnalysisResult
-from core.config import AiflayConfig
+from core.config import EviduneConfig
 from core.updater import UpdateResult, replace_section, update_reference
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
@@ -21,7 +21,7 @@ _MANAGED_ADJUSTMENTS_HEADING = "### Outcome-Backed Adjustments"
 
 
 def update_outcome_skills(
-    config: AiflayConfig,
+    config: EviduneConfig,
     base_dir: Path,
     result: AnalysisResult,
     memory,
@@ -266,7 +266,7 @@ def build_skill_reference_content(section: str, result: AnalysisResult) -> str:
     """
     lines = [section, ""]
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines.append(f"*Auto-updated by aiflay on {timestamp}*")
+    lines.append(f"*Auto-updated by evidune on {timestamp}*")
     lines.append("")
 
     if result.top_performers:
@@ -293,7 +293,7 @@ def build_reference_content(
     """Build new content for a standalone reference document.
 
     Includes Top Performers, Bottom Performers, and Patterns. Used for
-    references listed in the `references:` section of aiflay.yaml —
+    references listed in the `references:` section of evidune.yaml —
     *not* for outcome-metrics skills (those use
     `build_skill_reference_content` which omits bottoms).
     """

@@ -1,6 +1,6 @@
 """End-to-end integration tests for skill self-iteration.
 
-Verifies Aiflay's core differentiator: SKILL.md files with outcome_metrics: true
+Verifies Evidune's core differentiator: SKILL.md files with outcome_metrics: true
 can be rewritten and rolled back by the iteration loop, based on
 real-world business metrics and execution evidence.
 """
@@ -44,7 +44,7 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
         "Write good stuff.\n"
         "\n"
         "## Reference Data\n"
-        "(placeholder — will be replaced by aiflay)\n"
+        "(placeholder — will be replaced by evidune)\n"
         "\n"
         "## Footer\n"
         "Do not touch this section.\n",
@@ -64,7 +64,7 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
         "(this should NOT be touched)\n",
     )
 
-    # aiflay.yaml
+    # evidune.yaml
     config = {
         "domain": "test-domain",
         "metrics": {
@@ -85,7 +85,7 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
         "memory": {"path": str(tmp_path / "memory.db")},
         "channels": [],
     }
-    cfg_path = tmp_path / "aiflay.yaml"
+    cfg_path = tmp_path / "evidune.yaml"
     with open(cfg_path, "w") as f:
         yaml.dump(config, f)
 
@@ -105,10 +105,10 @@ class TestSkillSelfIteration:
         assert "Golden Article" in skill_content
         assert "Decent Article" in skill_content
         assert "reads=5000.0" in skill_content
-        assert "Auto-updated by aiflay" in skill_content
+        assert "Auto-updated by evidune" in skill_content
 
         # Placeholder text is gone
-        assert "(placeholder — will be replaced by aiflay)" not in skill_content
+        assert "(placeholder — will be replaced by evidune)" not in skill_content
 
         # Instructions are rewritten with a managed adjustment block
         assert "## Instructions" in skill_content
@@ -188,7 +188,7 @@ class TestSkillSelfIteration:
             "memory": {"path": str(tmp_path / "memory.db")},
             "channels": [],
         }
-        cfg_path = tmp_path / "aiflay.yaml"
+        cfg_path = tmp_path / "evidune.yaml"
         with open(cfg_path, "w") as f:
             yaml.dump(config_data, f)
 
@@ -198,7 +198,7 @@ class TestSkillSelfIteration:
         skill_content = (tmp_path / "skills" / "custom" / "SKILL.md").read_text()
 
         # Custom section was updated
-        assert "Auto-updated by aiflay" in skill_content
+        assert "Auto-updated by evidune" in skill_content
         assert "A" in skill_content  # Top performer
         assert "(old data here)" not in skill_content
 
@@ -228,4 +228,4 @@ class TestSkillSelfIteration:
 
         assert "Write good stuff." in skill_content
         assert "### Outcome-Backed Adjustments" not in skill_content
-        assert "Auto-updated by aiflay" in skill_content
+        assert "Auto-updated by evidune" in skill_content

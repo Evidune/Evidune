@@ -1,5 +1,5 @@
 <div class="typing-wrap">
-  <span class="msg-label">Aiflay</span>
+  <span class="msg-label">Evidune</span>
   <div class="typing">
     <span></span><span></span><span></span>
   </div>

@@ -1,4 +1,4 @@
-"""Iteration loop orchestrator — the core of aiflay."""
+"""Iteration loop orchestrator — the core of evidune."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 from channels.base import IterationReport, create_channel
 from core.analyzer import analyze
-from core.config import AiflayConfig, load_config
+from core.config import EviduneConfig, load_config
 from core.docs_lint import lint_repo
 from core.git_ops import commit_changes
 from core.iteration_helpers import build_reference_content, update_outcome_skills
@@ -28,7 +28,7 @@ from core.runtime_paths import (
 from core.updater import update_reference
 
 
-def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> IterationReport:
+def run_iteration(config: EviduneConfig, base_dir: Path | None = None) -> IterationReport:
     """Execute one full iteration cycle.
 
     1. Fetch metrics via adapter
@@ -38,7 +38,7 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
     5. Send reports via channels
 
     Args:
-        config: Parsed aiflay configuration.
+        config: Parsed evidune configuration.
         base_dir: Base directory for resolving relative paths. Defaults to cwd.
 
     Returns:
@@ -83,7 +83,7 @@ def run_iteration(config: AiflayConfig, base_dir: Path | None = None) -> Iterati
             )
             updates.append(update)
 
-        # 3b. Self-iterate outcome skills (Aiflay's unique differentiator)
+        # 3b. Self-iterate outcome skills (Evidune's unique differentiator)
         if config.skills.auto_update:
             updates.extend(update_outcome_skills(config, base_dir, result, memory))
 
@@ -220,7 +220,7 @@ def _handle_docs_command(base_dir: Path, subcommand: str | None) -> int:
 
 
 def _handle_iterations_command(
-    config: AiflayConfig, base_dir: Path, subcommand: str | None, target: str | None
+    config: EviduneConfig, base_dir: Path, subcommand: str | None, target: str | None
 ) -> int:
     from memory.store import MemoryStore
 
@@ -254,12 +254,12 @@ def _handle_init_command(target: str | None, subcommand: str | None) -> int:
     print("")
     print("Next steps:")
     print(f"  cd {result.root}")
-    print("  aiflay run --config aiflay.yaml")
-    print("  aiflay serve --config aiflay.yaml")
+    print("  evidune run --config evidune.yaml")
+    print("  evidune serve --config evidune.yaml")
     return 0
 
 
-def _build_harness_services(config: AiflayConfig, base_dir: Path, config_path: Path | None):
+def _build_harness_services(config: EviduneConfig, base_dir: Path, config_path: Path | None):
     if not config.agent:
         raise ValueError("agent section required for harness runtime commands")
 
@@ -319,7 +319,7 @@ def _load_runtime_environment(runtime_manager, environment_id: str | None):
 
 
 def _handle_env_command(
-    config: AiflayConfig,
+    config: EviduneConfig,
     base_dir: Path,
     config_path: Path | None,
     subcommand: str | None,
@@ -349,7 +349,7 @@ def _handle_env_command(
 
 
 async def _handle_validate_command(
-    config: AiflayConfig,
+    config: EviduneConfig,
     base_dir: Path,
     config_path: Path | None,
     subcommand: str | None,
@@ -396,7 +396,7 @@ async def _handle_validate_command(
 
 
 def _handle_delivery_command(
-    config: AiflayConfig,
+    config: EviduneConfig,
     base_dir: Path,
     config_path: Path | None,
     subcommand: str | None,
@@ -431,7 +431,7 @@ def _handle_delivery_command(
 
 
 def _handle_maintenance_command(
-    config: AiflayConfig,
+    config: EviduneConfig,
     base_dir: Path,
     config_path: Path | None,
     subcommand: str | None,
@@ -444,7 +444,7 @@ def _handle_maintenance_command(
 
 
 async def serve(
-    config: AiflayConfig,
+    config: EviduneConfig,
     base_dir: Path | None = None,
     config_path: Path | None = None,
 ) -> None:
@@ -641,7 +641,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point for run, serve, runtime, validation, delivery, and maintenance."""
     import asyncio
 
-    parser = argparse.ArgumentParser(description="Aiflay — outcome-driven skill self-iteration")
+    parser = argparse.ArgumentParser(description="Evidune — outcome-driven skill self-evolution")
     parser.add_argument(
         "command",
         choices=[
@@ -659,7 +659,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("subcommand", nargs="?", help="Subcommand for the selected command")
     parser.add_argument("target", nargs="?", help="Optional target for the selected subcommand")
-    parser.add_argument("--config", "-c", default="aiflay.yaml", help="Path to aiflay.yaml")
+    parser.add_argument("--config", "-c", default="evidune.yaml", help="Path to evidune.yaml")
     parser.add_argument("--base-dir", "-d", default=None, help="Base directory for resolving paths")
     parser.add_argument("--path", help="Target path for 'init'")
     parser.add_argument(

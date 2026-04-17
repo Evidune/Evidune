@@ -110,7 +110,7 @@ def agent(llm, skill_registry, memory):
         llm=llm,
         skill_registry=skill_registry,
         memory=memory,
-        system_prompt="You are Aiflay, a helpful assistant.",
+        system_prompt="You are Evidune, a helpful assistant.",
     )
 
 
@@ -133,7 +133,7 @@ class TestAgentCore:
         await agent.handle(msg)
         system_msgs = [m for m in llm.last_messages if m["role"] == "system"]
         assert len(system_msgs) == 1
-        assert "Aiflay" in system_msgs[0]["content"]
+        assert "Evidune" in system_msgs[0]["content"]
 
     @pytest.mark.asyncio
     async def test_includes_skills_in_prompt(self, agent: AgentCore, llm: MockLLM):
@@ -151,7 +151,7 @@ class TestAgentCore:
             llm=llm,
             skill_registry=skill_registry,
             memory=memory,
-            system_prompt="You are Aiflay, a helpful assistant.",
+            system_prompt="You are Evidune, a helpful assistant.",
             skill_prompt_mode="index",
         )
         msg = InboundMessage(text="greeting", sender_id="u", channel="cli", conversation_id="c")

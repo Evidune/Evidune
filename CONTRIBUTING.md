@@ -1,4 +1,4 @@
-# Contributing to Aiflay
+# Contributing to Evidune
 
 Thank you for your interest in contributing! This guide covers everything you need to start.
 
@@ -6,8 +6,8 @@ Thank you for your interest in contributing! This guide covers everything you ne
 
 ```bash
 # Clone and install
-git clone https://github.com/yfge/aiflay.git
-cd aiflay
+git clone git@github.com:Evidune/Evidune.git
+cd Evidune
 pip install -e ".[all,dev]"
 
 # Install pre-commit hooks (one-time)

@@ -44,7 +44,7 @@ class Skill:
     tags: list[str] = field(default_factory=list)
     triggers: list[str] = field(default_factory=list)
     anti_triggers: list[str] = field(default_factory=list)
-    outcome_metrics: bool = False  # Aiflay-specific: participates in iteration
+    outcome_metrics: bool = False  # Evidune-specific: participates in iteration
     update_section: str = "## Reference Data"
     instructions: str = ""  # Full markdown body of SKILL.md
     examples: list[str] = field(default_factory=list)  # Parsed "## Examples" entries

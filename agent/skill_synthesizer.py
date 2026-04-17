@@ -22,7 +22,7 @@ from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern
 from agent.utils import format_conversation, strip_code_fence
 
-DEFAULT_OUTPUT_DIR = Path.home() / ".aiflay" / "emerged_skills"
+DEFAULT_OUTPUT_DIR = Path.home() / ".evidune" / "emerged_skills"
 
 
 @dataclass
