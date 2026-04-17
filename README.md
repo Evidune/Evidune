@@ -1,14 +1,32 @@
-# Aiflay
+# Evidune
 
-Outcome-driven skill self-iteration framework for AI agents.
+Outcome-driven skill self-evolution framework for AI agents.
 
-Hermes optimizes what the agent _thinks_ worked. Aiflay optimizes what
+Hermes optimizes what the agent _thinks_ worked. Evidune optimizes what
 _actually_ worked.
 
 ## Install
 
+Private preview installs use authenticated GitHub access and place the runtime under
+`~/.evidune`, with a launcher at `~/.local/bin/evidune`.
+
 ```bash
-pip install aiflay
+git clone git@github.com:Evidune/Evidune.git
+cd Evidune
+./install.sh
+```
+
+If you prefer GitHub CLI:
+
+```bash
+gh repo clone Evidune/Evidune /tmp/Evidune
+/tmp/Evidune/install.sh
+```
+
+Planned public install shape once the repo is open:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Evidune/Evidune/main/install.sh | sh
 ```
 
 ## Quick Start
@@ -16,39 +34,40 @@ pip install aiflay
 Scaffold a local starter project:
 
 ```bash
-aiflay init --path demo
+evidune init --path demo
 cd demo
-aiflay run --config aiflay.yaml
+evidune run --config evidune.yaml
 ```
 
 Run the bundled Zhihu example from the repo root:
 
 ```bash
-python -m core.loop run --config examples/zhihu/aiflay.yaml
-python -m core.loop iterations list --config examples/zhihu/aiflay.yaml
+python -m core.loop run --config examples/zhihu/evidune.yaml
+python -m core.loop iterations list --config examples/zhihu/evidune.yaml
 ```
 
 Start the interactive agent:
 
 ```bash
-aiflay run --config aiflay.yaml
-aiflay serve --config aiflay.yaml
+evidune run --config evidune.yaml
+evidune serve --config evidune.yaml
 ```
 
 ## Local Iteration
 
-- `aiflay init` creates a runnable local loop with sample metrics, one identity, one
-  outcome-tracked skill, and worktree-local runtime artifacts under `.aiflay/`.
-- `aiflay run` now records each iteration cycle into SQLite so you can inspect recent
-  runs with `aiflay iterations list` and `aiflay iterations show <id>`.
+- `evidune init` creates a runnable local loop with sample metrics, one identity, one
+  outcome-tracked skill, and worktree-local runtime artifacts under `.evidune/`.
+- `evidune run` now records each iteration cycle into SQLite so you can inspect recent
+  runs with `evidune iterations list` and `evidune iterations show <id>`.
 - Relative runtime paths like `memory.path`, `agent.emergence.output_dir`, and
-  `metrics.config.file` are resolved relative to the active `aiflay.yaml`.
+  `metrics.config.file` are resolved relative to the active `evidune.yaml`.
 
 ## Repository Docs
 
 - [docs/index.md](docs/index.md) is the documentation hub
 - [docs/architecture.md](docs/architecture.md) defines package boundaries
 - [AGENTS.md](AGENTS.md) is the short entrypoint for coding agents
+- [CONTRIBUTING.md](CONTRIBUTING.md) covers development setup and contribution workflow
 
 ## Validation
 

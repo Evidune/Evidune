@@ -1,4 +1,4 @@
-# Aiflay Tasks
+# Evidune Tasks
 
 Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tasks at the bottom; archive completed batches to `docs/changelog.md` when the list grows long.
 
@@ -12,7 +12,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [ ] End-to-end smoke test with a real LLM (mocked or via OpenRouter free tier)
 - [ ] Telegram bot gateway
 - [ ] Discord bot gateway
-- [ ] PyPI publishing setup (release workflow)
+- [ ] GitHub installer + release workflow
 - [ ] Comprehensive README with competitive positioning vs Hermes / OpenClaw
 - [ ] `docs/architecture.md` deep dive
 - [ ] Skill for Zhihu Creator Center workflows
@@ -23,7 +23,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 
 - [x] Initial framework: gateway / agent / skills / memory / core / channels / adapters
 - [x] Vite + Svelte web UI with chat interface
-- [x] Skill self-iteration wired into the iteration loop (Aiflay differentiator)
+- [x] Skill self-iteration wired into the iteration loop (Evidune differentiator)
 - [x] Pre-commit hooks + commitlint + AGENTS.md collaboration baseline
 - [x] Docs knowledge base skeleton with architecture, quality, reliability, and tech debt records
 - [x] Repo docs lint, CI workflow, and structural guardrails
@@ -33,7 +33,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Add persisted `plan` / `execute` conversation modes
 - [x] Surface conversation mode and plan state in the web UI
 - [x] Persist iteration run ledger and CLI inspection commands
-- [x] Add `aiflay init` CLI command to scaffold starter `aiflay.yaml`
+- [x] Add `evidune init` CLI command to scaffold starter `evidune.yaml`
 - [x] Add worktree-local runtime artifacts and runnable local examples
 - [x] Streaming responses for the web gateway (SSE)
 - [x] Auto-activate emerged skills and reload them across restarts
