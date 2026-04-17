@@ -35,12 +35,6 @@ jobs:
       - name: Run docs lint
         run: python -m core.docs_lint
 
-      - name: Run tests
-        run: python -m pytest tests/ -v
-
-      - name: Run pre-commit
-        run: pre-commit run --all-files
-
       - name: Install web dependencies
         run: npm ci
         working-directory: web
@@ -51,6 +45,12 @@ jobs:
 
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files
 
       - name: Run browser validation
         run: python -m pytest tests/test_web_e2e.py -v
