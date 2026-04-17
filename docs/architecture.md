@@ -15,7 +15,7 @@
 - `identities/`: OpenClaw-style multi-file assistant identity packages
 - `skills/`: skill parsing, indexing, and progressive disclosure
 - `memory/`: SQLite-backed persistence API
-- `adapters/`: metrics ingestion adapters used by the iteration loop
+- `adapters/`: generic metrics ingestion adapters used by the iteration loop
 - `web/`: frontend for the web gateway
 
 ## Dependency Direction
@@ -36,6 +36,8 @@ Structural tests enforce the high-signal boundaries above.
 - `docs/` is the durable source of truth.
 - Skills should use progressive disclosure by default: expose a compact index in the
   system prompt and load full `SKILL.md` or `references/` only when needed.
+- Platform-specific operating knowledge and workflows belong in `skills/`, not in
+  hardcoded system behavior. Keep built-in adapters generic and reusable.
 
 ## File Size Policy
 

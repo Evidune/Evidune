@@ -16,8 +16,8 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [ ] PyPI publishing setup (release workflow)
 - [ ] Comprehensive README with competitive positioning vs Hermes / OpenClaw
 - [ ] `docs/architecture.md` deep dive
-- [ ] Adapter for Zhihu Creator Center API
-- [ ] Adapter for Xiaohongshu metrics
+- [ ] Skill for Zhihu Creator Center workflows
+- [ ] Skill for Xiaohongshu metrics analysis
 
 ## Completed
 
