@@ -60,15 +60,15 @@ evidune serve --config evidune.yaml
 
 ```mermaid
 flowchart TD
-    A["evidune.yaml + active skill states"] --> B["Start agent runtime"]
+    A["evidune.yaml and active skill states"] --> B["Start agent runtime"]
     B --> C{"Entry mode"}
 
-    C --> D["`evidune serve` receives a user task via CLI / Web / Feishu"]
-    C --> E["`evidune run` starts an outcome iteration from config + metrics"]
+    C --> D["evidune serve receives a task from CLI, Web, or Feishu"]
+    C --> E["evidune run starts an iteration from config and metrics"]
 
     D --> F["Load identity, memory, and matched skills"]
     E --> F
-    F --> G["Agent plans / executes with tools or the harness"]
+    F --> G["Agent plans and executes with tools or the harness"]
     G --> H["Response, artifacts, and execution history"]
     H --> I["Collect feedback, evaluator scores, metrics, and traces"]
     I --> J["Skill governance builds one decision packet"]

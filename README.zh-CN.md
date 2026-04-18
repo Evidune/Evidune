@@ -57,15 +57,15 @@ evidune serve --config evidune.yaml
 
 ```mermaid
 flowchart TD
-    A["evidune.yaml + 当前激活的技能状态"] --> B["启动 agent runtime"]
+    A["evidune.yaml 和当前激活的技能状态"] --> B["启动 agent runtime"]
     B --> C{"入口模式"}
 
-    C --> D["`evidune serve` 通过 CLI / Web / Feishu 接收用户任务"]
-    C --> E["`evidune run` 基于配置和指标启动一次结果迭代"]
+    C --> D["evidune serve 通过 CLI、Web 或 Feishu 接收用户任务"]
+    C --> E["evidune run 基于配置和指标启动一次结果迭代"]
 
     D --> F["加载 identity、memory 和匹配到的 skills"]
     E --> F
-    F --> G["Agent 借助 tools 或 harness 规划并执行"]
+    F --> G["Agent 借助 tools 或 harness 规划和执行"]
     G --> H["产出响应、工件和执行历史"]
     H --> I["收集反馈、评估器分数、指标和 traces"]
     I --> J["技能治理组装统一 decision packet"]
@@ -84,6 +84,7 @@ flowchart TD
 运行时，`evidune serve` 和 `evidune run` 都会先加载当前 identity、memory 和技能状态，再进入 agent 执行阶段。
 执行结束后，反馈、评估信号、指标和 traces 会汇入同一条技能治理链路，决定是保持现状、重写或回滚已有技能，还是合成一个新技能。
 下一轮运行会重新加载这批更新后的技能，这就是 Evidune 的 skill 自迭代方式。
+
 ## 本地迭代
 
 - `evidune init` 会生成一个可运行的本地闭环项目，包含示例指标、一个 identity、一个 outcome-tracked skill，以及位于 `.evidune/` 下的本地运行产物。
