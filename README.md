@@ -56,6 +56,42 @@ evidune run --config evidune.yaml
 evidune serve --config evidune.yaml
 ```
 
+## How The System Runs
+
+```mermaid
+flowchart TD
+    A["evidune.yaml + active skill states"] --> B["Start agent runtime"]
+    B --> C{"Entry mode"}
+
+    C --> D["`evidune serve` receives a user task via CLI / Web / Feishu"]
+    C --> E["`evidune run` starts an outcome iteration from config + metrics"]
+
+    D --> F["Load identity, memory, and matched skills"]
+    E --> F
+    F --> G["Agent plans / executes with tools or the harness"]
+    G --> H["Response, artifacts, and execution history"]
+    H --> I["Collect feedback, evaluator scores, metrics, and traces"]
+    I --> J["Skill governance builds one decision packet"]
+    J --> K{"Skill self-iteration decision"}
+
+    K --> L["Keep the current skill state"]
+    K --> M["Rewrite or roll back an existing skill"]
+    K --> N["Synthesize and activate a new emerged skill"]
+
+    L --> O["Persist memory, iteration ledger, and skill states"]
+    M --> O
+    N --> O
+    O --> P["Next run or conversation reloads the updated skill set"]
+```
+
+At runtime, both `evidune serve` and `evidune run` load the current identity,
+memory, and skill state before the agent executes work.
+After execution, feedback, evaluator signals, metrics, and traces are folded
+into one governance decision: keep the current skill, rewrite or roll it back,
+or synthesize a new emerged skill.
+That updated skill set is reloaded on the next turn or iteration, which is how
+Evidune self-iterates.
+
 ## Local Iteration
 
 - `evidune init` creates a runnable local loop with sample metrics, one identity, one
