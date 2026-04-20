@@ -518,34 +518,29 @@ async def serve(
 
         self_evaluator = SelfEvaluator(judge=_build_judge())
 
-    # Optional fact extractor
-    fact_extractor = None
-    if config.agent.fact_extraction.enabled:
-        from agent.fact_extractor import FactExtractor
+    # Fact extraction is a core serve capability.
+    from agent.fact_extractor import FactExtractor
 
-        judge = _build_judge() if config.agent.fact_extraction.use_evaluator else llm
-        fact_extractor = FactExtractor(judge=judge)
+    fact_judge = _build_judge() if config.agent.fact_extraction.use_evaluator else llm
+    fact_extractor = FactExtractor(judge=fact_judge)
 
-    # Optional skill emergence (pattern detector + synthesiser)
-    pattern_detector = None
-    skill_synthesizer = None
-    if config.agent.emergence.enabled:
-        from agent.pattern_detector import PatternDetector
-        from agent.skill_synthesizer import SkillSynthesizer
+    # Conversation emergence is a core serve capability.
+    from agent.pattern_detector import PatternDetector
+    from agent.skill_synthesizer import SkillSynthesizer
 
-        emerge_judge = _build_judge() if config.agent.emergence.use_evaluator else llm
-        pattern_detector = PatternDetector(judge=emerge_judge)
-        skill_synthesizer = SkillSynthesizer(
-            judge=emerge_judge,
-            output_dir=resolve_emergence_output_dir(config, base_dir),
-        )
-        loaded = _load_persisted_emerged_skills(
-            skill_registry,
-            memory,
-            resolve_emergence_output_dir(config, base_dir),
-        )
-        if loaded > 0:
-            print(f"Loaded {loaded} emerged skill(s) from persistence")
+    emerge_judge = _build_judge() if config.agent.emergence.use_evaluator else llm
+    pattern_detector = PatternDetector(judge=emerge_judge)
+    skill_synthesizer = SkillSynthesizer(
+        judge=emerge_judge,
+        output_dir=resolve_emergence_output_dir(config, base_dir),
+    )
+    loaded = _load_persisted_emerged_skills(
+        skill_registry,
+        memory,
+        resolve_emergence_output_dir(config, base_dir),
+    )
+    if loaded > 0:
+        print(f"Loaded {loaded} emerged skill(s) from persistence")
 
     filtered = _apply_skill_state_overrides(skill_registry, memory)
     if filtered > 0:

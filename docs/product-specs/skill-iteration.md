@@ -32,8 +32,8 @@ evidence layer and the skill definition itself.
 
 ### Conversation Emergence
 
-When `agent.emergence.enabled` is on, high-confidence reusable patterns from
-conversation should become active skills by default.
+In `evidune serve`, high-confidence reusable patterns from conversation should
+become active skills by default.
 
 - A new skill is synthesised, written under `agent.emergence.output_dir`, and
   added to the live registry immediately

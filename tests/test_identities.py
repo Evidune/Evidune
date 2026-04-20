@@ -15,18 +15,18 @@ def _write(path: Path, content: str) -> Path:
 
 
 IDENTITY_META = """---
-name: zhihu-writer
+name: content-writer
 display_name: 老拐
 description: 资深内容创作者
 language: zh-CN
-expertise: [zhihu, writing]
+expertise: [content, writing]
 voice: 实在、不端着
 default: true
 ---
 
 ## 你是谁
 
-你叫老拐，写知乎超过 5 年。
+你叫老拐，写长文超过 5 年。
 """
 
 IDENTITY_MINIMAL = """---
@@ -70,13 +70,13 @@ def _write_identity(
 
 class TestParseIdentity:
     def test_full_identity(self, tmp_path: Path):
-        root = _write_identity(tmp_path / "zhihu-writer", tools_md=TOOLS_SAMPLE)
+        root = _write_identity(tmp_path / "content-writer", tools_md=TOOLS_SAMPLE)
         identity = parse_identity(root)
-        assert identity.name == "zhihu-writer"
+        assert identity.name == "content-writer"
         assert identity.display_name == "老拐"
         assert identity.description == "资深内容创作者"
         assert identity.language == "zh-CN"
-        assert "zhihu" in identity.expertise
+        assert "content" in identity.expertise
         assert identity.voice == "实在、不端着"
         assert identity.default is True
         assert "实在话" in identity.soul
@@ -145,7 +145,7 @@ class TestLoadIdentitiesFromDir:
         _write_identity(tmp_path, identity_md=IDENTITY_META)
         identities = load_identities_from_dir(tmp_path)
         assert len(identities) == 1
-        assert identities[0].name == "zhihu-writer"
+        assert identities[0].name == "content-writer"
 
 
 class TestIdentityRegistry:
@@ -161,14 +161,14 @@ class TestIdentityRegistry:
         assert len(registry) == 2
 
     def test_get_by_name(self, registry: IdentityRegistry):
-        identity = registry.get("zhihu-writer")
+        identity = registry.get("content-writer")
         assert identity is not None
         assert identity.display_name == "老拐"
 
     def test_default_picks_marked_identity(self, registry: IdentityRegistry):
         default = registry.default()
         assert default is not None
-        assert default.name == "zhihu-writer"
+        assert default.name == "content-writer"
 
     def test_default_falls_back_to_first(self, tmp_path: Path):
         _write_identity(tmp_path / "p1", identity_md=IDENTITY_MINIMAL)
@@ -188,7 +188,7 @@ class TestIdentityRegistry:
     def test_resolve_no_name_returns_default(self, registry: IdentityRegistry):
         identity = registry.resolve(None)
         assert identity is not None
-        assert identity.name == "zhihu-writer"
+        assert identity.name == "content-writer"
 
     def test_set_default_explicit(self, registry: IdentityRegistry):
         registry.set_default("minimal")

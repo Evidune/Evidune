@@ -110,3 +110,28 @@ class TestPatternDetector:
         detector = PatternDetector(judge)
         result = await detector.detect([{"role": "user", "content": "x"}])
         assert result.suggested_name == "summarise-meeting-notes"
+
+    @pytest.mark.asyncio
+    async def test_skill_design_conversation_is_eligible_pattern(self):
+        judge = MockJudge(
+            '{"is_skill": true, "suggested_name": "news-market-analysis", '
+            '"description": "Build a reusable news and market analysis skill", '
+            '"confidence": 0.82, "rationale": "The user is designing a reusable capability."}'
+        )
+        detector = PatternDetector(judge)
+        history = [
+            {"role": "user", "content": "请设计一个可复用的新闻+行情分析 skill"},
+            {"role": "assistant", "content": "我会把它整理成可复用能力，而不是一次性回答。"},
+            {
+                "role": "user",
+                "content": "要兼容标准 Claude/OpenClaw skill 目录结构，至少有 SKILL.md。",
+            },
+        ]
+        result = await detector.detect(history)
+        prompt = judge.last_messages[0]["content"]
+        assert result.is_skill is True
+        assert result.suggested_name == "news-market-analysis"
+        assert "designing, refining, or operationalising a reusable skill/capability" in prompt
+        assert "make this into a reusable skill/capability/workflow" in prompt
+        assert "prioritise the final intended" in prompt
+        assert "capability rather than the earlier limitation discussion" in prompt

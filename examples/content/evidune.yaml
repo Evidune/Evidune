@@ -1,5 +1,5 @@
-domain: zhihu
-description: '知乎内容自动化 — 文章生成 + 数据驱动迭代'
+domain: content
+description: '长文内容自动化 — 文章生成 + 数据驱动迭代'
 
 # === Agent 配置 ===
 agent:
@@ -8,8 +8,8 @@ agent:
   api_key_env: OPENAI_API_KEY
   temperature: 0.7
   system_prompt: |
-    你是 Evidune 知乎写作助手。根据加载的 Skill 和知识库，
-    帮助用户创作高质量的知乎内容。
+    你是 Evidune 长文写作助手。根据加载的 Skill 和知识库，
+    帮助用户创作高质量的长文内容。
   # === 用 Codex CLI 的 OAuth 登录（无需 API key）===
   # 1. 先 `codex login` 用 ChatGPT 账号登录一次
   # 2. 把上面 llm_provider 改成 codex，模型改成 Codex 支持的型号
@@ -17,16 +17,14 @@ agent:
   # llm_model: gpt-5.4
   # api_key_env 在 codex 模式下被忽略，token 自动从 ~/.codex/auth.json 读取
 
-  # === 自动事实提取（每 N 轮让 LLM 从对话里学到 facts）===
+  # === 自动事实提取（内建能力；这里调节节奏和阈值）===
   fact_extraction:
-    enabled: false # 默认关闭，启用前请确认 evaluator 或 main LLM 已配好
     every_n_turns: 5 # 每 5 轮触发一次提取
     min_confidence: 0.7 # 低于此置信度的 fact 不入库
     use_evaluator: true # 优先用 evaluator LLM 做提取（避免主模型自我合理化）
 
-  # === Skill 浮现（每 N 轮自动检测可复用模式，提炼成 SKILL.md）===
+  # === Skill 浮现（内建能力；这里调节检测频率和输出目录）===
   emergence:
-    enabled: false # 默认关闭，需要 evaluator 或 main LLM 可用
     every_n_turns: 10 # 检测频率（比 fact_extraction 慢，因为生成成本更高）
     min_confidence: 0.7 # 低于此置信度不创建新 skill
     output_dir: .evidune/emerged_skills # 浮现 skill 落盘位置（相对 evidune.yaml）
@@ -42,11 +40,11 @@ skills:
 identities:
   directories:
     - identities/
-  default: zhihu-writer # 没指定时用这个；任何对话也可在 message.metadata.identity 显式切换
+  default: content-writer # 没指定时用这个；任何对话也可在 message.metadata.identity 显式切换
 
 # === 记忆 ===
 memory:
-  path: .evidune/zhihu-memory.db
+  path: .evidune/content-memory.db
   max_messages_per_conversation: 50
 
 # === 渠道网关（双向消息） ===
@@ -62,7 +60,7 @@ gateways:
 metrics:
   adapter: generic_csv
   config:
-    file: data/zhihu-metrics.csv
+    file: data/content-metrics.csv
     title_field: title
     metric_fields: [reads, upvotes, comments, collections]
     metadata_fields: [date, url]
@@ -83,7 +81,7 @@ analysis:
 iteration:
   schedule: '0 21 * * *'
   git_commit: false
-  commit_prefix: 'chore(zhihu-review): '
+  commit_prefix: 'chore(content-review): '
 
 # === 通知渠道（单向报告） ===
 channels:

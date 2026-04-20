@@ -1,0 +1,77 @@
+domain: content
+description: '长文内容自动化 - 1.81 部署配置'
+
+agent:
+  llm_provider: codex
+  llm_model: gpt-5.4
+  temperature: 0.7
+  system_prompt: |
+    你是 Evidune 长文写作助手。根据加载的 Skill 和知识库，
+    帮助用户创作高质量的长文内容。
+  fact_extraction:
+    every_n_turns: 5
+    min_confidence: 0.7
+    use_evaluator: true
+  emergence:
+    every_n_turns: 6
+    min_confidence: 0.65
+    output_dir: ~/.evidune-deploy/state/content/emerged_skills
+    use_evaluator: false
+  tools:
+    external_enabled: false
+  harness:
+    environment:
+      enabled: false
+      runtime_dir: ~/.evidune-deploy/state/content/runtime
+    validation:
+      enabled: false
+    delivery:
+      enabled: false
+
+skills:
+  directories:
+    - skills/
+  auto_update: true
+
+identities:
+  directories:
+    - identities/
+  default: content-writer
+
+memory:
+  path: ~/.evidune-deploy/state/content/content-memory.db
+  max_messages_per_conversation: 50
+
+gateways:
+  - type: web
+    host: 0.0.0.0
+    port: 8080
+
+metrics:
+  adapter: generic_csv
+  config:
+    file: data/content-metrics.csv
+    title_field: title
+    metric_fields: [reads, upvotes, comments, collections]
+    metadata_fields: [date, url]
+    sort_metric: reads
+
+references:
+  - path: skills/write-article/references/case-studies.md
+    update_strategy: replace_section
+    section: '## Top Performers'
+  - path: skills/write-article/references/hot-questions.md
+    update_strategy: full_replace
+
+analysis:
+  compare_window_days: 7
+  top_n: 5
+  bottom_n: 3
+
+iteration:
+  schedule: '0 21 * * *'
+  git_commit: false
+  commit_prefix: 'chore(content-review): '
+
+channels:
+  - type: stdout

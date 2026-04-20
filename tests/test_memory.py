@@ -211,8 +211,8 @@ class TestConversationManagement:
         store.ensure_conversation("c1", channel="web")
         assert store.get_conversation("c1")["identity"] == ""
 
-        store.ensure_conversation("c1", identity="zhihu-writer")
-        assert store.get_conversation("c1")["identity"] == "zhihu-writer"
+        store.ensure_conversation("c1", identity="content-writer")
+        assert store.get_conversation("c1")["identity"] == "content-writer"
 
     def test_set_title(self, store: MemoryStore):
         store.add_message("c1", "user", "x")
@@ -222,8 +222,8 @@ class TestConversationManagement:
 
     def test_set_identity(self, store: MemoryStore):
         store.ensure_conversation("c1", channel="web")
-        assert store.set_conversation_identity("c1", "zhihu-writer") is True
-        assert store.get_conversation("c1")["identity"] == "zhihu-writer"
+        assert store.set_conversation_identity("c1", "content-writer") is True
+        assert store.get_conversation("c1")["identity"] == "content-writer"
 
     def test_default_mode_is_execute(self, store: MemoryStore):
         store.ensure_conversation("c1")
@@ -504,12 +504,12 @@ class TestHarnessTasks:
 class TestIterationRuns:
     def test_record_and_get_iteration_run(self, store: MemoryStore):
         run_id = store.record_iteration_run(
-            domain="zhihu",
+            domain="content",
             metrics_adapter="generic_csv",
-            metrics_source="data/zhihu.csv",
+            metrics_source="data/content.csv",
             sort_metric="reads",
             total_records=3,
-            summary="zhihu: 3 items, total reads=1234, avg=411.",
+            summary="content: 3 items, total reads=1234, avg=411.",
             patterns=["Top performers have longer titles"],
             raw_stats={"reads": {"total": 1234, "avg": 411.3}},
             top_performers=[{"title": "A", "metrics": {"reads": 900}, "metadata": {}}],
@@ -530,7 +530,7 @@ class TestIterationRuns:
 
         run = store.get_iteration_run(run_id)
         assert run is not None
-        assert run["domain"] == "zhihu"
+        assert run["domain"] == "content"
         assert run["metrics_adapter"] == "generic_csv"
         assert run["patterns"] == ["Top performers have longer titles"]
         assert run["updates"] == [
@@ -548,7 +548,7 @@ class TestIterationRuns:
 
     def test_list_iteration_runs_includes_update_counts(self, store: MemoryStore):
         first_id = store.record_iteration_run(
-            domain="zhihu",
+            domain="content",
             metrics_adapter="generic_csv",
             summary="first",
             updates=[
@@ -557,7 +557,7 @@ class TestIterationRuns:
             ],
         )
         second_id = store.record_iteration_run(
-            domain="zhihu",
+            domain="content",
             metrics_adapter="generic_csv",
             summary="second",
             updates=[{"path": "c.md", "strategy": "append_only", "has_changes": True}],
@@ -573,7 +573,7 @@ class TestIterationRuns:
     def test_record_iteration_run_rejects_invalid_update(self, store: MemoryStore):
         with pytest.raises(ValueError, match="non-empty path"):
             store.record_iteration_run(
-                domain="zhihu",
+                domain="content",
                 metrics_adapter="generic_csv",
                 summary="x",
                 updates=[{"path": "", "strategy": "append_only"}],

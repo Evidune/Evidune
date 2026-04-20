@@ -40,10 +40,21 @@ A Skill is reusable when:
 - The user's request is likely to recur (not one-off)
 - The assistant's approach has a repeatable structure (steps, rules, format)
 - A future user asking a similar question would benefit from the same recipe
+- The conversation is designing, refining, or operationalising a reusable skill/capability
+  package, even if the current chat does not execute the capability end-to-end
+
+Treat conversations about "make this into a reusable skill/capability/workflow"
+as valid skill candidates when the output would help future conversations.
+If earlier turns discuss boundaries, limitations, or missing tools but later
+turns explicitly ask to build a reusable skill, prioritise the final intended
+capability rather than the earlier limitation discussion.
+Name the skill after the reusable job to be done, not after the assistant's
+temporary constraints or refusals.
 
 NOT a skill:
-- One-time questions, debugging, casual chat
+- One-time questions, one-off debugging for a single broken environment, casual chat
 - Pure information lookup
+- Generic Q&A without a durable operating procedure
 - Anything already covered by an existing skill
 
 # Existing skills (DO NOT propose duplicates)
@@ -81,7 +92,7 @@ _format_skills = format_skill_names
 
 
 def _format_conversation(history: list[dict[str, str]]) -> str:
-    return format_conversation(history, max_content_length=800)
+    return format_conversation(history, max_content_length=1600)
 
 
 def _parse_response(raw: str) -> DetectedPattern:

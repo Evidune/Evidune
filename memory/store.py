@@ -184,10 +184,16 @@ class MemoryStore:
                 "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
                 (conversation_id, role, content, now),
             )
-            self._conn.execute(
-                "UPDATE conversations SET updated_at = ? WHERE id = ?",
-                (now, conversation_id),
-            )
+            if role == "user":
+                self._conn.execute(
+                    "UPDATE conversations SET updated_at = ?, turn_count = turn_count + 1 WHERE id = ?",
+                    (now, conversation_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE conversations SET updated_at = ? WHERE id = ?",
+                    (now, conversation_id),
+                )
             self._conn.commit()
 
     def get_history(self, conversation_id: str, limit: int = 20) -> list[dict[str, str]]:
@@ -221,6 +227,17 @@ class MemoryStore:
             self._conn.commit()
             return to_delete
 
+    def get_conversation_turn_count(self, conversation_id: str) -> int:
+        """Return the persisted user-turn count for a conversation."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT turn_count FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if row is None:
+            return 0
+        return int(row["turn_count"] or 0)
+
     def list_conversations(
         self,
         limit: int = 50,
@@ -247,7 +264,7 @@ class MemoryStore:
         with self._lock:
             rows = self._conn.execute(
                 f"""SELECT c.id, c.channel, c.identity, c.squad_profile,
-                           c.mode, c.plan_json, c.title, c.status,
+                           c.mode, c.plan_json, c.title, c.status, c.turn_count,
                            c.created_at, c.updated_at,
                            (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id)
                              AS message_count,
@@ -273,6 +290,7 @@ class MemoryStore:
                     "identity": r["identity"] or "",
                     "squad_profile": r["squad_profile"] or "",
                     "mode": r["mode"] or "execute",
+                    "turn_count": r["turn_count"] or 0,
                     "has_plan": bool(r["plan_json"]),
                     "title": r["title"] or "",
                     "status": r["status"],
@@ -289,7 +307,7 @@ class MemoryStore:
         with self._lock:
             row = self._conn.execute(
                 """SELECT id, channel, identity, squad_profile,
-                          mode, plan_json, title, status, created_at, updated_at
+                          mode, plan_json, title, status, turn_count, created_at, updated_at
                    FROM conversations WHERE id = ?""",
                 (conversation_id,),
             ).fetchone()

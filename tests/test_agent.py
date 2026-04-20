@@ -458,10 +458,10 @@ class TestAgentWithIdentity:
                 name="老拐",
                 display_name="老拐",
                 soul="你说话直接，不端着。",
-                identity="你是老拐，知乎写作专家。",
+                identity="你是老拐，长文写作专家。",
                 user="你把用户当同行，不装老师。",
                 default=True,
-                path=Path("/tmp/identities/zhihu-writer"),
+                path=Path("/tmp/identities/content-writer"),
             )
         )
         reg.register(
@@ -488,7 +488,7 @@ class TestAgentWithIdentity:
         resp = await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "老拐" in system_content
-        assert "知乎写作专家" in system_content
+        assert "长文写作专家" in system_content
         assert resp.metadata["identity"] == "老拐"
 
     @pytest.mark.asyncio
@@ -503,7 +503,7 @@ class TestAgentWithIdentity:
         resp = await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "polite, formal tone" in system_content
-        assert "知乎写作专家" not in system_content
+        assert "长文写作专家" not in system_content
         assert resp.metadata["identity"] == "formal-helper"
 
     @pytest.mark.asyncio

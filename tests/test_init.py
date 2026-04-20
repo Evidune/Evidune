@@ -54,13 +54,13 @@ class TestInitProject:
             init_project(project_dir)
 
 
-def test_bundled_zhihu_example_runs_one_iteration(tmp_path: Path):
-    copied = tmp_path / "zhihu"
-    shutil.copytree(ROOT / "examples" / "zhihu", copied)
+def test_bundled_content_example_runs_one_iteration(tmp_path: Path):
+    copied = tmp_path / "content"
+    shutil.copytree(ROOT / "examples" / "content", copied)
 
     exit_code = main(["run", "--config", str(copied / "evidune.yaml")])
     assert exit_code == 0
 
-    assert (copied / ".evidune" / "zhihu-memory.db").exists()
+    assert (copied / ".evidune" / "content-memory.db").exists()
     skill_content = (copied / "skills" / "write-article" / "SKILL.md").read_text(encoding="utf-8")
     assert "Auto-updated by evidune" in skill_content

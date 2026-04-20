@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     plan_json TEXT DEFAULT '',
     title TEXT DEFAULT '',
     status TEXT DEFAULT 'active',
+    turn_count INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -241,6 +242,17 @@ def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT ''")
     if "status" not in cols:
         conn.execute("ALTER TABLE conversations ADD COLUMN status TEXT DEFAULT 'active'")
+    if "turn_count" not in cols:
+        conn.execute("ALTER TABLE conversations ADD COLUMN turn_count INTEGER DEFAULT 0")
+        conn.execute(
+            """UPDATE conversations
+               SET turn_count = (
+                   SELECT COUNT(*)
+                   FROM messages
+                   WHERE messages.conversation_id = conversations.id
+                     AND messages.role = 'user'
+               )"""
+        )
 
 
 def _migrate_skill_executions(conn: sqlite3.Connection) -> None:

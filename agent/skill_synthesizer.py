@@ -32,7 +32,7 @@ class SynthesisResult:
     path: Path
 
 
-_PROMPT_TEMPLATE = """You are a skill author. Turn the conversation pattern below into a complete, reusable SKILL.md following the Claude/OpenClaw skill format.
+_PROMPT_TEMPLATE = """You are a skill author. Turn the conversation pattern below into a complete, reusable SKILL.md for a standard Claude/OpenClaw directory-based skill.
 
 # Pattern detected
 
@@ -58,6 +58,10 @@ Return ONLY the full SKILL.md content (no surrounding prose, no code fences). It
 2. ## Instructions section: 5-15 actionable rules an LLM should follow when invoked
 3. ## Examples section with at least 1 example (### Example 1: ...)
 4. ## Reference Data section (placeholder for future iteration)
+
+The generated skill will live at <output_dir>/<skill-name>/SKILL.md and may later gain
+optional `references/` or `scripts/` siblings. Write the SKILL.md so it works on day one
+without depending on any missing files. Do not mention files that do not exist yet.
 
 Be concrete and useful. Do not include placeholder text like "TODO" or "fill this in later". The skill should work on day one.
 """

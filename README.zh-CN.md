@@ -39,11 +39,11 @@ cd demo
 evidune run --config evidune.yaml
 ```
 
-在仓库根目录直接运行内置的知乎示例：
+在仓库根目录直接运行内置的内容写作示例：
 
 ```bash
-python -m core.loop run --config examples/zhihu/evidune.yaml
-python -m core.loop iterations list --config examples/zhihu/evidune.yaml
+python -m core.loop run --config examples/content/evidune.yaml
+python -m core.loop iterations list --config examples/content/evidune.yaml
 ```
 
 启动交互式 agent：

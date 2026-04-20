@@ -59,14 +59,13 @@ class ChannelConfig:
 class EmergenceConfig:
     """Skill emergence: detect reusable patterns and synthesise SKILL.md.
 
-    When enabled, every N turns the agent runs pattern detection on
-    recent conversation; if a reusable pattern is found above
+    Every N turns the agent runs pattern detection on recent
+    conversation; if a reusable pattern is found above
     min_confidence, a complete SKILL.md is generated and saved to
     output_dir, then activated by default. `pending_review` is reserved
     for explicit manual hold flows rather than the default emergence path.
     """
 
-    enabled: bool = False
     every_n_turns: int = 10
     min_confidence: float = 0.7
     output_dir: str = "~/.evidune/emerged_skills"
@@ -77,12 +76,11 @@ class EmergenceConfig:
 class FactExtractionConfig:
     """Auto fact extraction from conversation history.
 
-    When enabled, every N turns the agent asks an LLM (the evaluator
-    if configured, otherwise the main LLM) to scan recent messages
+    Every N turns the agent asks an LLM (the evaluator if configured,
+    otherwise the main LLM) to scan recent messages
     and extract persistent facts worth remembering.
     """
 
-    enabled: bool = False
     every_n_turns: int = 5
     min_confidence: float = 0.7
     use_evaluator: bool = True  # If False, use the main agent LLM
@@ -345,14 +343,12 @@ def load_config(path: str | Path) -> EviduneConfig:
             )
         fe_raw = agent_raw.get("fact_extraction", {})
         fact_extraction = FactExtractionConfig(
-            enabled=fe_raw.get("enabled", False),
             every_n_turns=fe_raw.get("every_n_turns", 5),
             min_confidence=fe_raw.get("min_confidence", 0.7),
             use_evaluator=fe_raw.get("use_evaluator", True),
         )
         em_raw = agent_raw.get("emergence", {})
         emergence = EmergenceConfig(
-            enabled=em_raw.get("enabled", False),
             every_n_turns=em_raw.get("every_n_turns", 10),
             min_confidence=em_raw.get("min_confidence", 0.7),
             output_dir=em_raw.get("output_dir", "~/.evidune/emerged_skills"),

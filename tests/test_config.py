@@ -24,7 +24,7 @@ class TestLoadConfig:
 
     def test_full_config(self, tmp_path: Path):
         data = {
-            "domain": "zhihu",
+            "domain": "content",
             "description": "Test domain",
             "metrics": {
                 "adapter": "generic_csv",
@@ -51,7 +51,7 @@ class TestLoadConfig:
             },
         }
         config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
-        assert config.domain == "zhihu"
+        assert config.domain == "content"
         assert len(config.references) == 2
         assert config.references[0].update_strategy == "replace_section"
         assert config.references[0].section == "## Top Performers"
@@ -116,3 +116,43 @@ class TestLoadConfig:
         }
         with pytest.raises(ValueError, match="Invalid prompt_mode"):
             load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+
+    def test_legacy_fact_extraction_enabled_flag_is_ignored(self, tmp_path: Path):
+        data = {
+            "domain": "test",
+            "agent": {
+                "fact_extraction": {
+                    "enabled": False,
+                    "every_n_turns": 7,
+                    "min_confidence": 0.8,
+                    "use_evaluator": False,
+                }
+            },
+        }
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+        assert config.agent is not None
+        assert not hasattr(config.agent.fact_extraction, "enabled")
+        assert config.agent.fact_extraction.every_n_turns == 7
+        assert config.agent.fact_extraction.min_confidence == 0.8
+        assert config.agent.fact_extraction.use_evaluator is False
+
+    def test_legacy_emergence_enabled_flag_is_ignored(self, tmp_path: Path):
+        data = {
+            "domain": "test",
+            "agent": {
+                "emergence": {
+                    "enabled": False,
+                    "every_n_turns": 9,
+                    "min_confidence": 0.65,
+                    "use_evaluator": False,
+                    "output_dir": ".evidune/custom-emerged",
+                }
+            },
+        }
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+        assert config.agent is not None
+        assert not hasattr(config.agent.emergence, "enabled")
+        assert config.agent.emergence.every_n_turns == 9
+        assert config.agent.emergence.min_confidence == 0.65
+        assert config.agent.emergence.use_evaluator is False
+        assert config.agent.emergence.output_dir == ".evidune/custom-emerged"

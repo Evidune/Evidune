@@ -1,12 +1,12 @@
 ---
-name: write-zhihu-article
-description: Write a compelling Zhihu article tuned to platform algorithm and reader expectations
+name: write-article
+description: Write a compelling long-form article tuned to reader intent and completion
 version: 1.0.0
-tags: [writing, zhihu, content]
+tags: [writing, long-form, content]
 triggers:
-  - user wants to write an article for Zhihu
-  - user provides a topic and asks for a long-form post
-  - user shares hot questions and asks for an answer
+  - user wants to write a long-form article
+  - user provides a topic and asks for a publishable post
+  - user shares a hot question and asks for an answer
 anti_triggers:
   - user wants short-form content (tweet, status)
   - user wants code or technical documentation
@@ -17,9 +17,9 @@ update_section: '## Reference Data'
 
 ## Instructions
 
-Write a Zhihu article following these guidelines:
+Write a long-form article following these guidelines:
 
-1. **Length**: 2000-4000 words. Sweet spot for Zhihu algorithm completion rate.
+1. **Length**: 1800-3500 words. Long enough to develop an argument without padding.
 2. **Style**: practical, concrete, with real examples and specific numbers.
 3. **Avoid AI-sounding phrases**:
    - NO "这不仅仅是A，更是B"
@@ -37,8 +37,8 @@ Refer to `references/style-guide.md` for tone and structure deep dive.
 When to use this skill:
 
 - The user gives a Zhihu hot question and asks for an answer
-- The user provides a topic and explicitly says "write me a Zhihu article"
-- The user shares a knowledge base entry and asks to publish it on Zhihu
+- The user provides a topic and explicitly says "write me a long-form article"
+- The user shares a knowledge base entry and asks to turn it into a publishable article
 
 ## Anti-Triggers
 
@@ -47,13 +47,13 @@ When NOT to use this skill:
 - The user wants a tweet, status update, or short-form content
 - The user wants Python code, SQL, or technical documentation
 - The user wants paid fiction for Yanxuan (use `salt-story` instead)
-- The user wants a WeChat Official Account article (different platform conventions)
+- The user wants a script, ad copy, or campaign slogan
 
 ## Examples
 
 ### Example 1: Hot question response
 
-**Input**: "知乎热门：为什么大厂喜欢用 Java 而不是 Go？"
+**Input**: "热门问题：为什么大厂喜欢用 Java 而不是 Go？"
 
 **Output approach**:
 
@@ -73,6 +73,6 @@ When NOT to use this skill:
 
 ## Reference Data
 
-_This section is auto-updated by the evidune iteration loop based on real Zhihu performance metrics._
+_This section is auto-updated by the evidune iteration loop based on real content performance metrics._
 
 (Will be populated after the first review cycle)

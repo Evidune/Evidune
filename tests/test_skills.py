@@ -16,8 +16,8 @@ def _write_skill(path: Path, content: str) -> Path:
 
 SAMPLE_SKILL = """---
 name: write-article
-description: Write a compelling article for Zhihu
-tags: [writing, zhihu, content]
+description: Write a compelling long-form article
+tags: [writing, long-form, content]
 outcome_metrics: true
 ---
 
@@ -85,7 +85,7 @@ class TestParseSkill:
         path = _write_skill(tmp_path / "SKILL.md", SAMPLE_SKILL)
         skill = parse_skill(path)
         assert skill.name == "write-article"
-        assert skill.description == "Write a compelling article for Zhihu"
+        assert skill.description == "Write a compelling long-form article"
         assert "writing" in skill.tags
         assert skill.outcome_metrics is True
         assert "Be practical" in skill.instructions
@@ -224,7 +224,7 @@ class TestSkillRegistry:
         assert outcome[0].name == "write-article"
 
     def test_find_relevant(self, registry: SkillRegistry):
-        results = registry.find_relevant("write an article for zhihu")
+        results = registry.find_relevant("write a long-form article")
         assert len(results) > 0
         assert results[0].name == "write-article"
 

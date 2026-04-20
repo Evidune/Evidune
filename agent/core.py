@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent.fact_extractor import FactExtractor
@@ -26,6 +28,22 @@ from skills.loader import parse_skill
 from skills.registry import SkillRegistry
 
 _CONVERSATION_MODES = {"plan", "execute"}
+
+
+@dataclass
+class EmergenceDecision:
+    conversation_id: str
+    mode: str
+    matched_skills: list[str] = field(default_factory=list)
+    execution_skill_names: list[str] = field(default_factory=list)
+    emergence_counter: int = 0
+    emergence_attempted: bool = False
+    skip_reason: str = ""
+    detected_name: str = ""
+    detected_confidence: float | None = None
+    activation_status: str = "skipped"
+    emerged_skill_path: str = ""
+    emerged_skill: str | None = None
 
 
 class AgentCore:
@@ -375,6 +393,30 @@ class AgentCore:
                 trace.append(item)
         return trace
 
+    def _sync_turn_counter(self, cache: dict[str, int], conversation_id: str) -> int:
+        """Restore or advance a monotonic turn counter from persisted conversation state."""
+        persisted = self.memory.get_conversation_turn_count(conversation_id)
+        current = max(cache.get(conversation_id, 0), persisted)
+        cache[conversation_id] = current
+        return current
+
+    def _log_emergence_turn(self, decision: EmergenceDecision) -> None:
+        payload = {
+            "event": "emergence_turn",
+            "conversation_id": decision.conversation_id,
+            "mode": decision.mode,
+            "matched_skills": decision.matched_skills,
+            "execution_skill_names": decision.execution_skill_names,
+            "emergence_counter": decision.emergence_counter,
+            "emergence_attempted": decision.emergence_attempted,
+            "skip_reason": decision.skip_reason,
+            "detected_name": decision.detected_name,
+            "detected_confidence": decision.detected_confidence,
+            "activation_status": decision.activation_status,
+            "emerged_skill_path": decision.emerged_skill_path,
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+
     async def _run_swarm(
         self,
         *,
@@ -467,6 +509,8 @@ class AgentCore:
         matched_skills = self.skills.find_relevant(message.text)
         relevant_skills = matched_skills if matched_skills else self.skills.all()
         execution_skills = matched_skills if matched_skills else []
+        matched_skill_names = [skill.name for skill in matched_skills]
+        execution_skill_names = [skill.name for skill in execution_skills]
 
         task_id: str | None = None
         squad_name: str | None = None
@@ -525,6 +569,10 @@ class AgentCore:
         #    intermediate tool calls stay in the per-turn working messages)
         self.memory.add_message(message.conversation_id, "user", message.text)
         self.memory.add_message(message.conversation_id, "assistant", response_text)
+        current_turn_count = self._sync_turn_counter(self._turn_counts, message.conversation_id)
+        current_emergence_count = self._sync_turn_counter(
+            self._emergence_counts, message.conversation_id
+        )
 
         # 8. Record skill execution(s) for outcome iteration / feedback
         execution_ids: list[int] = []
@@ -553,15 +601,24 @@ class AgentCore:
         lifecycle_updates = self._maybe_reconcile_skill_feedback(execution_skills)
 
         # 9. Auto fact extraction (every N turns, when enabled)
-        extracted_count = await self._maybe_extract_facts(message, identity)
+        extracted_count = await self._maybe_extract_facts(
+            message, identity, turn_count=current_turn_count
+        )
 
         # 10. Skill emergence (every N turns, when enabled)
-        emerged_skill = await self._maybe_emerge_skill(message)
+        emergence_decision = await self._maybe_emerge_skill(
+            message,
+            mode=mode,
+            matched_skill_names=matched_skill_names,
+            execution_skill_names=execution_skill_names,
+            emergence_counter=current_emergence_count,
+        )
 
         # 11. Auto-title the conversation once it has enough content
         new_title = await self._maybe_generate_title(message.conversation_id)
 
         current_plan = self.memory.get_conversation_plan(message.conversation_id)
+        self._log_emergence_turn(emergence_decision)
 
         # Trim old history
         self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
@@ -570,14 +627,14 @@ class AgentCore:
             text=response_text,
             conversation_id=message.conversation_id,
             metadata={
-                "skills": [s.name for s in execution_skills],
+                "skills": execution_skill_names,
                 "execution_ids": execution_ids,
                 "identity": identity.name if identity else None,
                 "mode": mode,
                 "plan": current_plan,
                 "facts_extracted": extracted_count,
                 "evaluations_recorded": evaluated_count,
-                "emerged_skill": emerged_skill,
+                "emerged_skill": emergence_decision.emerged_skill,
                 "skill_lifecycle_updates": lifecycle_updates,
                 "new_title": new_title,
                 "tool_trace": tool_trace,
@@ -595,14 +652,24 @@ class AgentCore:
             },
         )
 
-    async def _maybe_extract_facts(self, message: InboundMessage, identity: Identity | None) -> int:
+    async def _maybe_extract_facts(
+        self,
+        message: InboundMessage,
+        identity: Identity | None,
+        *,
+        turn_count: int | None = None,
+    ) -> int:
         """Extract new facts from history every N turns. Returns count saved."""
         if not self.fact_extractor:
             return 0
 
         conv_id = message.conversation_id
-        self._turn_counts[conv_id] = self._turn_counts.get(conv_id, 0) + 1
-        if self._turn_counts[conv_id] % self.fact_extraction_every_n_turns != 0:
+        current_turn_count = (
+            turn_count
+            if turn_count is not None
+            else self._sync_turn_counter(self._turn_counts, conv_id)
+        )
+        if current_turn_count % self.fact_extraction_every_n_turns != 0:
             return 0
 
         namespace = identity.namespace if identity else ""
@@ -697,21 +764,39 @@ class AgentCore:
 
         return updated
 
-    async def _maybe_emerge_skill(self, message: InboundMessage) -> str | None:
-        """Detect and synthesise a new skill from recent conversation.
-
-        Returns the new skill name if one was created, else None.
-        Skips if pattern_detector or skill_synthesizer are not configured,
-        or if the proposed name collides with an existing skill.
-        """
-        if not (self.pattern_detector and self.skill_synthesizer):
-            return None
-
+    async def _maybe_emerge_skill(
+        self,
+        message: InboundMessage,
+        *,
+        mode: str,
+        matched_skill_names: list[str],
+        execution_skill_names: list[str],
+        emergence_counter: int | None = None,
+    ) -> EmergenceDecision:
+        """Detect and synthesise a new skill from recent conversation."""
         conv_id = message.conversation_id
-        self._emergence_counts[conv_id] = self._emergence_counts.get(conv_id, 0) + 1
-        if self._emergence_counts[conv_id] % self.emergence_every_n_turns != 0:
-            return None
+        current_counter = (
+            emergence_counter
+            if emergence_counter is not None
+            else self._sync_turn_counter(self._emergence_counts, conv_id)
+        )
+        decision = EmergenceDecision(
+            conversation_id=conv_id,
+            mode=mode,
+            matched_skills=matched_skill_names,
+            execution_skill_names=execution_skill_names,
+            emergence_counter=current_counter,
+        )
 
+        if not (self.pattern_detector and self.skill_synthesizer):
+            decision.skip_reason = "disabled_by_config"
+            return decision
+
+        if current_counter % self.emergence_every_n_turns != 0:
+            decision.skip_reason = "not_due_yet"
+            return decision
+
+        decision.emergence_attempted = True
         history = self.memory.get_history(conv_id, self.max_history)
         existing_names = [s.name for s in self.skills.all()]
 
@@ -720,23 +805,38 @@ class AgentCore:
                 history, existing_skill_names=existing_names
             )
         except Exception:
-            return None
+            decision.skip_reason = "detector_failed"
+            decision.activation_status = "failed"
+            return decision
+
+        decision.detected_name = pattern.suggested_name
+        decision.detected_confidence = pattern.confidence
 
         if not pattern.is_skill or pattern.confidence < self.emergence_min_confidence:
-            return None
+            decision.skip_reason = "below_threshold"
+            return decision
         if pattern.suggested_name in existing_names:
-            return None  # Avoid duplicate
+            decision.skip_reason = "duplicate_name"
+            return decision
 
         try:
             result = await self.skill_synthesizer.synthesize(pattern, history)
         except Exception:
-            return None
+            decision.skip_reason = "synthesis_failed"
+            decision.activation_status = "failed"
+            return decision
         if result is None:
-            return None
+            decision.skip_reason = "synthesis_failed"
+            decision.activation_status = "failed"
+            return decision
+
+        decision.emerged_skill_path = str(result.path)
 
         try:
             skill = parse_skill(result.path)
         except Exception:
+            decision.skip_reason = "parse_failed"
+            decision.activation_status = "failed"
             reason = "Synthesised skill could not be parsed for activation"
             evidence = {
                 "pattern_confidence": pattern.confidence,
@@ -761,7 +861,7 @@ class AgentCore:
                 evidence=evidence,
                 content_after=result.skill_md,
             )
-            return None
+            return decision
 
         evidence = {
             "pattern_confidence": pattern.confidence,
@@ -789,7 +889,9 @@ class AgentCore:
         )
         self.skills.register(skill)
 
-        return result.name
+        decision.activation_status = "activated"
+        decision.emerged_skill = result.name
+        return decision
 
     async def _maybe_generate_title(self, conversation_id: str) -> str | None:
         """Generate a title once the conversation has enough content.

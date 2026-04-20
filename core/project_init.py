@@ -36,7 +36,6 @@ agent:
       enabled: true
       github_enabled: false
   emergence:
-    enabled: false
     output_dir: .evidune/emerged_skills
 
 skills:
