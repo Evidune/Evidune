@@ -26,6 +26,16 @@ class MockLLM(LLMClient):
         return self.response
 
 
+class QueueJudge(LLMClient):
+    def __init__(self, responses: list[str]):
+        self.responses = list(responses)
+        self.last_messages: list[dict] = []
+
+    async def complete(self, messages, **kwargs):
+        self.last_messages = messages
+        return self.responses.pop(0)
+
+
 class MockToolLLM(LLMClient):
     def __init__(self):
         self.calls = 0
@@ -370,6 +380,125 @@ class TestAgentCore:
         assert execution["score"] == 0.82
         assert execution["evaluator_reasoning"] == "Strong match"
         assert response.metadata["evaluations_recorded"] == 1
+
+    @pytest.mark.asyncio
+    async def test_legacy_skill_discovers_contract_and_returns_evaluation_metadata(
+        self, tmp_path: Path, memory: MemoryStore
+    ):
+        skill_path = _write_skill(
+            tmp_path / "skills" / "incident-triage" / "SKILL.md",
+            "---\n"
+            "name: incident-triage\n"
+            "description: Triage incidents\n"
+            "triggers: [incident]\n"
+            "---\n"
+            "\n"
+            "## Instructions\n"
+            "Diagnose incidents with evidence.\n",
+        )
+        registry = SkillRegistry()
+        registry.load_directory(tmp_path / "skills")
+        judge = QueueJudge(
+            [
+                """{
+                  "version": 1,
+                  "min_pass_score": 0.7,
+                  "rewrite_below_score": 0.55,
+                  "disable_below_score": 0.25,
+                  "min_samples_for_rewrite": 3,
+                  "min_samples_for_disable": 2,
+                  "criteria": [
+                    {"name": "goal_completion", "description": "Incident was triaged", "weight": 1.0}
+                  ],
+                  "observable_metrics": [],
+                  "failure_modes": ["skipped_required_verification"]
+                }""",
+                """{
+                  "aggregate_score": 0.66,
+                  "criteria_scores": {
+                    "goal_completion": {"score": 0.66, "reasoning": "Partial triage"}
+                  },
+                  "observed_metrics": {},
+                  "missing_observations": ["tool trace"],
+                  "reasoning": "The response identifies a path but lacks verification."
+                }""",
+            ]
+        )
+        agent = AgentCore(
+            llm=MockLLM("Check logs first."),
+            skill_registry=registry,
+            memory=memory,
+            self_evaluator=SelfEvaluator(judge),
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="incident: api is down",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-contract",
+            )
+        )
+
+        assert response.metadata["skill_evaluations"][0]["skill_name"] == "incident-triage"
+        assert response.metadata["skill_evaluations"][0]["contract_status"] == "written"
+        assert response.metadata["skill_evaluations"][0]["aggregate_score"] == 0.66
+        assert memory.get_skill_evaluation_contract("incident-triage")["source"] == "written"
+        assert "evaluation_contract:" in skill_path.read_text(encoding="utf-8")
+        events = memory.list_skill_lifecycle_events("incident-triage")
+        assert events[0]["action"] == "contract_discover"
+
+    @pytest.mark.asyncio
+    async def test_legacy_skill_runtime_contract_respects_auto_update_false(
+        self, tmp_path: Path, memory: MemoryStore
+    ):
+        skill_path = _write_skill(
+            tmp_path / "skills" / "ops-helper" / "SKILL.md",
+            "---\nname: ops-helper\ndescription: Help ops\ntriggers: [ops]\n---\n"
+            "\n## Instructions\nHelp with operational tasks.\n",
+        )
+        registry = SkillRegistry()
+        registry.load_directory(tmp_path / "skills")
+        judge = QueueJudge(
+            [
+                """{
+                  "version": 1,
+                  "criteria": [
+                    {"name": "goal_completion", "description": "Goal completed", "weight": 1.0}
+                  ],
+                  "observable_metrics": [],
+                  "failure_modes": []
+                }""",
+                """{
+                  "aggregate_score": 0.8,
+                  "criteria_scores": {"goal_completion": {"score": 0.8}},
+                  "observed_metrics": {},
+                  "missing_observations": [],
+                  "reasoning": "Good enough."
+                }""",
+            ]
+        )
+        agent = AgentCore(
+            llm=MockLLM("ops response"),
+            skill_registry=registry,
+            memory=memory,
+            self_evaluator=SelfEvaluator(judge),
+            skill_contract_auto_update=False,
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="ops checklist",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-runtime-contract",
+            )
+        )
+
+        assert response.metadata["skill_evaluations"][0]["contract_status"] == "runtime"
+        assert memory.get_skill_evaluation_contract("ops-helper")["source"] == "runtime"
+        assert "evaluation_contract:" not in skill_path.read_text(encoding="utf-8")
+        assert memory.list_skill_lifecycle_events("ops-helper") == []
 
     @pytest.mark.asyncio
     async def test_prunes_rolled_back_emerged_skills_before_matching(

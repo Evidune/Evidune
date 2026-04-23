@@ -92,6 +92,16 @@
     <SkillCreationCard creation={message.skillCreation} />
   {/if}
 
+  {#if !isUser && message.skillEvaluations && message.skillEvaluations.length > 0}
+    <div class="skill-evals" data-testid="skill-evaluations">
+      {#each message.skillEvaluations as evaluation}
+        <span class="skill-eval" title={evaluation.reasoning || 'Skill evaluation'}>
+          {evaluation.skill_name}: {Math.round((evaluation.aggregate_score ?? 0) * 100)}%
+        </span>
+      {/each}
+    </div>
+  {/if}
+
   <div
     class="msg-body"
     data-testid={isUser ? 'user-message-body' : 'assistant-message-body'}
@@ -153,8 +163,6 @@
     align-self: flex-start;
   }
 
-  /* .msg-label base styles live in app.css; only the user-side
-     alignment override stays here */
   .msg.user :global(.msg-label) {
     text-align: right;
   }
@@ -180,6 +188,22 @@
     border-bottom-left-radius: 4px;
   }
 
+  .skill-evals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 4px;
+  }
+
+  .skill-eval {
+    background: rgba(15, 23, 42, 0.35);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text2);
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+
   .actions {
     display: flex;
     gap: 4px;
@@ -189,9 +213,7 @@
     transition: opacity 0.2s;
   }
 
-  .msg:hover .actions {
-    opacity: 1;
-  }
+  .msg:hover .actions { opacity: 1; }
 
   .action {
     background: transparent;
@@ -221,7 +243,7 @@
       max-width: 92%;
     }
     .actions {
-      opacity: 1; /* Always visible on mobile (no hover) */
+      opacity: 1;
     }
   }
 </style>

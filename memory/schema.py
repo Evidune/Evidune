@@ -76,6 +76,31 @@ CREATE TABLE IF NOT EXISTS skill_lifecycle_events (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS skill_evaluation_contracts (
+    skill_name TEXT PRIMARY KEY,
+    contract_json TEXT NOT NULL,
+    source TEXT DEFAULT 'runtime',
+    path TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    evidence_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS skill_evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    execution_id INTEGER NOT NULL,
+    skill_name TEXT NOT NULL,
+    aggregate_score REAL NOT NULL,
+    criteria_scores_json TEXT DEFAULT '{}',
+    observed_metrics_json TEXT DEFAULT '{}',
+    missing_observations_json TEXT DEFAULT '[]',
+    reasoning TEXT DEFAULT '',
+    contract_version INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (execution_id) REFERENCES skill_executions(id)
+);
+
 CREATE TABLE IF NOT EXISTS squad_profiles (
     name TEXT PRIMARY KEY,
     roles_json TEXT DEFAULT '[]',
@@ -342,6 +367,12 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skill_lifecycle_task ON skill_lifecycle_events(harness_task_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_skill_evaluations_skill ON skill_evaluations(skill_name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_skill_evaluations_execution ON skill_evaluations(execution_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_harness_tasks_conv ON harness_tasks(conversation_id)"

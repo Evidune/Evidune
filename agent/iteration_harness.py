@@ -36,6 +36,8 @@ class IterationDecisionPacket:
     top_performers: list[dict[str, Any]] = field(default_factory=list)
     patterns: list[str] = field(default_factory=list)
     executions: list[dict[str, Any]] = field(default_factory=list)
+    evaluation_contract: dict[str, Any] | None = None
+    contract_evaluations: list[dict[str, Any]] = field(default_factory=list)
     feedback: SkillFeedbackSummary | None = None
     lifecycle_history: list[dict[str, Any]] = field(default_factory=list)
     surface: str = "run"
@@ -167,6 +169,9 @@ def build_decision_packet(
     emerged = memory.get_emerged_skill(skill.name)
     origin = state["origin"] if state else ("emerged" if emerged else "base")
     executions = memory.get_skill_executions(skill.name, limit=20)
+    contract_row = memory.get_skill_evaluation_contract(skill.name)
+    contract = contract_row.get("contract") if contract_row else None
+    contract_evaluations = memory.list_skill_evaluations(skill.name, limit=20)
     top_performers = []
     patterns: list[str] = []
     metrics_summary: dict[str, Any] = {}
@@ -196,6 +201,8 @@ def build_decision_packet(
         top_performers=top_performers,
         patterns=patterns,
         executions=executions,
+        evaluation_contract=contract,
+        contract_evaluations=contract_evaluations,
         feedback=feedback or summarise_skill_feedback(executions),
         lifecycle_history=memory.list_skill_lifecycle_events(skill.name, limit=20),
         surface=surface,
@@ -361,8 +368,9 @@ class IterationHarness:
         feedback = packet.feedback or summarise_skill_feedback(packet.executions)
         latest_rewrite = self._latest_rewrite_event(packet.lifecycle_history)
         reference_content = self._build_reference_content(packet)
+        contract_decision = self._contract_decision(packet)
 
-        if feedback.should_disable:
+        if contract_decision == "disable":
             if latest_rewrite and latest_rewrite.get("content_before"):
                 return (
                     "rollback",
@@ -373,6 +381,29 @@ class IterationHarness:
                     ),
                 )
             return "disable", ""
+
+        if feedback.should_disable and not (
+            packet.contract_evaluations and feedback.signal_samples == 0
+        ):
+            if latest_rewrite and latest_rewrite.get("content_before"):
+                return (
+                    "rollback",
+                    self._build_rollback_content(
+                        restored=latest_rewrite["content_before"],
+                        section=packet.update_section,
+                        reference_content=reference_content,
+                    ),
+                )
+            return "disable", ""
+
+        if contract_decision == "rewrite":
+            proposed = self._build_rewrite_content(
+                current=packet.current_content,
+                packet=packet,
+                reference_content=reference_content,
+            )
+            if proposed:
+                return "rewrite", proposed
 
         if self._has_metric_evidence(packet) and feedback.should_rewrite:
             proposed = self._build_rewrite_content(
@@ -516,6 +547,50 @@ class IterationHarness:
         )
 
     @staticmethod
+    def _contract_evidence_summary(packet: IterationDecisionPacket) -> dict[str, Any]:
+        scores = [
+            float(item["aggregate_score"])
+            for item in packet.contract_evaluations
+            if item.get("aggregate_score") is not None
+        ]
+        criteria_totals: dict[str, list[float]] = {}
+        for item in packet.contract_evaluations:
+            for name, score in (item.get("criteria_scores") or {}).items():
+                try:
+                    criteria_totals.setdefault(name, []).append(float(score))
+                except (TypeError, ValueError):
+                    continue
+        criteria_averages = {
+            name: sum(values) / len(values) for name, values in criteria_totals.items() if values
+        }
+        lowest = sorted(criteria_averages, key=criteria_averages.get)[:3]
+        return {
+            "samples": len(scores),
+            "average_score": (sum(scores) / len(scores)) if scores else None,
+            "criteria_averages": criteria_averages,
+            "lowest_criteria": lowest,
+        }
+
+    def _contract_decision(self, packet: IterationDecisionPacket) -> str:
+        contract = packet.evaluation_contract or {}
+        summary = self._contract_evidence_summary(packet)
+        average = summary["average_score"]
+        samples = summary["samples"]
+        if average is None or samples <= 0:
+            return "keep"
+
+        disable_below = float(contract.get("disable_below_score", 0.25) or 0.25)
+        rewrite_below = float(contract.get("rewrite_below_score", 0.55) or 0.55)
+        min_disable = int(contract.get("min_samples_for_disable", 2) or 2)
+        min_rewrite = int(contract.get("min_samples_for_rewrite", 3) or 3)
+
+        if samples >= min_disable and average <= disable_below:
+            return "disable"
+        if samples >= min_rewrite and average <= rewrite_below:
+            return "rewrite"
+        return "keep"
+
+    @staticmethod
     def _summarise(text: str, limit: int = 160) -> str:
         compact = " ".join((text or "").split())
         if len(compact) <= limit:
@@ -549,7 +624,8 @@ class IterationHarness:
             packet.feedback or summarise_skill_feedback(packet.executions),
         )
         new_body = replace_section(body, "## Instructions", rewritten)
-        new_body = replace_section(new_body, packet.update_section, reference_content)
+        if reference_content.strip():
+            new_body = replace_section(new_body, packet.update_section, reference_content)
         return (prefix + new_body.rstrip() + "\n") if prefix else (new_body.rstrip() + "\n")
 
     def _build_rollback_content(
@@ -566,7 +642,7 @@ class IterationHarness:
         return (prefix + updated_body.rstrip() + "\n") if prefix else (updated_body.rstrip() + "\n")
 
     def _build_reference_content(self, packet: IterationDecisionPacket) -> str:
-        if not packet.top_performers and not packet.patterns:
+        if not packet.top_performers and not packet.patterns and not packet.contract_evaluations:
             return ""
         lines = [packet.update_section, ""]
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -588,6 +664,16 @@ class IterationHarness:
                 lines.append(f"- {pattern}")
             lines.append("")
 
+        if packet.contract_evaluations:
+            summary = self._contract_evidence_summary(packet)
+            lines.append("### Evaluation Contract Evidence")
+            lines.append(f"- Samples: {summary['samples']}")
+            if summary["average_score"] is not None:
+                lines.append(f"- Average score: {summary['average_score']:.2f}")
+            if summary["lowest_criteria"]:
+                lines.append(f"- Lowest criteria: {', '.join(summary['lowest_criteria'])}")
+            lines.append("")
+
         return "\n".join(lines)
 
     def _evidence_payload(self, packet: IterationDecisionPacket) -> dict[str, Any]:
@@ -598,6 +684,8 @@ class IterationHarness:
             "top_titles": [item["title"] for item in packet.top_performers],
             "patterns": list(packet.patterns),
             "execution_count": len(packet.executions),
+            "evaluation_contract": packet.evaluation_contract or {},
+            "contract_evaluation_summary": self._contract_evidence_summary(packet),
             "feedback": feedback.evidence,
             "lifecycle_events": len(packet.lifecycle_history),
         }

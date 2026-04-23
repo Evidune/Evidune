@@ -108,30 +108,35 @@ flowchart TD
     I --> J["Resolve identity, mode, facts, and matched skills"]
     J --> K["Execute with internal tools and enabled external tools"]
     K --> L["Persist messages, tool trace, skill executions, and feedback hooks"]
-    L --> M["Fact extraction by cadence"]
-    L --> N["Skill emergence: explicit requests immediately, implicit patterns by cadence"]
+    L --> X["Evaluate matched skills with their evaluation contracts"]
+    X --> M["Fact extraction by cadence"]
+    X --> N["Skill emergence: explicit requests immediately, implicit patterns by cadence"]
 
     G --> O["evidune run: offline metric-driven iteration"]
     O --> P["Load metrics and configured references"]
-    P --> Q["Analyze outcomes and build a skill decision packet"]
+    P --> Q["Build a decision packet from metrics plus contract evidence"]
     Q --> R["Update reference docs or rewrite/rollback eligible skills"]
 
     M --> S["Persist facts"]
     N --> T["Create, update, reuse, disable, or activate skill packages"]
+    X --> Y["Persist contract scores, observed signals, and missing evidence"]
     R --> U["Record iteration ledger and changed files"]
 
     S --> V["Shared memory and skill state"]
     T --> V
+    Y --> V
     U --> V
     V --> W["Next serve turn or run reloads the updated skill set"]
 ```
 
 `evidune serve` and `evidune run` are separate entry modes that share the same
-config, memory database, skill registry, and lifecycle state. `serve` handles
-interactive work: it answers user turns, uses tools, records executions, extracts
-facts, and creates or updates skills from explicit requests or repeated
-patterns. `run` handles offline outcome iteration: it reads metrics and
-reference targets, updates skill knowledge, and records an iteration ledger.
+config, memory database, skill registry, evaluation contracts, and lifecycle
+state. `serve` handles interactive work: it answers user turns, uses tools,
+records executions, evaluates matched skills against their own contracts,
+extracts facts, and creates or updates skills from explicit requests or repeated
+patterns. `run` handles offline outcome iteration: it reads metrics, combines
+them with contract evidence, updates skill knowledge, and records an iteration
+ledger.
 
 Both paths persist into the same skill state, so the next serve turn or run
 reloads the improved skill set.
@@ -141,7 +146,15 @@ reloads the improved skill set.
 Skills are first-class runtime objects, not just extra prompt text. A skill is a
 standard package with `SKILL.md` and optional `scripts/*.md` plus
 `references/*.md`. The registry loads project skills, active generated skills,
-their lifecycle status, match reasons, references, scripts, and runtime metadata.
+their lifecycle status, match reasons, references, scripts, evaluation contract,
+and runtime metadata.
+
+Each skill can carry an `evaluation_contract` in `SKILL.md` frontmatter. The
+contract defines success criteria, observable signals, failure modes, scoring
+thresholds, and sample counts for rewrite or disable decisions. New generated
+skills include a contract and `references/evaluation-contract.md`; legacy skills
+without a contract can have one discovered on first matched execution and stored
+in SQLite or written back when `skills.auto_update` allows it.
 
 Evidune improves skills through two paths:
 
@@ -153,9 +166,9 @@ Evidune improves skills through two paths:
   keeps normal Q&A conservative while still letting useful workflows emerge from
   real conversations.
 - In `evidune run`, metrics and configured references drive offline iteration.
-  The run analyzes strong and weak outcomes, then updates reference sections,
-  rewrites eligible outcome-tracked skills, or rolls back/disable states when
-  evidence is negative.
+  The run analyzes strong and weak outcomes plus contract evaluation evidence,
+  then updates reference sections, rewrites eligible outcome-tracked skills, or
+  rolls back/disable states when evidence is negative.
 - All changes are persisted in SQLite and skill package files. Restarting
   `serve` reloads active generated skills and lifecycle state before the next
   turn.

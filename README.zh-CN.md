@@ -103,25 +103,28 @@ flowchart TD
     I --> J["解析 identity、mode、facts 和匹配 skills"]
     J --> K["使用内部工具和已开启的 external tools 执行"]
     K --> L["持久化消息、tool trace、skill executions 和反馈入口"]
-    L --> M["按 cadence 做 fact extraction"]
-    L --> N["skill emergence：显式请求立即触发，隐式模式按 cadence 触发"]
+    L --> X["按各 skill 的 evaluation contract 评价执行结果"]
+    X --> M["按 cadence 做 fact extraction"]
+    X --> N["skill emergence：显式请求立即触发，隐式模式按 cadence 触发"]
 
     G --> O["evidune run：离线指标驱动迭代"]
     O --> P["读取 metrics 和配置的 references"]
-    P --> Q["分析结果并组装 skill decision packet"]
+    P --> Q["用 metrics 和 contract evidence 组装 decision packet"]
     Q --> R["更新参考文档，或重写/回滚 eligible skills"]
 
     M --> S["持久化 facts"]
     N --> T["创建、更新、复用、禁用或激活 skill 包"]
+    X --> Y["持久化 contract 评分、观测信号和缺失证据"]
     R --> U["记录 iteration ledger 和变更文件"]
 
     S --> V["共享 memory 和 skill state"]
     T --> V
+    Y --> V
     U --> V
     V --> W["下一次 serve turn 或 run 会重新加载更新后的技能集"]
 ```
 
-`evidune serve` 和 `evidune run` 是两种独立入口，但共享同一套 config、memory database、skill registry 和生命周期状态。`serve` 处理交互任务：回答用户消息、使用工具、记录执行、抽取事实，并根据显式请求或重复模式创建/更新 skill。`run` 处理离线结果迭代：读取指标和参考文档目标，更新 skill 知识，并记录 iteration ledger。
+`evidune serve` 和 `evidune run` 是两种独立入口，但共享同一套 config、memory database、skill registry、evaluation contracts 和生命周期状态。`serve` 处理交互任务：回答用户消息、使用工具、记录执行、按 skill 自己的 contract 评价结果、抽取事实，并根据显式请求或重复模式创建/更新 skill。`run` 处理离线结果迭代：读取指标，把它们和 contract evidence 合并进决策包，更新 skill 知识，并记录 iteration ledger。
 
 两条路径最终都会写入同一份 skill state，所以下一次 serve turn 或 run 都会重新加载改进后的技能集。
 
@@ -129,8 +132,14 @@ flowchart TD
 
 Skill 是运行时的一等对象，不只是附加 prompt。一个 skill 是标准包：
 `SKILL.md` 加可选的 `scripts/*.md` 和 `references/*.md`。Registry 会加载项目
-skills、active generated skills、生命周期状态、匹配原因、references、scripts 和
-运行时元数据。
+skills、active generated skills、生命周期状态、匹配原因、references、scripts、
+evaluation contract 和运行时元数据。
+
+每个 skill 都可以在 `SKILL.md` frontmatter 中带 `evaluation_contract`。这个契约
+定义成功标准、可观测信号、失败模式、评分阈值，以及触发 rewrite/disable 需要的样本数。
+新生成的 skill 会自带 contract 和 `references/evaluation-contract.md`；旧 skill
+第一次被匹配执行且缺少 contract 时，会自动发现 runtime contract，并在
+`skills.auto_update` 允许时写回 `SKILL.md`，否则只落 SQLite。
 
 Evidune 通过两条路径改进 skill：
 
@@ -139,9 +148,9 @@ Evidune 通过两条路径改进 skill：
   skill；写入 skill 包；解析成功后激活；并在响应里返回 `skill_creation` metadata。
 - 在 `evidune serve` 中，隐式重复模式按 cadence 检测。这样普通问答不会过度生成
   skill，但真实对话里反复出现的有效 workflow 仍然可以沉淀。
-- 在 `evidune run` 中，metrics 和配置的 references 驱动离线迭代。系统会分析好坏
-  outcome，更新 reference sections，重写 eligible outcome-tracked skills，或在负面
-  证据足够时回滚/禁用。
+- 在 `evidune run` 中，metrics、配置的 references 和 contract evaluation evidence
+  共同驱动离线迭代。系统会分析好坏 outcome，更新 reference sections，重写
+  eligible outcome-tracked skills，或在负面证据足够时回滚/禁用。
 - 所有变化都会持久化到 SQLite 和 skill 包文件。`serve` 重启后，会在下一轮对话前
   重新加载 active generated skills 和生命周期状态。
 

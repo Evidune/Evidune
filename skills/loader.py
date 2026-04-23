@@ -14,7 +14,7 @@ A skill can be:
 
 SKILL.md frontmatter supports:
   name, description, version, tags, triggers, anti_triggers,
-  outcome_metrics, update_section, plus arbitrary meta fields.
+  outcome_metrics, update_section, evaluation_contract, plus arbitrary meta fields.
 
 The markdown body may contain "## Triggers", "## Anti-Triggers",
 and "## Examples" sections that augment the frontmatter.
@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from skills.evaluation import EvaluationContract, parse_evaluation_contract
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
@@ -46,6 +48,7 @@ class Skill:
     anti_triggers: list[str] = field(default_factory=list)
     outcome_metrics: bool = False  # Evidune-specific: participates in iteration
     update_section: str = "## Reference Data"
+    evaluation_contract: EvaluationContract | None = None
     instructions: str = ""  # Full markdown body of SKILL.md
     examples: list[str] = field(default_factory=list)  # Parsed "## Examples" entries
     references: dict[str, str] = field(default_factory=dict)  # filename → content
@@ -212,6 +215,7 @@ def parse_skill(path: str | Path) -> Skill:
         "anti_triggers",
         "outcome_metrics",
         "update_section",
+        "evaluation_contract",
     }
 
     return Skill(
@@ -224,6 +228,7 @@ def parse_skill(path: str | Path) -> Skill:
         anti_triggers=anti_triggers,
         outcome_metrics=frontmatter.get("outcome_metrics", False),
         update_section=frontmatter.get("update_section", "## Reference Data"),
+        evaluation_contract=parse_evaluation_contract(frontmatter.get("evaluation_contract")),
         instructions=body,
         examples=examples,
         references=references,

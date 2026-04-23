@@ -14,6 +14,32 @@ triggers:
   - 接入 API
   - 调试服务
 outcome_metrics: false
+evaluation_contract:
+  version: 1
+  min_pass_score: 0.7
+  rewrite_below_score: 0.55
+  disable_below_score: 0.25
+  min_samples_for_rewrite: 3
+  min_samples_for_disable: 2
+  criteria:
+    - name: implementation_progress
+      description: The response performs or clearly scopes concrete code changes.
+      weight: 0.35
+    - name: verification_quality
+      description: The result is validated with relevant tests, commands, logs, or explicit blockers.
+      weight: 0.35
+    - name: change_safety
+      description: The work preserves unrelated changes and respects tool/security boundaries.
+      weight: 0.3
+  observable_metrics:
+    - name: validation_command_recorded
+      description: A validation command, test result, or explicit inability to validate is recorded.
+      source: execution_metadata
+      weight: 0.3
+  failure_modes:
+    - unverified_code_claim
+    - overwrote_unrelated_changes
+    - ignored_tool_boundary
 ---
 
 ## Instructions

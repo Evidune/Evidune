@@ -13,6 +13,32 @@ triggers:
   - 创建能力
   - 更新 skill
 outcome_metrics: false
+evaluation_contract:
+  version: 1
+  min_pass_score: 0.7
+  rewrite_below_score: 0.55
+  disable_below_score: 0.25
+  min_samples_for_rewrite: 3
+  min_samples_for_disable: 2
+  criteria:
+    - name: transaction_outcome
+      description: The request is resolved as created, updated, reused, queued, or failed with a concrete reason.
+      weight: 0.4
+    - name: package_quality
+      description: Created or updated skills use SKILL.md plus Markdown scripts and references.
+      weight: 0.3
+    - name: lifecycle_clarity
+      description: The response and metadata explain lifecycle state and next availability.
+      weight: 0.3
+  observable_metrics:
+    - name: skill_creation_metadata
+      description: Response metadata includes the skill creation status when a transaction occurred.
+      source: execution_metadata
+      weight: 0.3
+  failure_modes:
+    - generic_advice_instead_of_transaction
+    - duplicate_skill_created
+    - missing_lifecycle_reason
 ---
 
 ## Instructions

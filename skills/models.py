@@ -23,6 +23,7 @@ class SkillRecord:
     references: list[str] = field(default_factory=list)
     triggers: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    evaluation_contract: dict | None = None
     created_at: str = ""
     updated_at: str = ""
     last_loaded_at: str = ""

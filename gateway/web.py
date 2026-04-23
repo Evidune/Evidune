@@ -371,6 +371,7 @@ class WebGateway(Gateway):
             "execution_ids": response.metadata.get("execution_ids", []),
             "emerged_skill": response.metadata.get("emerged_skill"),
             "skill_creation": response.metadata.get("skill_creation"),
+            "skill_evaluations": response.metadata.get("skill_evaluations", []),
             "facts_extracted": response.metadata.get("facts_extracted", 0),
             "identity": response.metadata.get("identity"),
             "mode": response.metadata.get("mode"),

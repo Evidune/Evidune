@@ -129,6 +129,32 @@ triggers:
   - turn this repeated workflow into a skill
 outcome_metrics: true
 update_section: "## Reference Data"
+evaluation_contract:
+  version: 1
+  min_pass_score: 0.7
+  rewrite_below_score: 0.55
+  disable_below_score: 0.25
+  min_samples_for_rewrite: 3
+  min_samples_for_disable: 2
+  criteria:
+    - name: goal_completion
+      description: The response completes the user's requested operational outcome.
+      weight: 0.4
+    - name: tool_grounding
+      description: Claims and decisions are grounded in available tool output or explicit limits.
+      weight: 0.35
+    - name: durable_learning
+      description: Reusable lessons are captured or routed to skill creation when appropriate.
+      weight: 0.25
+  observable_metrics:
+    - name: relevant_tool_trace
+      description: Relevant tool calls or an explicit no-tool limitation are present.
+      source: tool_trace
+      weight: 0.3
+  failure_modes:
+    - skipped_required_verification
+    - hallucinated_external_state
+    - failed_to_capture_reusable_workflow
 ---
 
 ## Instructions
@@ -149,6 +175,25 @@ This section is replaced by `evidune run` after each iteration cycle.
 
 This file is updated by the local iteration loop after each run.
 """,
+    "skills/task-execution/references/evaluation-contract.md": """# task-execution Evaluation Contract
+
+## Success Criteria
+
+- Complete the user's operational outcome.
+- Ground claims in tool output, user-provided data, or explicit uncertainty.
+- Capture reusable lessons in memory, references, or a skill transaction when appropriate.
+
+## Observable Signals
+
+- Tool trace shows relevant inspection, validation, or a clear no-tool limitation.
+- Execution metadata and user feedback support whether the task was completed.
+
+## Failure Modes
+
+- Skipped required verification.
+- Hallucinated current external state.
+- Failed to capture an obviously reusable workflow.
+""",
     "skills/skill-agent/SKILL.md": """---
 name: skill-agent
 description: Create, update, reuse, and diagnose Claude/OpenClaw-style skill packages
@@ -161,6 +206,32 @@ triggers:
   - 建立 skill
   - 创建能力
 outcome_metrics: false
+evaluation_contract:
+  version: 1
+  min_pass_score: 0.7
+  rewrite_below_score: 0.55
+  disable_below_score: 0.25
+  min_samples_for_rewrite: 3
+  min_samples_for_disable: 2
+  criteria:
+    - name: transaction_outcome
+      description: The request is resolved as created, updated, reused, queued, or failed with a concrete reason.
+      weight: 0.4
+    - name: package_quality
+      description: Created or updated skills use SKILL.md plus Markdown scripts and references.
+      weight: 0.3
+    - name: lifecycle_clarity
+      description: The response and metadata explain lifecycle state and next availability.
+      weight: 0.3
+  observable_metrics:
+    - name: skill_creation_metadata
+      description: Response metadata includes the skill creation status when a transaction occurred.
+      source: execution_metadata
+      weight: 0.3
+  failure_modes:
+    - generic_advice_instead_of_transaction
+    - duplicate_skill_created
+    - missing_lifecycle_reason
 ---
 
 ## Instructions
@@ -172,6 +243,25 @@ Treat skills as first-class runtime objects:
 3. Keep generated scripts prompt-readable unless the user explicitly asks for executable code.
 4. Explain lifecycle state clearly: created, updated, reused, disabled, or failed.
 5. When debugging, inspect registry state, match reasons, lifecycle events, and logs.
+""",
+    "skills/skill-agent/references/evaluation-contract.md": """# skill-agent Evaluation Contract
+
+## Success Criteria
+
+- Explicit skill requests resolve through a skill transaction instead of generic advice.
+- Created or updated skills use `SKILL.md`, Markdown `scripts/`, and Markdown `references/`.
+- Lifecycle status is visible as created, updated, reused, queued, or failed with a concrete reason.
+
+## Observable Signals
+
+- Response metadata includes `skill_creation` when a transaction occurred.
+- The skill registry and lifecycle tables reflect successful creation or update.
+
+## Failure Modes
+
+- Generic prose answer instead of a transaction.
+- Duplicate skill created when an active similar skill exists.
+- Missing lifecycle reason for failure or reuse.
 """,
     "skills/code-implementation/SKILL.md": """---
 name: code-implementation
@@ -187,6 +277,32 @@ triggers:
   - 修改代码
   - 接入 API
 outcome_metrics: false
+evaluation_contract:
+  version: 1
+  min_pass_score: 0.7
+  rewrite_below_score: 0.55
+  disable_below_score: 0.25
+  min_samples_for_rewrite: 3
+  min_samples_for_disable: 2
+  criteria:
+    - name: implementation_progress
+      description: The response performs or clearly scopes concrete code changes.
+      weight: 0.35
+    - name: verification_quality
+      description: The result is validated with relevant tests, commands, logs, or explicit blockers.
+      weight: 0.35
+    - name: change_safety
+      description: The work preserves unrelated changes and respects tool/security boundaries.
+      weight: 0.3
+  observable_metrics:
+    - name: validation_command_recorded
+      description: A validation command, test result, or explicit inability to validate is recorded.
+      source: execution_metadata
+      weight: 0.3
+  failure_modes:
+    - unverified_code_claim
+    - overwrote_unrelated_changes
+    - ignored_tool_boundary
 ---
 
 ## Instructions
@@ -198,6 +314,25 @@ Use this skill when the task requires concrete implementation:
 3. Run the narrowest useful validation first, then broader checks when needed.
 4. Report exact commands, changed files, and any remaining risk.
 5. If runtime tools are unavailable, state that as a blocker instead of pretending execution happened.
+""",
+    "skills/code-implementation/references/evaluation-contract.md": """# code-implementation Evaluation Contract
+
+## Success Criteria
+
+- Perform or precisely scope concrete code changes.
+- Report validation commands, test results, logs, or explicit blockers.
+- Preserve unrelated work and configured tool boundaries.
+
+## Observable Signals
+
+- Tool trace shows file inspection, edits, command execution, or a clear no-tool limitation.
+- Execution metadata records validation status and remaining risk.
+
+## Failure Modes
+
+- Claimed code changes without evidence.
+- Overwrote unrelated user work.
+- Ignored configured shell, file, or network boundaries.
 """,
 }
 

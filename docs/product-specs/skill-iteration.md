@@ -8,11 +8,16 @@ Skill iteration has two loops:
 - `evidune run`: outcome-driven updates to existing skills
 - `evidune serve`: conversation-driven emergence of new skills
 
+Both loops share skill-specific evaluation contracts. A contract can be authored
+in `SKILL.md`, generated with a new skill, or discovered at runtime for legacy
+skills. It defines the success criteria, observable signals, failure modes, and
+thresholds that govern future rewrite, rollback, and disable decisions.
+
 In `serve`, skills are first-class runtime objects. A skill has a parsed
 `SKILL.md` package, lifecycle state, source, path, version, loaded resources,
-matching diagnostics, and API/UI representation. Chat does not treat skills as
-hidden prompt fragments; the runtime can explain which skills were visible,
-matched, created, updated, reused, or skipped.
+matching diagnostics, evaluation contract, and API/UI representation. Chat does
+not treat skills as hidden prompt fragments; the runtime can explain which
+skills were visible, matched, created, updated, reused, evaluated, or skipped.
 
 ## Target Behavior
 
@@ -34,7 +39,31 @@ evidence layer and the skill definition itself.
   `lifecycle_arbiter`
 - The workflow consumes one unified decision packet that includes origin,
   current content, metrics evidence, recent executions, aggregated feedback,
-  evaluator scores, and lifecycle history
+  evaluator scores, evaluation contract evidence, and lifecycle history
+
+### Contract-Driven Evaluation
+
+Every skill may define an `evaluation_contract` in frontmatter. The runtime
+accepts legacy skills without a contract, but the first matched execution
+discovers a runtime contract through the evaluator. If `skills.auto_update` is
+true and the skill file is writable, that contract is written back to
+`SKILL.md`; otherwise SQLite stores it as the active runtime contract.
+
+- New synthesized skills must include machine-readable frontmatter plus
+  `references/evaluation-contract.md` for human review
+- The contract includes fixed governance fields: `version`, `criteria`,
+  `observable_metrics`, `failure_modes`, `min_pass_score`,
+  `rewrite_below_score`, `disable_below_score`, `min_samples_for_rewrite`, and
+  `min_samples_for_disable`
+- `serve` evaluates matched skill executions against the contract and persists
+  aggregate score, per-criterion scores, observed metrics, missing
+  observations, and reasoning
+- `skill_executions.cross_model_score` remains the compatibility aggregate
+  score, while `skill_evaluations` stores the full contract-aware evidence
+- `run` and `serve` governance both consume the same contract evidence; external
+  metrics remain useful but are not the only source of evaluation
+- If no contract criteria can be scored, the evaluator falls back to the generic
+  0-1 score path rather than blocking execution
 
 ### Conversation Emergence
 
@@ -50,6 +79,8 @@ become active skills by default.
   `agent.emergence.output_dir`, and added to the live registry immediately
 - Emerged packages use the standard directory layout: `SKILL.md`,
   prompt-readable `scripts/*.md`, and `references/*.md`
+- Emerged packages include an evaluation contract and a human-readable
+  `references/evaluation-contract.md`
 - Active emerged skills must be loaded again on later process starts so the
   behavior survives restart
 - Name collisions and high-similarity candidates are resolved before writing:
@@ -85,8 +116,10 @@ Feedback and evaluation signals must feed the same decision loop.
 
 - Web feedback signals such as `thumbs_up`, `thumbs_down`, `copied`,
   `regenerated`, and explicit rating must influence keep or rewrite decisions
-- Cross-model evaluator scores must influence creation, promotion, rewrite, and
-  rollback decisions
+- Contract-aware evaluator scores must influence creation, promotion, rewrite,
+  rollback, and disable decisions
+- Each decision packet must include contract thresholds, criteria averages,
+  failure modes, evaluation sample counts, and lowest-scoring criteria
 - No signal type should be stored indefinitely without affecting a future skill
   decision
 - `evidune run`, automatic feedback reconciliation in `serve`, and the web
@@ -99,6 +132,10 @@ Feedback and evaluation signals must feed the same decision loop.
 - The same skill is still available after process restart
 - Negative feedback or evaluator scores can disable or roll back both base and
   emerged skills
+- A legacy skill without frontmatter contract gets a runtime contract on first
+  matched execution, and that contract appears in SQLite or `SKILL.md`
+- Repeated low contract scores can rewrite or disable a skill even when no
+  external metrics are configured
 - An outcome-tracked skill can rewrite its core instructions, not only replace a
   reference section
 - Every automatic change leaves an auditable record that explains why it

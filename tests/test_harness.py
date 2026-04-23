@@ -242,6 +242,122 @@ def test_iteration_harness_rewrites_skill(tmp_path: Path, memory: MemoryStore):
     assert "Auto-updated by evidune" in updated
 
 
+def test_iteration_harness_rewrites_from_contract_evidence_without_metrics(
+    tmp_path: Path, memory: MemoryStore
+):
+    skill_path = _write(
+        tmp_path / "skills" / "triage" / "SKILL.md",
+        "---\nname: triage\ndescription: Triage incidents\noutcome_metrics: true\n---\n"
+        "## Instructions\nDiagnose with evidence.\n\n## Reference Data\nplaceholder\n",
+    )
+    registry = SkillRegistry()
+    registry.load_directory(tmp_path / "skills")
+    skill = registry.get("triage")
+    memory.upsert_skill_evaluation_contract(
+        "triage",
+        {
+            "version": 1,
+            "criteria": [
+                {"name": "goal_completion", "description": "Triage completed", "weight": 1.0}
+            ],
+            "observable_metrics": [],
+            "failure_modes": ["skipped_required_verification"],
+            "min_pass_score": 0.7,
+            "rewrite_below_score": 0.55,
+            "disable_below_score": 0.25,
+            "min_samples_for_rewrite": 3,
+            "min_samples_for_disable": 2,
+        },
+    )
+    for score in [0.4, 0.5, 0.52]:
+        execution_id = memory.record_execution(
+            skill_name="triage",
+            user_input="incident",
+            assistant_output="restart",
+        )
+        memory.record_skill_evaluation(
+            execution_id=execution_id,
+            skill_name="triage",
+            aggregate_score=score,
+            criteria_scores={"goal_completion": score},
+            missing_observations=["tool trace"],
+            reasoning="Under-verified",
+        )
+
+    workflow = IterationHarness(memory)
+    decision = workflow.run(
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            result=SimpleNamespace(top_performers=[], patterns=[]),
+            surface="run",
+            task_kind="skill_iteration",
+        )
+    )
+
+    assert decision.decision == "rewrite"
+    updated = skill_path.read_text(encoding="utf-8")
+    assert "Evaluation Contract Evidence" in updated
+    assert "Average score" in updated
+
+
+def test_iteration_harness_disables_from_contract_threshold(tmp_path: Path, memory: MemoryStore):
+    skill_path = _write(
+        tmp_path / "skills" / "emerged-low" / "SKILL.md",
+        "---\nname: emerged-low\ndescription: Low scorer\noutcome_metrics: true\n---\n"
+        "## Instructions\nHelp.\n\n## Reference Data\nplaceholder\n",
+    )
+    registry = SkillRegistry()
+    registry.load_directory(tmp_path / "skills")
+    skill = registry.get("emerged-low")
+    memory.register_emerged_skill(name="emerged-low", status="active", path=str(skill_path))
+    memory.upsert_skill_evaluation_contract(
+        "emerged-low",
+        {
+            "version": 1,
+            "criteria": [
+                {"name": "goal_completion", "description": "Goal completed", "weight": 1.0}
+            ],
+            "observable_metrics": [],
+            "failure_modes": [],
+            "min_pass_score": 0.7,
+            "rewrite_below_score": 0.55,
+            "disable_below_score": 0.25,
+            "min_samples_for_rewrite": 3,
+            "min_samples_for_disable": 2,
+        },
+    )
+    for score in [0.2, 0.22]:
+        execution_id = memory.record_execution(
+            skill_name="emerged-low",
+            user_input="help",
+            assistant_output="generic",
+        )
+        memory.record_skill_evaluation(
+            execution_id=execution_id,
+            skill_name="emerged-low",
+            aggregate_score=score,
+            criteria_scores={"goal_completion": score},
+            reasoning="Fails the goal",
+        )
+
+    decision = IterationHarness(memory).run(
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            result=SimpleNamespace(top_performers=[], patterns=[]),
+            surface="run",
+            task_kind="skill_iteration",
+        )
+    )
+
+    assert decision.decision == "disable"
+    assert memory.get_emerged_skill("emerged-low")["status"] == "disabled"
+    assert memory.get_skill_state("emerged-low")["status"] == "disabled"
+
+
 def test_iteration_harness_disables_negative_emerged_skill(tmp_path: Path, memory: MemoryStore):
     skill_path = _write(
         tmp_path / "skills" / "emerged" / "SKILL.md",

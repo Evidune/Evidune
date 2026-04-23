@@ -5,6 +5,7 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from skills.evaluation import contract_summary
 from skills.loader import Skill, load_skills_from_dir
 from skills.models import (
     SkillMatch,
@@ -72,6 +73,7 @@ class SkillRegistry:
             references=sorted(skill.references.keys()),
             triggers=list(skill.triggers),
             tags=list(skill.tags),
+            evaluation_contract=contract_summary(skill.evaluation_contract),
             created_at=loaded_at,
             updated_at=loaded_at,
             last_loaded_at=loaded_at,

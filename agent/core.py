@@ -28,6 +28,11 @@ from gateway.base import InboundMessage, OutboundMessage
 from identities.loader import Identity
 from identities.registry import IdentityRegistry
 from memory.store import MemoryStore
+from skills.evaluation import (
+    contract_summary,
+    parse_evaluation_contract,
+    upsert_contract_frontmatter,
+)
 from skills.loader import Skill, parse_skill
 from skills.models import SkillMatch
 from skills.registry import SkillRegistry
@@ -73,6 +78,11 @@ class EmergenceDecision:
     resolver_action: str = ""
     duplicate_of: str = ""
     load_error: str = ""
+    evaluation_contract_status: str = ""
+    aggregate_score: float | None = None
+    lowest_criteria: str = ""
+    observed_metric_count: int = 0
+    evaluation_samples: int = 0
 
 
 class AgentCore:
@@ -100,6 +110,7 @@ class AgentCore:
         title_after_turns: int = 3,
         tool_registry: ToolRegistry | None = None,
         max_tool_iterations: int = 8,
+        skill_contract_auto_update: bool = True,
         harness_config: object | None = None,
         base_dir: Path | None = None,
         config_path: Path | None = None,
@@ -128,6 +139,7 @@ class AgentCore:
         self.title_after_turns = title_after_turns
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
+        self.skill_contract_auto_update = skill_contract_auto_update
         self.harness_config = harness_config
         self.base_dir = Path(base_dir) if base_dir is not None else None
         self.config_path = Path(config_path) if config_path is not None else None
@@ -454,8 +466,31 @@ class AgentCore:
             "resolver_action": decision.resolver_action,
             "duplicate_of": decision.duplicate_of,
             "load_error": decision.load_error,
+            "evaluation_contract_status": decision.evaluation_contract_status,
+            "aggregate_score": decision.aggregate_score,
+            "lowest_criteria": decision.lowest_criteria,
+            "observed_metric_count": decision.observed_metric_count,
+            "evaluation_samples": decision.evaluation_samples,
         }
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+
+    def _attach_evaluation_summary(
+        self,
+        decision: EmergenceDecision,
+        evaluations: list[dict[str, Any]],
+    ) -> None:
+        if not evaluations:
+            return
+        decision.evaluation_samples = len(evaluations)
+        latest = evaluations[-1]
+        decision.evaluation_contract_status = latest.get("contract_status", "")
+        score = latest.get("aggregate_score")
+        decision.aggregate_score = float(score) if score is not None else None
+        criteria = latest.get("criteria_scores") or {}
+        if criteria:
+            lowest = min(criteria.items(), key=lambda item: item[1])
+            decision.lowest_criteria = str(lowest[0])
+        decision.observed_metric_count = len(latest.get("observed_metrics") or {})
 
     def _attach_skill_snapshot(self, decision: EmergenceDecision, snapshot) -> None:
         """Copy registry snapshot diagnostics onto an emergence decision."""
@@ -688,6 +723,7 @@ class AgentCore:
                     "plan": current_plan,
                     "facts_extracted": extracted_count,
                     "evaluations_recorded": 0,
+                    "skill_evaluations": [],
                     "emerged_skill": emergence_decision.emerged_skill,
                     "skill_creation": emergence_decision.skill_creation,
                     "skill_lifecycle_updates": [],
@@ -787,11 +823,12 @@ class AgentCore:
                 harness_task_id=task_id,
             )
             execution_ids.append(eid)
-        evaluated_count = await self._maybe_evaluate_executions(
+        skill_evaluations = await self._maybe_evaluate_executions(
             execution_skills,
             message.text,
             response_text,
             execution_ids,
+            tool_trace=tool_trace,
         )
         lifecycle_updates = self._maybe_reconcile_skill_feedback(execution_skills)
 
@@ -809,6 +846,7 @@ class AgentCore:
             emergence_counter=current_emergence_count,
         )
         self._attach_skill_snapshot(emergence_decision, skill_snapshot)
+        self._attach_evaluation_summary(emergence_decision, skill_evaluations)
 
         # 11. Auto-title the conversation once it has enough content
         new_title = await self._maybe_generate_title(message.conversation_id)
@@ -829,7 +867,8 @@ class AgentCore:
                 "mode": mode,
                 "plan": current_plan,
                 "facts_extracted": extracted_count,
-                "evaluations_recorded": evaluated_count,
+                "evaluations_recorded": len(skill_evaluations),
+                "skill_evaluations": skill_evaluations,
                 "emerged_skill": emergence_decision.emerged_skill,
                 "skill_creation": emergence_decision.skill_creation,
                 "skill_lifecycle_updates": lifecycle_updates,
@@ -894,18 +933,26 @@ class AgentCore:
         user_input: str,
         assistant_output: str,
         execution_ids: list[int],
-    ) -> int:
+        *,
+        tool_trace: list[dict] | None = None,
+    ) -> list[dict[str, Any]]:
         """Persist cross-model evaluation scores for matched skill executions."""
         if not self.self_evaluator:
-            return 0
+            return []
 
-        saved = 0
+        saved: list[dict[str, Any]] = []
         for skill, execution_id in zip(skills, execution_ids, strict=False):
+            contract_status = await self._ensure_skill_evaluation_contract(
+                skill,
+                user_input=user_input,
+                assistant_output=assistant_output,
+            )
             try:
                 evaluation = await self.self_evaluator.evaluate(
                     skill,
                     user_input,
                     assistant_output,
+                    tool_trace=tool_trace,
                 )
             except Exception:
                 continue
@@ -914,8 +961,106 @@ class AgentCore:
                 evaluation.score,
                 evaluation.reasoning,
             ):
-                saved += 1
+                self.memory.record_skill_evaluation(
+                    execution_id=execution_id,
+                    skill_name=skill.name,
+                    aggregate_score=evaluation.score,
+                    criteria_scores=evaluation.criteria_scores,
+                    observed_metrics=evaluation.observed_metrics,
+                    missing_observations=evaluation.missing_observations,
+                    reasoning=evaluation.reasoning,
+                    contract_version=evaluation.contract_version,
+                )
+                saved.append(
+                    {
+                        "skill_name": skill.name,
+                        "execution_id": execution_id,
+                        "contract_status": contract_status,
+                        "aggregate_score": evaluation.score,
+                        "criteria_scores": evaluation.criteria_scores or {},
+                        "observed_metrics": evaluation.observed_metrics or {},
+                        "missing_observations": evaluation.missing_observations or [],
+                        "reasoning": evaluation.reasoning,
+                    }
+                )
         return saved
+
+    async def _ensure_skill_evaluation_contract(
+        self,
+        skill: Skill,
+        *,
+        user_input: str,
+        assistant_output: str,
+    ) -> str:
+        """Ensure a matched skill has an active evaluation contract."""
+        if skill.evaluation_contract is not None:
+            self.memory.upsert_skill_evaluation_contract(
+                skill.name,
+                skill.evaluation_contract.to_dict(),
+                source="skill",
+                path=str(skill.path),
+                reason="Loaded from SKILL.md frontmatter",
+            )
+            return "skill"
+
+        stored = self.memory.get_skill_evaluation_contract(skill.name)
+        if stored is not None:
+            contract = parse_evaluation_contract(stored.get("contract"))
+            if contract is not None:
+                skill.evaluation_contract = contract
+                self.skills.register(
+                    skill,
+                    source=self._skill_origin(skill.name),
+                    status=self.memory.resolve_skill_status(skill.name),
+                )
+                return stored.get("source") or "runtime"
+
+        if self.self_evaluator is None:
+            return "missing"
+
+        contract = await self.self_evaluator.discover_contract(
+            skill,
+            user_input=user_input,
+            assistant_output=assistant_output,
+        )
+        skill.evaluation_contract = contract
+        status = "runtime"
+        content_before = ""
+        content_after = ""
+        if self.skill_contract_auto_update and skill.path.is_file():
+            try:
+                content_before = skill.path.read_text(encoding="utf-8")
+                content_after = upsert_contract_frontmatter(content_before, contract)
+                if content_after != content_before:
+                    skill.path.write_text(content_after, encoding="utf-8")
+                    status = "written"
+                    self.memory.record_skill_lifecycle_event(
+                        skill.name,
+                        "contract_discover",
+                        status=self.memory.resolve_skill_status(skill.name),
+                        path=str(skill.path),
+                        harness_task_id="",
+                        reason="Discovered skill-specific evaluation contract",
+                        evidence={"contract": contract_summary(contract)},
+                        content_before=content_before,
+                        content_after=content_after,
+                    )
+            except OSError:
+                status = "runtime"
+        self.memory.upsert_skill_evaluation_contract(
+            skill.name,
+            contract.to_dict(),
+            source=status,
+            path=str(skill.path),
+            reason="Discovered skill-specific evaluation contract",
+            evidence={"contract": contract_summary(contract)},
+        )
+        self.skills.register(
+            skill,
+            source=self._skill_origin(skill.name),
+            status=self.memory.resolve_skill_status(skill.name),
+        )
+        return status
 
     def _skill_origin(self, skill_name: str) -> str:
         state = self.memory.get_skill_state(skill_name)

@@ -113,6 +113,15 @@ class MemoryStore:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    def _json_load_list(self, raw: str | None) -> list[Any]:
+        if not raw:
+            return []
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        return payload if isinstance(payload, list) else []
+
     def _normalise_emerged_skill_status(self, status: str) -> str:
         if status not in _EMERGED_SKILL_STATUSES:
             valid = ", ".join(sorted(_EMERGED_SKILL_STATUSES))
@@ -444,6 +453,13 @@ class MemoryStore:
         with self._lock:
             self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
             self._conn.execute(
+                """DELETE FROM skill_evaluations
+                   WHERE execution_id IN (
+                     SELECT id FROM skill_executions WHERE conversation_id = ?
+                   )""",
+                (conversation_id,),
+            )
+            self._conn.execute(
                 "DELETE FROM skill_executions WHERE conversation_id = ?", (conversation_id,)
             )
             task_rows = self._conn.execute(
@@ -607,6 +623,125 @@ class MemoryStore:
             )
             self._conn.commit()
             return cursor.rowcount > 0
+
+    # --- Skill Evaluation Contract API ---
+
+    def upsert_skill_evaluation_contract(
+        self,
+        skill_name: str,
+        contract: dict[str, Any],
+        *,
+        source: str = "runtime",
+        path: str = "",
+        reason: str = "",
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist the active evaluation contract for a skill."""
+        with self._lock:
+            now = self._now()
+            self._conn.execute(
+                """INSERT INTO skill_evaluation_contracts
+                   (skill_name, contract_json, source, path, reason, evidence_json,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(skill_name) DO UPDATE SET
+                     contract_json = ?,
+                     source = ?,
+                     path = ?,
+                     reason = ?,
+                     evidence_json = ?,
+                     updated_at = ?""",
+                (
+                    skill_name,
+                    self._json_dump(contract),
+                    source,
+                    path,
+                    reason,
+                    self._json_dump(evidence or {}),
+                    now,
+                    now,
+                    self._json_dump(contract),
+                    source,
+                    path,
+                    reason,
+                    self._json_dump(evidence or {}),
+                    now,
+                ),
+            )
+            self._conn.commit()
+
+    def get_skill_evaluation_contract(self, skill_name: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM skill_evaluation_contracts WHERE skill_name = ?",
+                (skill_name,),
+            ).fetchone()
+        if not row:
+            return None
+        payload = dict(row)
+        payload["contract"] = self._json_load_dict(payload.pop("contract_json", ""))
+        payload["evidence"] = self._json_load_dict(payload.pop("evidence_json", ""))
+        return payload
+
+    def record_skill_evaluation(
+        self,
+        *,
+        execution_id: int,
+        skill_name: str,
+        aggregate_score: float,
+        criteria_scores: dict[str, Any] | None = None,
+        observed_metrics: dict[str, Any] | None = None,
+        missing_observations: list[Any] | None = None,
+        reasoning: str = "",
+        contract_version: int = 1,
+    ) -> int:
+        """Persist one contract-aware evaluation result."""
+        with self._lock:
+            now = self._now()
+            cursor = self._conn.execute(
+                """INSERT INTO skill_evaluations
+                   (execution_id, skill_name, aggregate_score, criteria_scores_json,
+                    observed_metrics_json, missing_observations_json, reasoning,
+                    contract_version, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    execution_id,
+                    skill_name,
+                    aggregate_score,
+                    self._json_dump(criteria_scores or {}),
+                    self._json_dump(observed_metrics or {}),
+                    self._json_dump(missing_observations or []),
+                    reasoning,
+                    contract_version,
+                    now,
+                ),
+            )
+            self._conn.commit()
+            return cursor.lastrowid or 0
+
+    def list_skill_evaluations(self, skill_name: str, limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT * FROM skill_evaluations
+                   WHERE skill_name = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (skill_name, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            payload = dict(row)
+            payload["criteria_scores"] = self._json_load_dict(
+                payload.pop("criteria_scores_json", "")
+            )
+            payload["observed_metrics"] = self._json_load_dict(
+                payload.pop("observed_metrics_json", "")
+            )
+            payload["missing_observations"] = self._json_load_list(
+                payload.pop("missing_observations_json", "")
+            )
+            result.append(payload)
+        return result
 
     def get_skill_executions_by_id(self, execution_id: int) -> dict | None:
         """Get a single execution by id, with parsed signals."""

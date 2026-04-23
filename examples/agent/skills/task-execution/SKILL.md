@@ -14,6 +14,32 @@ triggers:
   - 验证结果
 outcome_metrics: true
 update_section: '## Reference Data'
+evaluation_contract:
+  version: 1
+  min_pass_score: 0.7
+  rewrite_below_score: 0.55
+  disable_below_score: 0.25
+  min_samples_for_rewrite: 3
+  min_samples_for_disable: 2
+  criteria:
+    - name: goal_completion
+      description: The response completes the user's requested operational outcome.
+      weight: 0.4
+    - name: tool_grounding
+      description: Claims and decisions are grounded in available tool output or explicit limits.
+      weight: 0.35
+    - name: durable_learning
+      description: Reusable lessons are captured or routed to skill creation when appropriate.
+      weight: 0.25
+  observable_metrics:
+    - name: relevant_tool_trace
+      description: Relevant tool calls or an explicit no-tool limitation are present.
+      source: tool_trace
+      weight: 0.3
+  failure_modes:
+    - skipped_required_verification
+    - hallucinated_external_state
+    - failed_to_capture_reusable_workflow
 ---
 
 ## Instructions

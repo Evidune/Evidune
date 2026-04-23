@@ -156,6 +156,68 @@ class TestSkillExecutions:
         execs = store.get_skill_executions("s", limit=5)
         assert len(execs) == 5
 
+    def test_persists_skill_evaluation_contract_and_results(self, store: MemoryStore):
+        contract = {
+            "version": 1,
+            "criteria": [
+                {"name": "goal_completion", "description": "Complete the task", "weight": 0.7}
+            ],
+            "observable_metrics": [
+                {
+                    "name": "tool_verification_used",
+                    "description": "Tool output was checked",
+                    "source": "tool_trace",
+                    "weight": 0.3,
+                }
+            ],
+            "failure_modes": ["skipped_required_verification"],
+            "min_pass_score": 0.7,
+            "rewrite_below_score": 0.55,
+            "disable_below_score": 0.25,
+            "min_samples_for_rewrite": 3,
+            "min_samples_for_disable": 2,
+        }
+        store.upsert_skill_evaluation_contract(
+            "s",
+            contract,
+            source="runtime",
+            path="/tmp/s/SKILL.md",
+            reason="discovered",
+            evidence={"source": "test"},
+        )
+        store.add_message("conv-eval", "user", "i")
+        execution_id = store.record_execution(
+            skill_name="s",
+            user_input="i",
+            assistant_output="o",
+            conversation_id="conv-eval",
+        )
+
+        evaluation_id = store.record_skill_evaluation(
+            execution_id=execution_id,
+            skill_name="s",
+            aggregate_score=0.62,
+            criteria_scores={"goal_completion": 0.7},
+            observed_metrics={"tool_verification_used": "no"},
+            missing_observations=["tool trace"],
+            reasoning="Partially complete",
+            contract_version=1,
+        )
+
+        stored = store.get_skill_evaluation_contract("s")
+        assert stored["contract"]["criteria"][0]["name"] == "goal_completion"
+        assert stored["source"] == "runtime"
+        assert stored["evidence"] == {"source": "test"}
+        evaluations = store.list_skill_evaluations("s")
+        assert evaluations[0]["id"] == evaluation_id
+        assert evaluations[0]["aggregate_score"] == 0.62
+        assert evaluations[0]["criteria_scores"] == {"goal_completion": 0.7}
+        assert evaluations[0]["observed_metrics"] == {"tool_verification_used": "no"}
+        assert evaluations[0]["missing_observations"] == ["tool trace"]
+
+        assert store.delete_conversation("conv-eval") is True
+        assert store.list_skill_evaluations("s") == []
+
 
 class TestConversationManagement:
     def test_list_empty(self, store: MemoryStore):

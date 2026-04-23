@@ -251,6 +251,28 @@ def _skill_records_payload(skill_registry, memory) -> list[dict]:
             payload["updated_at"] = emerged["updated_at"] or payload["updated_at"]
         if emerged is not None:
             payload["version"] = str(emerged["version"])
+        contract = memory.get_skill_evaluation_contract(record.name)
+        if contract is not None and not payload.get("evaluation_contract"):
+            active_contract = contract.get("contract") or {}
+            payload["evaluation_contract"] = {
+                "version": active_contract.get("version", 1),
+                "criteria": [
+                    item.get("name")
+                    for item in active_contract.get("criteria", [])
+                    if isinstance(item, dict) and item.get("name")
+                ],
+                "observable_metrics": [
+                    item.get("name")
+                    for item in active_contract.get("observable_metrics", [])
+                    if isinstance(item, dict) and item.get("name")
+                ],
+                "failure_modes": active_contract.get("failure_modes", []),
+                "min_pass_score": active_contract.get("min_pass_score", 0.7),
+                "rewrite_below_score": active_contract.get("rewrite_below_score", 0.55),
+                "disable_below_score": active_contract.get("disable_below_score", 0.25),
+                "min_samples_for_rewrite": active_contract.get("min_samples_for_rewrite", 3),
+                "min_samples_for_disable": active_contract.get("min_samples_for_disable", 2),
+            }
         payload_by_name[record.name] = payload
 
     for state in memory.list_skill_states():
@@ -589,11 +611,9 @@ async def serve(
             )
         return llm
 
-    self_evaluator = None
-    if config.agent.evaluator:
-        from agent.self_evaluator import SelfEvaluator
+    from agent.self_evaluator import SelfEvaluator
 
-        self_evaluator = SelfEvaluator(judge=_build_judge())
+    self_evaluator = SelfEvaluator(judge=_build_judge())
 
     # Fact extraction is a core serve capability.
     from agent.fact_extractor import FactExtractor
@@ -671,6 +691,7 @@ async def serve(
         emergence_min_confidence=config.agent.emergence.min_confidence,
         title_generator=title_generator,
         tool_registry=tool_registry,
+        skill_contract_auto_update=config.skills.auto_update,
         harness_config=config.agent.harness,
         base_dir=base_dir,
         config_path=config_path,

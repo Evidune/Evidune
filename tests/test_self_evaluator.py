@@ -3,6 +3,7 @@
 import pytest
 
 from agent.self_evaluator import Evaluation, SelfEvaluator, _parse_response
+from skills.evaluation import EvaluationContract, EvaluationCriterion, ObservableMetric
 from skills.loader import Skill
 from tests.conftest import MockJudge
 
@@ -11,13 +12,28 @@ def _make_skill() -> Skill:
     from pathlib import Path
 
     return Skill(
-        name="write-article",
-        description="Write a Zhihu article",
+        name="incident-triage",
+        description="Triage an operational incident",
         path=Path("/tmp/SKILL.md"),
-        triggers=["user wants a Zhihu article"],
+        triggers=["user reports an incident"],
         anti_triggers=["user wants code"],
-        instructions="Write 2000-4000 words. Be concrete.",
+        instructions="Identify likely causes, evidence needed, and next actions.",
     )
+
+
+def _make_contract_skill() -> Skill:
+    skill = _make_skill()
+    skill.evaluation_contract = EvaluationContract(
+        criteria=[
+            EvaluationCriterion("goal_completion", "Completes the requested outcome", 0.6),
+            EvaluationCriterion("evidence_quality", "Uses evidence", 0.4),
+        ],
+        observable_metrics=[
+            ObservableMetric("tool_verification_used", "Tool evidence was checked", "tool_trace")
+        ],
+        failure_modes=["skipped_required_verification"],
+    )
+    return skill
 
 
 class TestParseResponse:
@@ -74,9 +90,9 @@ class TestSelfEvaluator:
         await evaluator.evaluate(skill, "input here", "output here")
 
         prompt = judge.last_messages[0]["content"]
-        assert "write-article" in prompt
-        assert "Write a Zhihu article" in prompt
-        assert "user wants a Zhihu article" in prompt
+        assert "incident-triage" in prompt
+        assert "Triage an operational incident" in prompt
+        assert "user reports an incident" in prompt
         assert "user wants code" in prompt
         assert "input here" in prompt
         assert "output here" in prompt
@@ -110,3 +126,46 @@ class TestSelfEvaluator:
         prompt = judge.last_messages[0]["content"]
         # Should be truncated to ≤3000 occurrences (template has none)
         assert prompt.count("🚀") <= 3000
+
+    @pytest.mark.asyncio
+    async def test_contract_aware_evaluation_returns_details(self):
+        judge = MockJudge(
+            """{
+              "aggregate_score": 0.64,
+              "criteria_scores": {
+                "goal_completion": {"score": 0.7, "reasoning": "Mostly complete"},
+                "evidence_quality": {"score": 0.55, "reasoning": "Weak evidence"}
+              },
+              "observed_metrics": {"tool_verification_used": "no"},
+              "missing_observations": ["tool trace"],
+              "reasoning": "Useful but under-verified."
+            }"""
+        )
+        evaluator = SelfEvaluator(judge)
+        skill = _make_contract_skill()
+
+        result = await evaluator.evaluate(
+            skill,
+            "debug this incident",
+            "Try restarting it.",
+            tool_trace=[],
+        )
+
+        assert result.score == 0.64
+        assert result.criteria_scores["evidence_quality"] == 0.55
+        assert result.observed_metrics["tool_verification_used"] == "no"
+        assert result.missing_observations == ["tool trace"]
+        prompt = judge.last_messages[0]["content"]
+        assert "Evaluation Contract" in prompt
+        assert "goal_completion" in prompt
+
+    @pytest.mark.asyncio
+    async def test_discover_contract_falls_back_to_default(self):
+        judge = MockJudge('{"score": 0.5, "reasoning": "not a contract"}')
+        evaluator = SelfEvaluator(judge)
+        skill = _make_skill()
+
+        contract = await evaluator.discover_contract(skill, "input", "output")
+
+        assert contract.criteria
+        assert contract.criteria[0].name == "goal_completion"

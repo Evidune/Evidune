@@ -23,6 +23,11 @@ from typing import Any
 from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern
 from agent.utils import format_conversation, strip_code_fence
+from skills.evaluation import (
+    default_contract_for_skill,
+    parse_evaluation_contract,
+    upsert_contract_frontmatter,
+)
 from skills.loader import Skill
 
 DEFAULT_OUTPUT_DIR = Path.home() / ".evidune" / "emerged_skills"
@@ -67,6 +72,7 @@ Required files:
 - SKILL.md
 - scripts/checklist.md
 - references/source-notes.md
+- references/evaluation-contract.md
 
 Allowed paths:
 - SKILL.md
@@ -85,6 +91,9 @@ SKILL.md must contain:
    - triggers: list of 2-4 phrases that should activate this skill
    - anti_triggers: list of 1-3 phrases that should NOT activate it
    - outcome_metrics: false (this skill emerged from chat, not from outcome data)
+   - evaluation_contract with version, criteria, observable_metrics, failure_modes,
+     min_pass_score, rewrite_below_score, disable_below_score,
+     min_samples_for_rewrite, and min_samples_for_disable
 2. ## Instructions section: 5-15 actionable rules an LLM should follow when invoked
 3. ## Examples section with at least 1 example (### Example 1: ...)
 4. ## Reference Data section (placeholder for future iteration)
@@ -94,6 +103,8 @@ are not executable code.
 
 references/*.md should contain durable background notes, source categories,
 examples, or operating constraints extracted from the conversation.
+references/evaluation-contract.md must explain the contract in human-readable
+terms: success criteria, observable signals, failure modes, and thresholds.
 
 Be concrete and useful. Do not include placeholder text like "TODO" or
 "fill this in later". The skill should work on day one.
@@ -126,6 +137,24 @@ def _default_reference(pattern: DetectedPattern) -> str:
         f"# {pattern.suggested_name} Source Notes\n\n"
         f"Description: {description}\n\n"
         f"Detection rationale: {rationale}\n"
+    )
+
+
+def _default_evaluation_reference(pattern: DetectedPattern) -> str:
+    contract = default_contract_for_skill(pattern.suggested_name, pattern.description)
+    criteria = "\n".join(f"- {item.name}: {item.description}" for item in contract.criteria)
+    observables = "\n".join(
+        f"- {item.name} ({item.source}): {item.description}" for item in contract.observable_metrics
+    )
+    failures = "\n".join(f"- {item}" for item in contract.failure_modes)
+    return (
+        f"# {pattern.suggested_name} Evaluation Contract\n\n"
+        "## Success Criteria\n\n"
+        f"{criteria}\n\n"
+        "## Observable Signals\n\n"
+        f"{observables}\n\n"
+        "## Failure Modes\n\n"
+        f"{failures}\n"
     )
 
 
@@ -175,10 +204,31 @@ def _parse_file_bundle(raw: str, pattern: DetectedPattern) -> dict[str, str] | N
 
 
 def _ensure_standard_support_files(files: dict[str, str], pattern: DetectedPattern) -> None:
+    _ensure_evaluation_contract(files, pattern)
     if not any(path.startswith("scripts/") for path in files):
         files["scripts/checklist.md"] = _default_script(pattern)
     if not any(path.startswith("references/") for path in files):
         files["references/source-notes.md"] = _default_reference(pattern)
+    if "references/evaluation-contract.md" not in files:
+        files["references/evaluation-contract.md"] = _default_evaluation_reference(pattern)
+
+
+def _ensure_evaluation_contract(files: dict[str, str], pattern: DetectedPattern) -> None:
+    skill_md = files.get("SKILL.md", "")
+    if not skill_md.strip():
+        return
+    from yaml import YAMLError, safe_load
+
+    contract = None
+    if skill_md.startswith("---"):
+        try:
+            frontmatter = safe_load(skill_md.split("---", 2)[1]) or {}
+            contract = parse_evaluation_contract(frontmatter.get("evaluation_contract"))
+        except (IndexError, YAMLError):
+            contract = None
+    if contract is None:
+        contract = default_contract_for_skill(pattern.suggested_name, pattern.description)
+        files["SKILL.md"] = upsert_contract_frontmatter(skill_md, contract)
 
 
 def _safe_bundle_path(rel_path: str) -> bool:

@@ -181,6 +181,45 @@ Body
         skill = parse_skill(path)
         assert skill.update_section == "## My Custom Section"
 
+    def test_evaluation_contract_frontmatter(self, tmp_path: Path):
+        content = """---
+name: triage
+description: Triage incidents
+evaluation_contract:
+  version: 1
+  min_pass_score: 0.7
+  rewrite_below_score: 0.55
+  disable_below_score: 0.25
+  min_samples_for_rewrite: 3
+  min_samples_for_disable: 2
+  criteria:
+    - name: goal_completion
+      description: Completes the triage outcome
+      weight: 0.6
+    - name: evidence_quality
+      description: Uses evidence
+      weight: 0.4
+  observable_metrics:
+    - name: tool_verification_used
+      description: Tool evidence was checked
+      source: tool_trace
+      weight: 0.2
+  failure_modes:
+    - skipped_required_verification
+custom_field: hello
+---
+
+## Instructions
+Do triage.
+"""
+        path = _write_skill(tmp_path / "SKILL.md", content)
+        skill = parse_skill(path)
+        assert skill.evaluation_contract is not None
+        assert skill.evaluation_contract.criteria[0].name == "goal_completion"
+        assert skill.evaluation_contract.observable_metrics[0].source == "tool_trace"
+        assert "skipped_required_verification" in skill.evaluation_contract.failure_modes
+        assert skill.meta["custom_field"] == "hello"
+
 
 class TestLoadSkillsFromDir:
     def test_loads_subdirectory_skills(self, tmp_path: Path):
@@ -260,6 +299,35 @@ class TestSkillRegistry:
         assert record.status == "active"
         assert record.path.endswith("SKILL.md")
         assert "writing" in record.tags
+
+    def test_records_expose_evaluation_contract_summary(self, tmp_path: Path):
+        _write_skill(
+            tmp_path / "triage" / "SKILL.md",
+            """---
+name: triage
+description: Triage incidents
+evaluation_contract:
+  version: 1
+  criteria:
+    - name: goal_completion
+      description: Completes triage
+      weight: 1.0
+  observable_metrics:
+    - name: tool_verification_used
+      description: Tool evidence was checked
+      source: tool_trace
+      weight: 1.0
+  failure_modes: [skipped_required_verification]
+---
+## Instructions
+Do triage.
+""",
+        )
+        registry = SkillRegistry()
+        registry.load_directory(tmp_path)
+        record = registry.records()[0]
+        assert record.evaluation_contract["criteria"] == ["goal_completion"]
+        assert record.evaluation_contract["observable_metrics"] == ["tool_verification_used"]
 
     def test_find_matches_reports_reasons(self, registry: SkillRegistry):
         matches = registry.find_matches("write a long-form article")
