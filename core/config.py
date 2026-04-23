@@ -59,11 +59,12 @@ class ChannelConfig:
 class EmergenceConfig:
     """Skill emergence: detect reusable patterns and synthesise SKILL.md.
 
-    Every N turns the agent runs pattern detection on recent
-    conversation; if a reusable pattern is found above
-    min_confidence, a complete SKILL.md is generated and saved to
-    output_dir, then activated by default. `pending_review` is reserved
-    for explicit manual hold flows rather than the default emergence path.
+    Explicit requests to create a skill run pattern detection immediately.
+    Otherwise, every N turns the agent runs pattern detection on recent
+    conversation; if a reusable pattern is found above min_confidence, a
+    Claude/OpenClaw-style skill package is generated and saved to output_dir,
+    then activated by default. `pending_review` is reserved for explicit manual
+    hold flows rather than the default emergence path.
     """
 
     every_n_turns: int = 10

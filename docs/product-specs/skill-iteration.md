@@ -35,8 +35,14 @@ evidence layer and the skill definition itself.
 In `evidune serve`, high-confidence reusable patterns from conversation should
 become active skills by default.
 
-- A new skill is synthesised, written under `agent.emergence.output_dir`, and
-  added to the live registry immediately
+- Explicit requests to create, implement, or turn something into a reusable
+  skill bypass the implicit `every_n_turns` cadence and run emergence immediately
+- Implicit reusable patterns are still detected on the configured cadence to
+  avoid running the detector on every ordinary turn
+- A new skill package is synthesised, written under
+  `agent.emergence.output_dir`, and added to the live registry immediately
+- Emerged packages use the standard directory layout: `SKILL.md`,
+  prompt-readable `scripts/*.md`, and `references/*.md`
 - Active emerged skills must be loaded again on later process starts so the
   behavior survives restart
 - Name collisions must be prevented without silently overwriting an unrelated

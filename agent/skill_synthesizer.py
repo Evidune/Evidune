@@ -1,12 +1,13 @@
-"""Skill synthesis — generate a complete SKILL.md from an emerged pattern.
+"""Skill synthesis — generate a complete directory-based skill package.
 
 Second half of the emergence pipeline. Given a DetectedPattern + the
-conversation context, asks an LLM to write a complete Claude-style
-SKILL.md (frontmatter + instructions + triggers + anti-triggers +
-examples), then writes it to disk.
+conversation context, asks an LLM to write a complete Claude/OpenClaw-style
+skill directory, then writes the safe markdown bundle to disk.
 
 Output layout:
     <output_dir>/<skill-name>/SKILL.md
+    <output_dir>/<skill-name>/scripts/*.md
+    <output_dir>/<skill-name>/references/*.md
 
 The synthesised skill is activated by default. Manual review remains
 available as a separate lifecycle state rather than the default gate.
@@ -14,7 +15,8 @@ available as a separate lifecycle state rather than the default gate.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +32,13 @@ class SynthesisResult:
     name: str
     skill_md: str
     path: Path
+    files: dict[str, str] = field(default_factory=dict)
 
 
-_PROMPT_TEMPLATE = """You are a skill author. Turn the conversation pattern below into a complete, reusable SKILL.md for a standard Claude/OpenClaw directory-based skill.
+_FILE_MARKER_RE = re.compile(r"^<<<FILE:\s*([^>\n]+?)\s*>>>\s*$", re.MULTILINE)
+
+_PROMPT_TEMPLATE = """You are a skill author. Turn the conversation pattern below
+into a complete, reusable standard Claude/OpenClaw directory-based skill.
 
 # Pattern detected
 
@@ -46,7 +52,26 @@ _PROMPT_TEMPLATE = """You are a skill author. Turn the conversation pattern belo
 
 # Output spec
 
-Return ONLY the full SKILL.md content (no surrounding prose, no code fences). It must contain:
+Return ONLY a file bundle. Do not add surrounding prose or code fences.
+Each file must start with a marker on its own line:
+
+<<<FILE: relative/path.md>>>
+file content here
+
+Required files:
+- SKILL.md
+- scripts/checklist.md
+- references/source-notes.md
+
+Allowed paths:
+- SKILL.md
+- scripts/*.md
+- references/*.md
+
+Do not emit absolute paths, parent-directory paths, executable scripts, .py files,
+.sh files, or files outside scripts/ and references/.
+
+SKILL.md must contain:
 
 1. YAML frontmatter with:
    - name: kebab-case identifier
@@ -59,11 +84,14 @@ Return ONLY the full SKILL.md content (no surrounding prose, no code fences). It
 3. ## Examples section with at least 1 example (### Example 1: ...)
 4. ## Reference Data section (placeholder for future iteration)
 
-The generated skill will live at <output_dir>/<skill-name>/SKILL.md and may later gain
-optional `references/` or `scripts/` siblings. Write the SKILL.md so it works on day one
-without depending on any missing files. Do not mention files that do not exist yet.
+scripts/*.md should be prompt-readable workflows, checklists, or templates. They
+are not executable code.
 
-Be concrete and useful. Do not include placeholder text like "TODO" or "fill this in later". The skill should work on day one.
+references/*.md should contain durable background notes, source categories,
+examples, or operating constraints extracted from the conversation.
+
+Be concrete and useful. Do not include placeholder text like "TODO" or
+"fill this in later". The skill should work on day one.
 """
 
 
@@ -74,6 +102,80 @@ def _format_conversation(history: list[dict[str, str]]) -> str:
 def _strip_code_fence(raw: str) -> str:
     """If the LLM wraps the output in ```markdown ...```, strip it."""
     return strip_code_fence(raw).strip() + "\n"
+
+
+def _default_script(pattern: DetectedPattern) -> str:
+    return (
+        f"# {pattern.suggested_name} Checklist\n\n"
+        "- Confirm the user's concrete goal and reusable context.\n"
+        "- Follow the skill instructions before drafting the final answer.\n"
+        "- Separate current environment limits from future integration options.\n"
+        "- Produce structured output that can be reused in later conversations.\n"
+    )
+
+
+def _default_reference(pattern: DetectedPattern) -> str:
+    description = pattern.description or "Reusable capability emerging from conversation."
+    rationale = pattern.rationale or "Detected as a reusable conversation pattern."
+    return (
+        f"# {pattern.suggested_name} Source Notes\n\n"
+        f"Description: {description}\n\n"
+        f"Detection rationale: {rationale}\n"
+    )
+
+
+def _parse_file_bundle(raw: str, pattern: DetectedPattern) -> dict[str, str] | None:
+    cleaned = strip_code_fence(raw)
+    markers = list(_FILE_MARKER_RE.finditer(cleaned))
+    if not markers:
+        skill_md = _strip_code_fence(raw)
+        if not skill_md.strip():
+            return None
+        files = {"SKILL.md": skill_md}
+        _ensure_standard_support_files(files, pattern)
+        return files
+
+    files: dict[str, str] = {}
+    for idx, marker in enumerate(markers):
+        start = marker.end()
+        end = markers[idx + 1].start() if idx + 1 < len(markers) else len(cleaned)
+        rel_path = marker.group(1).strip()
+        content = cleaned[start:end].strip()
+        files[rel_path] = content + "\n"
+
+    _ensure_standard_support_files(files, pattern)
+    return files
+
+
+def _ensure_standard_support_files(files: dict[str, str], pattern: DetectedPattern) -> None:
+    if not any(path.startswith("scripts/") for path in files):
+        files["scripts/checklist.md"] = _default_script(pattern)
+    if not any(path.startswith("references/") for path in files):
+        files["references/source-notes.md"] = _default_reference(pattern)
+
+
+def _safe_bundle_path(rel_path: str) -> bool:
+    if not rel_path or "\\" in rel_path:
+        return False
+    path = Path(rel_path)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        return False
+    if rel_path == "SKILL.md":
+        return True
+    if not rel_path.endswith(".md"):
+        return False
+    if len(path.parts) != 2:
+        return False
+    return path.parts[0] in {"scripts", "references"}
+
+
+def _validate_file_bundle(files: dict[str, str]) -> bool:
+    if "SKILL.md" not in files or not files["SKILL.md"].strip():
+        return False
+    for rel_path, content in files.items():
+        if not _safe_bundle_path(rel_path) or not content.strip():
+            return False
+    return True
 
 
 class SkillSynthesizer:
@@ -94,10 +196,10 @@ class SkillSynthesizer:
         write: bool = True,
         **llm_kwargs: Any,
     ) -> SynthesisResult | None:
-        """Generate and (optionally) persist a SKILL.md.
+        """Generate and (optionally) persist a directory-based skill package.
 
         Returns None if the pattern is not a skill or the LLM returned
-        empty content.
+        empty or unsafe content.
         """
         if not pattern.is_skill or not pattern.suggested_name:
             return None
@@ -114,19 +216,22 @@ class SkillSynthesizer:
             **kwargs,
         )
 
-        skill_md = _strip_code_fence(raw)
-        if not skill_md.strip():
+        files = _parse_file_bundle(raw, pattern)
+        if files is None or not _validate_file_bundle(files):
             return None
 
         skill_dir = self.output_dir / pattern.suggested_name
         skill_path = skill_dir / "SKILL.md"
 
         if write:
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            skill_path.write_text(skill_md, encoding="utf-8")
+            for rel_path, content in files.items():
+                target = skill_dir / rel_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content.strip() + "\n", encoding="utf-8")
 
         return SynthesisResult(
             name=pattern.suggested_name,
-            skill_md=skill_md,
+            skill_md=files["SKILL.md"],
             path=skill_path,
+            files=files,
         )

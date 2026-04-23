@@ -8,7 +8,7 @@ import pytest
 from agent.core import AgentCore
 from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern
-from agent.skill_synthesizer import SynthesisResult
+from agent.skill_synthesizer import SkillSynthesizer, SynthesisResult
 from core.loop import _load_active_emerged_skills
 from gateway.base import InboundMessage
 from memory.store import MemoryStore
@@ -137,12 +137,12 @@ class TestEmergenceTrigger:
             )
 
         synth = MockSynthesizer(tmp_path, factory)
-        agent = _make_agent(memory, detector=detector, synthesizer=synth, every_n=3)
+        agent = _make_agent(memory, detector=detector, synthesizer=synth, every_n=6)
         conversation_id = "web-mo5tvtb9"
         turns = [
-            "可以自己搜索网页吗？",
-            "是需要你自己接入，形成 skill。",
-            "你自己实现一个新闻+行情分析 skill，要能反复复用。",
+            "有哪些公开的信息源可以收集新闻、财经等信息？",
+            "这些 API 可以未来接入吗？",
+            "建立一个新闻+行情分析 skill，要能反复复用。",
         ]
         for text in turns[:-1]:
             await agent.handle(
@@ -178,8 +178,45 @@ class TestEmergenceTrigger:
         assert log["emergence_attempted"] is True
         assert log["activation_status"] == "activated"
         assert log["skip_reason"] == ""
+        assert log["trigger_reason"] == "explicit_skill_request"
         assert log["detected_name"] == "news-market-analysis"
         assert log["emerged_skill_path"].endswith("news-market-analysis/SKILL.md")
+
+    @pytest.mark.asyncio
+    async def test_explicit_skill_request_bypasses_cadence(self, memory, tmp_path, capsys):
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="collect-intel",
+                description="Collect public information into an intelligence brief",
+                confidence=0.9,
+                rationale="The user explicitly asked to create a reusable skill.",
+            )
+        )
+
+        def factory(pattern, write):
+            path = _make_skill_md(tmp_path, "collect-intel")
+            return SynthesisResult(
+                name=pattern.suggested_name, skill_md=path.read_text(), path=path
+            )
+
+        synth = MockSynthesizer(tmp_path, factory)
+        agent = _make_agent(memory, detector=detector, synthesizer=synth, every_n=6)
+        resp = await agent.handle(
+            InboundMessage(
+                text="建立一个收集资讯的 skill",
+                sender_id="u",
+                channel="web",
+                conversation_id="c",
+            )
+        )
+        assert resp.metadata["emerged_skill"] == "collect-intel"
+        assert detector.calls == 1
+        assert synth.calls == 1
+        log = _read_last_log(capsys)
+        assert log["emergence_counter"] == 1
+        assert log["emergence_attempted"] is True
+        assert log["trigger_reason"] == "explicit_skill_request"
 
     @pytest.mark.asyncio
     async def test_duplicate_name_skipped(self, memory, tmp_path):
@@ -222,6 +259,25 @@ class TestEmergenceTrigger:
             await agent.handle(msg)
         # Triggered at turns 3 and 6 = 2 detector calls
         assert detector.calls == 2
+
+    @pytest.mark.asyncio
+    async def test_cadence_trigger_reason_logged(self, memory, tmp_path, capsys):
+        detector = MockDetector(DetectedPattern(is_skill=False, confidence=0.0))
+        synth = MockSynthesizer(tmp_path, lambda p, w: None)
+        agent = _make_agent(memory, detector=detector, synthesizer=synth, every_n=2)
+        msg = InboundMessage(
+            text="ordinary chat",
+            sender_id="u",
+            channel="cli",
+            conversation_id="c",
+        )
+        await agent.handle(msg)
+        await agent.handle(msg)
+        log = _read_last_log(capsys)
+        assert log["emergence_counter"] == 2
+        assert log["emergence_attempted"] is True
+        assert log["trigger_reason"] == "cadence"
+        assert log["skip_reason"] == "below_threshold"
 
     @pytest.mark.asyncio
     async def test_turn_count_survives_agent_restart(self, memory, tmp_path):
@@ -277,3 +333,44 @@ class TestEmergenceTrigger:
         # Response delivered normally; emerged_skill is None
         assert resp.text == "ok"
         assert resp.metadata["emerged_skill"] is None
+
+    @pytest.mark.asyncio
+    async def test_unsafe_synthesis_bundle_reports_failed(self, memory, tmp_path, capsys):
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="unsafe-skill",
+                description="Unsafe",
+                confidence=0.9,
+                rationale="test",
+            )
+        )
+        unsafe_bundle = """<<<FILE: SKILL.md>>>
+---
+name: unsafe-skill
+description: Unsafe
+outcome_metrics: false
+---
+
+## Instructions
+
+Do it.
+
+<<<FILE: /tmp/escape.md>>>
+bad
+"""
+        synth = SkillSynthesizer(judge=MockLLM(unsafe_bundle), output_dir=tmp_path)
+        agent = _make_agent(memory, detector=detector, synthesizer=synth, every_n=1)
+        resp = await agent.handle(
+            InboundMessage(
+                text="建立一个 unsafe skill",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c",
+            )
+        )
+        assert resp.metadata["emerged_skill"] is None
+        assert not (tmp_path / "unsafe-skill").exists()
+        log = _read_last_log(capsys)
+        assert log["skip_reason"] == "synthesis_failed"
+        assert log["activation_status"] == "failed"

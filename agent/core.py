@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,22 @@ from skills.loader import parse_skill
 from skills.registry import SkillRegistry
 
 _CONVERSATION_MODES = {"plan", "execute"}
+_SKILL_TARGET_RE = re.compile(
+    r"\b(skills?|capabilit(?:y|ies)|workflows?)\b|skill|能力|工作流|可复用",
+    re.IGNORECASE,
+)
+_SKILL_ACTION_RE = re.compile(
+    r"\b(create|build|generate|implement|synthesi[sz]e|make|turn\s+.*\s+into)\b"
+    r"|建立|创建|新建|生成|实现|沉淀|形成|做成|变成|封装|提炼|设计",
+    re.IGNORECASE,
+)
+
+
+def _is_explicit_skill_request(text: str) -> bool:
+    """Return True when the user is directly asking to create a reusable skill."""
+    if not text:
+        return False
+    return bool(_SKILL_TARGET_RE.search(text) and _SKILL_ACTION_RE.search(text))
 
 
 @dataclass
@@ -44,6 +61,7 @@ class EmergenceDecision:
     activation_status: str = "skipped"
     emerged_skill_path: str = ""
     emerged_skill: str | None = None
+    trigger_reason: str = ""
 
 
 class AgentCore:
@@ -414,6 +432,7 @@ class AgentCore:
             "detected_confidence": decision.detected_confidence,
             "activation_status": decision.activation_status,
             "emerged_skill_path": decision.emerged_skill_path,
+            "trigger_reason": decision.trigger_reason,
         }
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
 
@@ -600,12 +619,12 @@ class AgentCore:
         )
         lifecycle_updates = self._maybe_reconcile_skill_feedback(execution_skills)
 
-        # 9. Auto fact extraction (every N turns, when enabled)
+        # 9. Auto fact extraction (every N turns)
         extracted_count = await self._maybe_extract_facts(
             message, identity, turn_count=current_turn_count
         )
 
-        # 10. Skill emergence (every N turns, when enabled)
+        # 10. Skill emergence: explicit creation requests bypass cadence.
         emergence_decision = await self._maybe_emerge_skill(
             message,
             mode=mode,
@@ -792,10 +811,15 @@ class AgentCore:
             decision.skip_reason = "disabled_by_config"
             return decision
 
-        if current_counter % self.emergence_every_n_turns != 0:
+        explicit_request = _is_explicit_skill_request(message.text)
+        due_by_cadence = (
+            self.emergence_every_n_turns > 0 and current_counter % self.emergence_every_n_turns == 0
+        )
+        if not (explicit_request or due_by_cadence):
             decision.skip_reason = "not_due_yet"
             return decision
 
+        decision.trigger_reason = "explicit_skill_request" if explicit_request else "cadence"
         decision.emergence_attempted = True
         history = self.memory.get_history(conv_id, self.max_history)
         existing_names = [s.name for s in self.skills.all()]

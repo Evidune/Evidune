@@ -6,6 +6,7 @@ import pytest
 
 from agent.pattern_detector import DetectedPattern
 from agent.skill_synthesizer import SkillSynthesizer, _strip_code_fence
+from skills.loader import parse_skill
 from tests.conftest import MockJudge
 
 SAMPLE_SKILL_MD = """---
@@ -35,6 +36,20 @@ Output: ...
 (auto-updated)
 """
 
+SAMPLE_SKILL_PACKAGE = f"""<<<FILE: SKILL.md>>>
+{SAMPLE_SKILL_MD}
+<<<FILE: scripts/checklist.md>>>
+# Checklist
+
+- Confirm the user wants an explanation.
+- Explain step by step.
+
+<<<FILE: references/source-notes.md>>>
+# Source Notes
+
+Use the user's topic and prior context.
+"""
+
 
 class TestStripCodeFence:
     def test_no_fence(self):
@@ -52,7 +67,7 @@ class TestStripCodeFence:
 class TestSynthesizer:
     @pytest.mark.asyncio
     async def test_writes_skill_md(self, tmp_path: Path):
-        judge = MockJudge(SAMPLE_SKILL_MD)
+        judge = MockJudge(SAMPLE_SKILL_PACKAGE)
         synth = SkillSynthesizer(judge=judge, output_dir=tmp_path)
         pattern = DetectedPattern(
             is_skill=True,
@@ -70,6 +85,11 @@ class TestSynthesizer:
         content = result.path.read_text(encoding="utf-8")
         assert "explain-topic" in content
         assert "## Instructions" in content
+        assert (tmp_path / "explain-topic" / "scripts" / "checklist.md").exists()
+        assert (tmp_path / "explain-topic" / "references" / "source-notes.md").exists()
+        skill = parse_skill(result.path)
+        assert "checklist.md" in skill.scripts
+        assert "source-notes.md" in skill.references
 
     @pytest.mark.asyncio
     async def test_skips_when_pattern_not_skill(self, tmp_path: Path):
@@ -90,7 +110,7 @@ class TestSynthesizer:
 
     @pytest.mark.asyncio
     async def test_no_write_mode(self, tmp_path: Path):
-        judge = MockJudge(SAMPLE_SKILL_MD)
+        judge = MockJudge(SAMPLE_SKILL_PACKAGE)
         synth = SkillSynthesizer(judge=judge, output_dir=tmp_path)
         pattern = DetectedPattern(
             is_skill=True, suggested_name="x", description="d", confidence=0.9
@@ -103,7 +123,7 @@ class TestSynthesizer:
 
     @pytest.mark.asyncio
     async def test_strips_code_fence_around_output(self, tmp_path: Path):
-        judge = MockJudge(f"```markdown\n{SAMPLE_SKILL_MD}\n```")
+        judge = MockJudge(f"```markdown\n{SAMPLE_SKILL_PACKAGE}\n```")
         synth = SkillSynthesizer(judge=judge, output_dir=tmp_path)
         pattern = DetectedPattern(
             is_skill=True, suggested_name="explain-topic", description="d", confidence=0.9
@@ -123,3 +143,39 @@ class TestSynthesizer:
         )
         result = await synth.synthesize(pattern, [{"role": "user", "content": "x"}])
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_legacy_single_file_output_gets_support_files(self, tmp_path: Path):
+        judge = MockJudge(SAMPLE_SKILL_MD)
+        synth = SkillSynthesizer(judge=judge, output_dir=tmp_path)
+        pattern = DetectedPattern(
+            is_skill=True,
+            suggested_name="explain-topic",
+            description="Explain",
+            confidence=0.9,
+            rationale="useful",
+        )
+        result = await synth.synthesize(pattern, [{"role": "user", "content": "x"}])
+        assert result is not None
+        assert (tmp_path / "explain-topic" / "scripts" / "checklist.md").exists()
+        assert (tmp_path / "explain-topic" / "references" / "source-notes.md").exists()
+
+    @pytest.mark.asyncio
+    async def test_rejects_unsafe_bundle_path(self, tmp_path: Path):
+        unsafe = f"""<<<FILE: SKILL.md>>>
+{SAMPLE_SKILL_MD}
+<<<FILE: ../escape.md>>>
+bad
+"""
+        judge = MockJudge(unsafe)
+        synth = SkillSynthesizer(judge=judge, output_dir=tmp_path)
+        pattern = DetectedPattern(
+            is_skill=True,
+            suggested_name="explain-topic",
+            description="Explain",
+            confidence=0.9,
+            rationale="useful",
+        )
+        result = await synth.synthesize(pattern, [{"role": "user", "content": "x"}])
+        assert result is None
+        assert not (tmp_path / "explain-topic").exists()
