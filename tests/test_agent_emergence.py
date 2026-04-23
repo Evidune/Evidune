@@ -1,5 +1,6 @@
 """Integration tests: AgentCore triggers skill emergence every N turns."""
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def _make_agent(
     synthesizer=None,
     every_n: int = 3,
     min_conf: float = 0.7,
+    inline_timeout_s: float = 5.0,
 ):
     return AgentCore(
         llm=MockLLM(),
@@ -69,6 +71,7 @@ def _make_agent(
         skill_synthesizer=synthesizer,
         emergence_every_n_turns=every_n,
         emergence_min_confidence=min_conf,
+        emergence_inline_timeout_s=inline_timeout_s,
     )
 
 
@@ -374,3 +377,57 @@ bad
         log = _read_last_log(capsys)
         assert log["skip_reason"] == "synthesis_failed"
         assert log["activation_status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_slow_emergence_is_queued_without_blocking_response(
+        self, memory, tmp_path, capsys
+    ):
+        class SlowDetector:
+            calls = 0
+
+            async def detect(self, history, existing_skill_names=None, **kw):
+                self.calls += 1
+                await asyncio.sleep(0.05)
+                return DetectedPattern(
+                    is_skill=True,
+                    suggested_name="queued-skill",
+                    description="Queued skill",
+                    confidence=0.9,
+                    rationale="The user explicitly asked for a skill.",
+                )
+
+        def factory(pattern, write):
+            path = _make_skill_md(tmp_path, "queued-skill")
+            return SynthesisResult(
+                name=pattern.suggested_name, skill_md=path.read_text(), path=path
+            )
+
+        detector = SlowDetector()
+        synth = MockSynthesizer(tmp_path, factory)
+        agent = _make_agent(
+            memory,
+            detector=detector,
+            synthesizer=synth,
+            every_n=6,
+            inline_timeout_s=0.001,
+        )
+        resp = await agent.handle(
+            InboundMessage(
+                text="建立一个会后台完成的 skill",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c",
+            )
+        )
+        assert resp.text == "ok"
+        assert resp.metadata["emerged_skill"] is None
+        queued_log = _read_last_log(capsys)
+        assert queued_log["skip_reason"] == "emergence_queued"
+        assert queued_log["activation_status"] == "pending"
+        assert queued_log["trigger_reason"] == "explicit_skill_request"
+
+        await asyncio.sleep(0.1)
+        final_log = _read_last_log(capsys)
+        assert final_log["activation_status"] == "activated"
+        assert final_log["emerged_skill_path"].endswith("queued-skill/SKILL.md")
+        assert memory.get_emerged_skill("queued-skill") is not None

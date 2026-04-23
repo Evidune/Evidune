@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
@@ -84,6 +85,7 @@ class AgentCore:
         skill_synthesizer: SkillSynthesizer | None = None,
         emergence_every_n_turns: int = 10,
         emergence_min_confidence: float = 0.7,
+        emergence_inline_timeout_s: float = 5.0,
         title_generator: TitleGenerator | None = None,
         title_after_turns: int = 3,
         tool_registry: ToolRegistry | None = None,
@@ -111,6 +113,7 @@ class AgentCore:
         self.skill_synthesizer = skill_synthesizer
         self.emergence_every_n_turns = emergence_every_n_turns
         self.emergence_min_confidence = emergence_min_confidence
+        self.emergence_inline_timeout_s = emergence_inline_timeout_s
         self.title_generator = title_generator
         self.title_after_turns = title_after_turns
         self.tool_registry = tool_registry
@@ -124,6 +127,7 @@ class AgentCore:
         self.maintenance_runner = maintenance_runner
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
+        self._background_emergence_tasks: set[asyncio.Task] = set()
 
     def _tool_registry_for_turn(
         self,
@@ -435,6 +439,25 @@ class AgentCore:
             "trigger_reason": decision.trigger_reason,
         }
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+
+    def _track_background_emergence(
+        self,
+        task: asyncio.Task[EmergenceDecision],
+        fallback: EmergenceDecision,
+    ) -> None:
+        self._background_emergence_tasks.add(task)
+
+        def _done(done_task: asyncio.Task[EmergenceDecision]) -> None:
+            self._background_emergence_tasks.discard(done_task)
+            try:
+                decision = done_task.result()
+            except Exception:
+                fallback.skip_reason = "emergence_failed"
+                fallback.activation_status = "failed"
+                decision = fallback
+            self._log_emergence_turn(decision)
+
+        task.add_done_callback(_done)
 
     async def _run_swarm(
         self,
@@ -820,6 +843,33 @@ class AgentCore:
             return decision
 
         decision.trigger_reason = "explicit_skill_request" if explicit_request else "cadence"
+        attempt_decision = EmergenceDecision(
+            conversation_id=conv_id,
+            mode=mode,
+            matched_skills=matched_skill_names,
+            execution_skill_names=execution_skill_names,
+            emergence_counter=current_counter,
+            trigger_reason="explicit_skill_request" if explicit_request else "cadence",
+        )
+        task = asyncio.create_task(self._run_emergence_attempt(attempt_decision, conv_id))
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=self.emergence_inline_timeout_s,
+            )
+        except asyncio.TimeoutError:
+            self._track_background_emergence(task, attempt_decision)
+            decision.emergence_attempted = True
+            decision.skip_reason = "emergence_queued"
+            decision.activation_status = "pending"
+            decision.trigger_reason = attempt_decision.trigger_reason
+            return decision
+
+    async def _run_emergence_attempt(
+        self,
+        decision: EmergenceDecision,
+        conv_id: str,
+    ) -> EmergenceDecision:
         decision.emergence_attempted = True
         history = self.memory.get_history(conv_id, self.max_history)
         existing_names = [s.name for s in self.skills.all()]
@@ -892,26 +942,31 @@ class AgentCore:
             "pattern_rationale": pattern.rationale,
             "pattern_description": pattern.description,
         }
-        self.memory.register_emerged_skill(
-            name=result.name,
-            source_conversation_id=conv_id,
-            evaluation_criteria=pattern.rationale,
-            status="active",
-            path=str(result.path),
-            reason="Auto-activated from conversation pattern",
-            evidence=evidence,
-        )
-        self.memory.record_skill_lifecycle_event(
-            result.name,
-            "activate",
-            status="active",
-            path=str(result.path),
-            harness_task_id="",
-            reason="Auto-activated from conversation pattern",
-            evidence=evidence,
-            content_after=result.skill_md,
-        )
-        self.skills.register(skill)
+        try:
+            self.memory.register_emerged_skill(
+                name=result.name,
+                source_conversation_id=conv_id,
+                evaluation_criteria=pattern.rationale,
+                status="active",
+                path=str(result.path),
+                reason="Auto-activated from conversation pattern",
+                evidence=evidence,
+            )
+            self.memory.record_skill_lifecycle_event(
+                result.name,
+                "activate",
+                status="active",
+                path=str(result.path),
+                harness_task_id="",
+                reason="Auto-activated from conversation pattern",
+                evidence=evidence,
+                content_after=result.skill_md,
+            )
+            self.skills.register(skill)
+        except Exception:
+            decision.skip_reason = "activation_failed"
+            decision.activation_status = "failed"
+            return decision
 
         decision.activation_status = "activated"
         decision.emerged_skill = result.name
