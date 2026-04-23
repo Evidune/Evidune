@@ -125,6 +125,30 @@ flowchart TD
 
 两条路径最终都会写入同一份 skill state，所以下一次 serve turn 或 run 都会重新加载改进后的技能集。
 
+## Skill 迭代
+
+Skill 是运行时的一等对象，不只是附加 prompt。一个 skill 是标准包：
+`SKILL.md` 加可选的 `scripts/*.md` 和 `references/*.md`。Registry 会加载项目
+skills、active generated skills、生命周期状态、匹配原因、references、scripts 和
+运行时元数据。
+
+Evidune 通过两条路径改进 skill：
+
+- 在 `evidune serve` 中，用户明确说“创建一个可复用 incident triage skill”
+  这类请求时，会立即进入 skill transaction。Agent 会判断应该创建、更新还是复用
+  skill；写入 skill 包；解析成功后激活；并在响应里返回 `skill_creation` metadata。
+- 在 `evidune serve` 中，隐式重复模式按 cadence 检测。这样普通问答不会过度生成
+  skill，但真实对话里反复出现的有效 workflow 仍然可以沉淀。
+- 在 `evidune run` 中，metrics 和配置的 references 驱动离线迭代。系统会分析好坏
+  outcome，更新 reference sections，重写 eligible outcome-tracked skills，或在负面
+  证据足够时回滚/禁用。
+- 所有变化都会持久化到 SQLite 和 skill 包文件。`serve` 重启后，会在下一轮对话前
+  重新加载 active generated skills 和生命周期状态。
+
+自动合成默认只写 Markdown skill 包，不会把生成的 skill 偷偷变成可执行工具；可执行能力
+仍来自已配置的 runtime tools 及其安全边界。更完整的产品模型见
+[docs/product-specs/skill-iteration.md](docs/product-specs/skill-iteration.md)。
+
 ## 本地迭代
 
 - `evidune init` 会生成一个可运行的通用 skill agent，包含示例指标、`general-assistant` identity，以及任务执行、skill 生命周期、代码实现等 starter skills，并把运行产物放在 `.evidune/` 下。

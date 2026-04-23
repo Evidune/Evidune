@@ -136,6 +136,36 @@ reference targets, updates skill knowledge, and records an iteration ledger.
 Both paths persist into the same skill state, so the next serve turn or run
 reloads the improved skill set.
 
+## Skill Iteration
+
+Skills are first-class runtime objects, not just extra prompt text. A skill is a
+standard package with `SKILL.md` and optional `scripts/*.md` plus
+`references/*.md`. The registry loads project skills, active generated skills,
+their lifecycle status, match reasons, references, scripts, and runtime metadata.
+
+Evidune improves skills through two paths:
+
+- In `evidune serve`, explicit requests like "create a reusable incident triage
+  skill" enter the skill transaction path immediately. The agent decides whether
+  to create, update, or reuse a skill, writes the package, activates it when it
+  parses successfully, and returns `skill_creation` metadata.
+- In `evidune serve`, implicit repeated patterns are checked by cadence. This
+  keeps normal Q&A conservative while still letting useful workflows emerge from
+  real conversations.
+- In `evidune run`, metrics and configured references drive offline iteration.
+  The run analyzes strong and weak outcomes, then updates reference sections,
+  rewrites eligible outcome-tracked skills, or rolls back/disable states when
+  evidence is negative.
+- All changes are persisted in SQLite and skill package files. Restarting
+  `serve` reloads active generated skills and lifecycle state before the next
+  turn.
+
+Automatic synthesis only writes Markdown skill packages by default. It does not
+turn generated skills into hidden executable tools; executable behavior still
+comes from configured runtime tools and their security boundary. See
+[docs/product-specs/skill-iteration.md](docs/product-specs/skill-iteration.md)
+for the deeper product model.
+
 ## Local Iteration
 
 - `evidune init` creates a runnable generic skill agent with sample metrics, a
