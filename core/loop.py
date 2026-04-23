@@ -705,6 +705,9 @@ async def serve(
     except KeyboardInterrupt:
         pass
     finally:
+        wait_for_emergence = getattr(agent, "wait_for_background_emergence", None)
+        if wait_for_emergence:
+            await wait_for_emergence(timeout_s=180)
         await router.stop()
         memory.close()
 

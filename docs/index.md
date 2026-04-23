@@ -9,6 +9,7 @@ agents working in Evidune.
 - [Quality Score](quality-score.md): current subsystem grades and target improvements
 - [Reliability](reliability.md): validation expectations and release gates
 - [Tech Debt](tech-debt.md): tracked exceptions and cleanup backlog
+- [Security Policy](../SECURITY.md): Developer Preview security boundaries and reporting
 
 ## Working Sets
 

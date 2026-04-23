@@ -20,11 +20,10 @@ Usage:
 What it does:
 1. Spins up an in-memory MemoryStore, empty SkillRegistry,
    one identity package, the chosen LLM client.
-2. Plays a scripted 12-turn conversation that should look like a
-   reusable pattern (asking for haiku-style summaries of news
-   articles).
-3. Triggers fact extraction and skill emergence at the configured
-   thresholds.
+2. Plays a short scripted conversation that includes an explicit request
+   to create a reusable incident-triage skill.
+3. Verifies that the skill transaction/emergence path persists and
+   registers the generated skill.
 4. Reports what was extracted/emerged at the end.
 """
 
@@ -53,18 +52,20 @@ from memory.store import MemoryStore  # noqa: E402
 from skills.registry import SkillRegistry  # noqa: E402
 
 SCRIPTED_TURNS = [
-    "Hi, I'm Gao, I run a small AI newsletter.",
-    "Can you give me a haiku-style 3-line summary of: 'OpenAI launches GPT-5.4 with improved reasoning'?",
-    "Now do one for: 'Anthropic releases Claude Sonnet 4.6 with extended context'",
-    "And: 'Google DeepMind publishes Gemini Ultra benchmark suite'",
-    "Same format please: 'Meta unveils Llama 4 with 405B parameters, open weights'",
-    "And this one: 'xAI ships Grok-3 with improved tool use'",
-    "One more: 'Mistral launches Mixtral 8x22B for enterprise customers'",
-    "Try this: 'Cohere announces Command R+ multilingual upgrade'",
-    "Now: 'Stability AI releases Stable Diffusion 4 with native 4k support'",
-    "Final one: 'Hugging Face launches transformers v5 with native multimodal'",
-    "Thanks! Btw I prefer Chinese internet platforms to global ones.",
-    "What do you think makes a great haiku-style news summary?",
+    "I operate a local agent service and want a repeatable incident triage workflow.",
+    (
+        "Sample incident: a web deploy starts, /api/health is OK, but the browser shows "
+        "a blank screen. Triage it with symptom, checks, likely cause, and next action."
+    ),
+    (
+        "Create a reusable skill for this incident triage workflow. It should help future "
+        "agents inspect logs, confirm config, check recent changes, and propose a safe fix. "
+        "Include a Markdown checklist and source notes."
+    ),
+    (
+        "Now apply that workflow to a second incident: HTTP 500 appears after a restart, "
+        "and launch logs are mostly empty."
+    ),
 ]
 
 
@@ -93,13 +94,13 @@ async def run(provider: str, model: str, base_url: str | None = None) -> None:
         identity_registry = IdentityRegistry()
         identity_registry.register(
             Identity(
-                name="news-helper",
-                display_name="News Helper",
+                name="ops-agent",
+                display_name="Ops Agent",
                 soul="You are concise, helpful, and calm.",
-                identity="You are a concise news summariser.",
-                user="The user wants fast summaries and practical takeaways.",
+                identity="You help developers run, debug, and improve local agent systems.",
+                user="The user wants reusable operational workflows and practical next steps.",
                 default=True,
-                path=Path("/tmp/identities/news-helper"),
+                path=Path("/tmp/identities/ops-agent"),
             )
         )
 
@@ -147,8 +148,25 @@ async def run(provider: str, model: str, base_url: str | None = None) -> None:
                 extras.append(f"facts:+{md['facts_extracted']}")
             if md.get("emerged_skill"):
                 extras.append(f"emerged:{md['emerged_skill']}")
+            if md.get("skill_creation"):
+                creation = md["skill_creation"]
+                extras.append(
+                    f"skill_creation:{creation.get('status')}:{creation.get('skill_name')}"
+                )
             if extras:
                 print(f"  [{'  '.join(extras)}]")
+
+        background = await agent.wait_for_background_emergence(timeout_s=180)
+        if background:
+            print("\nBackground emergence completed:")
+            for decision in background:
+                status = (decision.skill_creation or {}).get("status") or decision.activation_status
+                name = (
+                    (decision.skill_creation or {}).get("skill_name")
+                    or decision.emerged_skill
+                    or decision.detected_name
+                )
+                print(f"  - {status}: {name or 'unknown'}")
 
         # Final report
         print("\n" + "=" * 60)
@@ -170,6 +188,12 @@ async def run(provider: str, model: str, base_url: str | None = None) -> None:
         for e in emerged:
             print(f"  - {e['name']} (status={e['status']}, version={e['version']})")
             print(f"    rationale: {e['evaluation_criteria'][:100]}")
+
+        if not emerged:
+            raise SystemExit(
+                "No emerged skill was persisted. Check LLM credentials, "
+                "skill_creation metadata, and emergence logs."
+            )
 
 
 def main() -> None:

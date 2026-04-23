@@ -513,13 +513,46 @@ class AgentCore:
             self._background_emergence_tasks.discard(done_task)
             try:
                 decision = done_task.result()
+            except asyncio.CancelledError:
+                fallback.skip_reason = "emergence_cancelled"
+                fallback.activation_status = "failed"
+                if fallback.trigger_reason == "explicit_skill_request":
+                    self._failed_skill_creation(fallback, reason="emergence_cancelled")
+                decision = fallback
             except Exception:
                 fallback.skip_reason = "emergence_failed"
                 fallback.activation_status = "failed"
+                if fallback.trigger_reason == "explicit_skill_request":
+                    self._failed_skill_creation(fallback, reason="emergence_failed")
                 decision = fallback
             self._log_emergence_turn(decision)
 
         task.add_done_callback(_done)
+
+    async def wait_for_background_emergence(
+        self,
+        timeout_s: float | None = None,
+    ) -> list[EmergenceDecision]:
+        """Wait for currently queued emergence attempts to finish.
+
+        This is primarily useful for CLI/smoke flows that need to exit only
+        after queued skill creation has had a chance to persist and register.
+        Long-running serve processes do not need to call it.
+        """
+        if not self._background_emergence_tasks:
+            return []
+
+        tasks = set(self._background_emergence_tasks)
+        done, _pending = await asyncio.wait(tasks, timeout=timeout_s)
+        decisions: list[EmergenceDecision] = []
+        for task in done:
+            if task.cancelled():
+                continue
+            try:
+                decisions.append(task.result())
+            except Exception:
+                continue
+        return decisions
 
     async def _run_swarm(
         self,

@@ -3,7 +3,8 @@
 set -eu
 
 REPO_GH="${EVIDUNE_REPO_GH:-Evidune/Evidune}"
-REPO_SSH="${EVIDUNE_REPO_SSH:-git@github.com:Evidune/Evidune.git}"
+REPO_URL="${EVIDUNE_REPO_URL:-https://github.com/Evidune/Evidune.git}"
+REPO_SSH="${EVIDUNE_REPO_SSH:-}"
 INSTALL_ROOT="${EVIDUNE_HOME:-$HOME/.evidune}"
 SRC_DIR="${EVIDUNE_SRC_DIR:-$INSTALL_ROOT/src/Evidune}"
 VENV_DIR="${EVIDUNE_VENV_DIR:-$INSTALL_ROOT/venv}"
@@ -28,7 +29,7 @@ clone_or_update_repo() {
 
   if [ -d "$SRC_DIR/.git" ]; then
     log "Updating existing Evidune checkout in $SRC_DIR"
-    git -C "$SRC_DIR" remote set-url origin "$REPO_SSH"
+    git -C "$SRC_DIR" remote set-url origin "${REPO_SSH:-$REPO_URL}"
     git -C "$SRC_DIR" fetch --tags origin
     git -C "$SRC_DIR" checkout "$REF"
     git -C "$SRC_DIR" pull --ff-only origin "$REF"
@@ -40,8 +41,8 @@ clone_or_update_repo() {
     log "Cloning $REPO_GH with GitHub CLI"
     gh repo clone "$REPO_GH" "$SRC_DIR"
   else
-    log "Cloning $REPO_SSH with git+ssh"
-    git clone "$REPO_SSH" "$SRC_DIR"
+    log "Cloning ${REPO_SSH:-$REPO_URL} with git"
+    git clone "${REPO_SSH:-$REPO_URL}" "$SRC_DIR"
   fi
 
   git -C "$SRC_DIR" checkout "$REF"

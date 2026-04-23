@@ -527,8 +527,52 @@ bad
         assert queued_log["activation_status"] == "pending"
         assert queued_log["trigger_reason"] == "explicit_skill_request"
 
-        await asyncio.sleep(0.1)
+        decisions = await agent.wait_for_background_emergence(timeout_s=1)
+        assert [d.emerged_skill for d in decisions] == ["queued-skill"]
         final_log = _read_last_log(capsys)
         assert final_log["activation_status"] == "activated"
         assert final_log["emerged_skill_path"].endswith("queued-skill/SKILL.md")
         assert memory.get_emerged_skill("queued-skill") is not None
+
+    @pytest.mark.asyncio
+    async def test_cancelled_background_emergence_logs_failure(self, memory, tmp_path, capsys):
+        class HangingDetector:
+            async def detect(self, history, existing_skill_names=None, **kw):
+                await asyncio.sleep(10)
+                return DetectedPattern(
+                    is_skill=True,
+                    suggested_name="cancelled-skill",
+                    description="Cancelled skill",
+                    confidence=0.9,
+                    rationale="The user explicitly asked for a skill.",
+                )
+
+        synth = MockSynthesizer(tmp_path, lambda pattern, write: None)
+        agent = _make_agent(
+            memory,
+            detector=HangingDetector(),
+            synthesizer=synth,
+            every_n=6,
+            inline_timeout_s=0.001,
+        )
+        resp = await agent.handle(
+            InboundMessage(
+                text="创建一个会被取消的 skill",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c",
+            )
+        )
+        assert resp.metadata["skill_creation"]["status"] == "queued"
+        _read_last_log(capsys)
+
+        tasks = list(agent._background_emergence_tasks)
+        assert tasks
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        final_log = _read_last_log(capsys)
+        assert final_log["skip_reason"] == "emergence_cancelled"
+        assert final_log["activation_status"] == "failed"
+        assert final_log["skill_creation_status"] == "failed"
