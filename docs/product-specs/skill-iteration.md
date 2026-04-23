@@ -8,10 +8,12 @@ Skill iteration has two loops:
 - `evidune run`: outcome-driven updates to existing skills
 - `evidune serve`: conversation-driven emergence of new skills
 
-Both loops share skill-specific evaluation contracts. A contract can be authored
-in `SKILL.md`, generated with a new skill, or discovered at runtime for legacy
-skills. It defines the success criteria, observable signals, failure modes, and
-thresholds that govern future rewrite, rollback, and disable decisions.
+Both loops share skill-specific execution contracts. An execution contract can
+be authored in `SKILL.md`, generated with a new skill, or discovered at runtime
+for legacy skills. It defines the success criteria, observable signals,
+failure modes, and thresholds for execution-quality governance. Outcome-driven
+rewrites additionally require an explicit `outcome_contract` that defines the
+business KPI, windowing rules, and rewrite or rollback thresholds.
 
 In `serve`, skills are first-class runtime objects. A skill has a parsed
 `SKILL.md` package, lifecycle state, source, path, version, loaded resources,
@@ -43,11 +45,12 @@ evidence layer and the skill definition itself.
 
 ### Contract-Driven Evaluation
 
-Every skill may define an `evaluation_contract` in frontmatter. The runtime
+Every skill may define an `execution_contract` in frontmatter. The runtime
 accepts legacy skills without a contract, but the first matched execution
-discovers a runtime contract through the evaluator. If `skills.auto_update` is
-true and the skill file is writable, that contract is written back to
-`SKILL.md`; otherwise SQLite stores it as the active runtime contract.
+discovers a runtime execution contract through the evaluator. If
+`skills.auto_update` is true and the skill file is writable, that contract is
+written back to `SKILL.md`; otherwise SQLite stores it as the active runtime
+contract. Legacy `evaluation_contract` remains a read alias only.
 
 - New synthesized skills must include machine-readable frontmatter plus
   `references/evaluation-contract.md` for human review
@@ -60,8 +63,8 @@ true and the skill file is writable, that contract is written back to
   observations, and reasoning
 - `skill_executions.cross_model_score` remains the compatibility aggregate
   score, while `skill_evaluations` stores the full contract-aware evidence
-- `run` and `serve` governance both consume the same contract evidence; external
-  metrics remain useful but are not the only source of evaluation
+- `serve` consumes execution-contract evidence, while `run` consumes explicit
+  outcome-contract evidence plus the latest execution summary
 - If no contract criteria can be scored, the evaluator falls back to the generic
   0-1 score path rather than blocking execution
 
@@ -136,8 +139,8 @@ Feedback and evaluation signals must feed the same decision loop.
   matched execution, and that contract appears in SQLite or `SKILL.md`
 - Repeated low contract scores can rewrite or disable a skill even when no
   external metrics are configured
-- An outcome-tracked skill can rewrite its core instructions, not only replace a
-  reference section
+- A skill with an explicit `outcome_contract` can rewrite its core instructions,
+  not only replace a reference section
 - Every automatic change leaves an auditable record that explains why it
   happened
 - Each outcome iteration run persists a harness task, step, and artifact trail

@@ -69,7 +69,8 @@ export interface Message {
   deliverySummary?: Record<string, unknown> | null
   artifactManifest?: Record<string, unknown> | null
   skillCreation?: SkillCreation | null
-  skillEvaluations?: SkillEvaluation[]
+  executionEvaluations?: SkillEvaluation[]
+  outcomeGovernance?: Record<string, unknown>[]
 }
 
 export interface Skill {
@@ -87,12 +88,15 @@ export interface Skill {
   updated_at?: string
   last_loaded_at?: string
   load_error?: string
-  evaluation_contract?: SkillEvaluationContractSummary | null
+  execution_contract?: SkillEvaluationContractSummary | null
+  outcome_contract?: SkillOutcomeContractSummary | null
+  warnings?: string[]
 }
 
 export interface SkillEvaluationContractSummary {
   version: number
   criteria: string[]
+  observable_signals: string[]
   observable_metrics: string[]
   failure_modes: string[]
   min_pass_score: number
@@ -100,6 +104,18 @@ export interface SkillEvaluationContractSummary {
   disable_below_score: number
   min_samples_for_rewrite: number
   min_samples_for_disable: number
+}
+
+export interface SkillOutcomeContractSummary {
+  entity: string
+  primary_kpi: string
+  supporting_kpis: string[]
+  dimensions: string[]
+  window: {
+    current_days: number
+    baseline_days: number
+  }
+  min_sample_size: number
 }
 
 export interface SkillCreation {
@@ -131,7 +147,8 @@ export interface ChatResponse {
   execution_ids?: number[]
   emerged_skill?: string | null
   skill_creation?: SkillCreation | null
-  skill_evaluations?: SkillEvaluation[]
+  execution_evaluations?: SkillEvaluation[]
+  outcome_governance?: Record<string, unknown>[]
   facts_extracted?: number
   identity?: string | null
   mode?: ConversationMode | null

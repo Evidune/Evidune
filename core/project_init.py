@@ -63,9 +63,11 @@ metrics:
   adapter: generic_csv
   config:
     file: data/metrics.csv
-    title_field: task
+    entity_id_field: task_id
+    exemplar_field: task
+    timestamp_field: date
     metric_fields: [success_score, reuse_count]
-    metadata_fields: [date, outcome]
+    dimension_fields: [channel, outcome]
     sort_metric: success_score
 
 references:
@@ -87,10 +89,10 @@ channels:
 
 
 _STARTER_FILES = {
-    "data/metrics.csv": """task,success_score,reuse_count,date,outcome
-Investigate a failing integration and patch the config,95,4,2026-04-01,verified_fix
-Create a reusable workflow from repeated support questions,88,3,2026-04-03,reusable_skill
-Answer a current-data request without tool verification,42,0,2026-04-05,insufficient_evidence
+    "data/metrics.csv": """task_id,task,success_score,reuse_count,date,channel,outcome
+incident-fix,Investigate a failing integration and patch the config,95,4,2026-04-10,cli,verified_fix
+workflow-capture,Create a reusable workflow from repeated support questions,88,3,2026-04-09,web,reusable_skill
+stale-answer,Answer a current-data request without tool verification,42,0,2026-04-02,web,insufficient_evidence
 """,
     "identities/general-assistant/SOUL.md": """# Soul
 
@@ -127,9 +129,8 @@ triggers:
   - investigate and fix
   - verify with tools
   - turn this repeated workflow into a skill
-outcome_metrics: true
 update_section: "## Reference Data"
-evaluation_contract:
+execution_contract:
   version: 1
   min_pass_score: 0.7
   rewrite_below_score: 0.55
@@ -146,7 +147,7 @@ evaluation_contract:
     - name: durable_learning
       description: Reusable lessons are captured or routed to skill creation when appropriate.
       weight: 0.25
-  observable_metrics:
+  observable_signals:
     - name: relevant_tool_trace
       description: Relevant tool calls or an explicit no-tool limitation are present.
       source: tool_trace
@@ -155,6 +156,25 @@ evaluation_contract:
     - skipped_required_verification
     - hallucinated_external_state
     - failed_to_capture_reusable_workflow
+outcome_contract:
+  entity: task
+  primary_kpi: success_score
+  supporting_kpis: [reuse_count]
+  dimensions: [channel, outcome]
+  window:
+    current_days: 7
+    baseline_days: 7
+  min_sample_size: 3
+  rewrite_policy:
+    target: 90
+    min_delta: 5
+    require_segment: true
+    severe_regression_delta: 15
+  rollback_policy:
+    max_negative_delta: 10
+  reference_update_policy:
+    max_segments: 3
+    max_exemplars: 2
 ---
 
 ## Instructions
@@ -175,7 +195,7 @@ This section is replaced by `evidune run` after each iteration cycle.
 
 This file is updated by the local iteration loop after each run.
 """,
-    "skills/task-execution/references/evaluation-contract.md": """# task-execution Evaluation Contract
+    "skills/task-execution/references/evaluation-contract.md": """# task-execution Execution Contract
 
 ## Success Criteria
 
@@ -205,8 +225,7 @@ triggers:
   - reusable capability
   - 建立 skill
   - 创建能力
-outcome_metrics: false
-evaluation_contract:
+execution_contract:
   version: 1
   min_pass_score: 0.7
   rewrite_below_score: 0.55
@@ -223,7 +242,7 @@ evaluation_contract:
     - name: lifecycle_clarity
       description: The response and metadata explain lifecycle state and next availability.
       weight: 0.3
-  observable_metrics:
+  observable_signals:
     - name: skill_creation_metadata
       description: Response metadata includes the skill creation status when a transaction occurred.
       source: execution_metadata
@@ -244,7 +263,7 @@ Treat skills as first-class runtime objects:
 4. Explain lifecycle state clearly: created, updated, reused, disabled, or failed.
 5. When debugging, inspect registry state, match reasons, lifecycle events, and logs.
 """,
-    "skills/skill-agent/references/evaluation-contract.md": """# skill-agent Evaluation Contract
+    "skills/skill-agent/references/evaluation-contract.md": """# skill-agent Execution Contract
 
 ## Success Criteria
 
@@ -276,8 +295,7 @@ triggers:
   - 写代码
   - 修改代码
   - 接入 API
-outcome_metrics: false
-evaluation_contract:
+execution_contract:
   version: 1
   min_pass_score: 0.7
   rewrite_below_score: 0.55
@@ -294,7 +312,7 @@ evaluation_contract:
     - name: change_safety
       description: The work preserves unrelated changes and respects tool/security boundaries.
       weight: 0.3
-  observable_metrics:
+  observable_signals:
     - name: validation_command_recorded
       description: A validation command, test result, or explicit inability to validate is recorded.
       source: execution_metadata
@@ -315,7 +333,7 @@ Use this skill when the task requires concrete implementation:
 4. Report exact commands, changed files, and any remaining risk.
 5. If runtime tools are unavailable, state that as a blocker instead of pretending execution happened.
 """,
-    "skills/code-implementation/references/evaluation-contract.md": """# code-implementation Evaluation Contract
+    "skills/code-implementation/references/evaluation-contract.md": """# code-implementation Execution Contract
 
 ## Success Criteria
 

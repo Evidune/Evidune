@@ -1,8 +1,4 @@
-"""Helpers used by the iteration loop (core/loop.py).
-
-Kept separate so `loop.py` stays focused on orchestration — the
-content-building functions below are pure and trivially testable.
-"""
+"""Helpers used by the iteration loop (core/loop.py)."""
 
 from __future__ import annotations
 
@@ -11,9 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent.skill_feedback import SkillFeedbackSummary, summarise_skill_feedback
-from core.analyzer import AnalysisResult
+from core.analyzer import AnalysisResult, OutcomeAnalysisResult, analyze_outcomes
 from core.config import EviduneConfig
-from core.updater import UpdateResult, replace_section, update_reference
+from core.metrics import MetricsSnapshot
+from core.updater import UpdateResult, update_reference
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
@@ -23,15 +20,10 @@ _MANAGED_ADJUSTMENTS_HEADING = "### Outcome-Backed Adjustments"
 def update_outcome_skills(
     config: EviduneConfig,
     base_dir: Path,
-    result: AnalysisResult,
+    snapshot: MetricsSnapshot,
     memory,
 ) -> list[UpdateResult]:
-    """Update SKILL.md files that opt into outcome-driven iteration.
-
-    For each skill with `outcome_metrics: true` in its frontmatter,
-    refreshes evidence and, when guardrails allow, rewrites the
-    `## Instructions` section with outcome-backed adjustments.
-    """
+    """Update SKILL.md files that opt into explicit outcome governance."""
     from skills.registry import SkillRegistry
 
     registry = SkillRegistry()
@@ -42,7 +34,8 @@ def update_outcome_skills(
     workflow_enabled = True
     if config.agent is not None:
         workflow_enabled = getattr(config.agent.harness, "iteration_workflow_enabled", True)
-    for skill in registry.get_outcome_skills():
+
+    for skill in registry.all():
         origin = "emerged" if memory.get_emerged_skill(skill.name) else "base"
         memory.upsert_skill_state(
             skill.name,
@@ -50,6 +43,18 @@ def update_outcome_skills(
             path=str(skill.path),
             status=memory.resolve_skill_status(skill.name),
         )
+        if skill.outcome_contract is None:
+            if skill.outcome_metrics:
+                skill_updates.append(
+                    UpdateResult(
+                        path=str(skill.path),
+                        strategy="skill_skipped_deprecated",
+                        has_changes=False,
+                        old_content="",
+                        new_content="",
+                    )
+                )
+            continue
         if memory.resolve_skill_status(skill.name) != "active":
             skill_updates.append(
                 UpdateResult(
@@ -61,11 +66,41 @@ def update_outcome_skills(
                 )
             )
             continue
+
         feedback = summarise_skill_feedback(memory.get_skill_executions(skill.name, limit=20))
+        outcome_result = analyze_outcomes(snapshot, skill.outcome_contract, skill_name=skill.name)
+        observations = [
+            item
+            for item in snapshot.observations
+            if not item.skill_name or item.skill_name == skill.name
+        ]
+        if observations:
+            memory.record_outcome_observations(skill.name, observations)
+        if outcome_result.outcome_summary is not None:
+            memory.record_outcome_window_summary(
+                skill_name=skill.name,
+                primary_kpi=skill.outcome_contract.primary_kpi,
+                summary={
+                    "window": outcome_result.outcome_summary.window,
+                    "sample_count": outcome_result.outcome_summary.sample_count,
+                    "baseline_value": outcome_result.outcome_summary.baseline_value,
+                    "current_value": outcome_result.outcome_summary.current_value,
+                    "delta": outcome_result.outcome_summary.delta,
+                    "confidence": outcome_result.outcome_summary.confidence,
+                    "segment_breakdown": outcome_result.outcome_summary.segment_breakdown,
+                    "policy_state": outcome_result.outcome_summary.policy_state,
+                },
+                raw_stats=outcome_result.raw_stats,
+                exemplar_slice=outcome_result.exemplar_slice,
+            )
         if workflow_enabled:
-            update = _update_outcome_skill(skill, result, feedback, memory)
+            update = _update_outcome_skill(skill, outcome_result, feedback, memory)
         else:
-            reference_content = build_skill_reference_content(skill.update_section, result)
+            reference_content = build_skill_reference_content(
+                skill.update_section,
+                outcome_result,
+                primary_kpi=skill.outcome_contract.primary_kpi,
+            )
             update = update_reference(
                 path=skill.path,
                 strategy="replace_section",
@@ -76,7 +111,12 @@ def update_outcome_skills(
     return skill_updates
 
 
-def _update_outcome_skill(skill, result, feedback: SkillFeedbackSummary, memory) -> UpdateResult:
+def _update_outcome_skill(
+    skill,
+    result: OutcomeAnalysisResult,
+    feedback: SkillFeedbackSummary,
+    memory,
+) -> UpdateResult:
     from core.iteration_harness import IterationHarness, build_decision_packet
 
     current = skill.path.read_text(encoding="utf-8")
@@ -93,122 +133,6 @@ def _update_outcome_skill(skill, result, feedback: SkillFeedbackSummary, memory)
         ),
     )
     return decision.update
-
-
-def _rewrite_skill(
-    skill,
-    current: str,
-    result: AnalysisResult,
-    feedback: SkillFeedbackSummary,
-    memory,
-) -> UpdateResult | None:
-    prefix, body = _split_frontmatter(current)
-    instructions_body = _extract_section(body, "## Instructions")
-    if instructions_body is None:
-        return None
-
-    reference_content = build_skill_reference_content(skill.update_section, result)
-    rewritten_instructions = _build_rewritten_instructions(instructions_body, result, feedback)
-    new_body = replace_section(body, "## Instructions", rewritten_instructions)
-    new_body = replace_section(new_body, skill.update_section, reference_content)
-    new_content = (prefix + new_body.rstrip() + "\n") if prefix else (new_body.rstrip() + "\n")
-    if new_content == current:
-        return None
-
-    skill.path.write_text(new_content, encoding="utf-8")
-    evidence = dict(feedback.evidence)
-    evidence["top_titles"] = [record.title for record in result.top_performers]
-    evidence["patterns"] = list(result.patterns)
-    memory.record_skill_lifecycle_event(
-        skill.name,
-        "rewrite",
-        path=str(skill.path),
-        reason="Outcome-driven rewrite from metrics and execution evidence",
-        evidence=evidence,
-        content_before=current,
-        content_after=new_content,
-    )
-    return UpdateResult(
-        path=str(skill.path),
-        strategy="skill_rewrite",
-        has_changes=True,
-        old_content=current,
-        new_content=new_content,
-    )
-
-
-def _rollback_skill(
-    skill,
-    current: str,
-    result: AnalysisResult,
-    feedback: SkillFeedbackSummary,
-    memory,
-) -> UpdateResult | None:
-    event = memory.get_latest_skill_lifecycle_event(skill.name, action="rewrite")
-    if not event or not event.get("content_before"):
-        return None
-
-    restored = event["content_before"]
-    prefix, body = _split_frontmatter(restored)
-    updated_body = replace_section(
-        body,
-        skill.update_section,
-        build_skill_reference_content(skill.update_section, result),
-    )
-    new_content = (
-        (prefix + updated_body.rstrip() + "\n") if prefix else (updated_body.rstrip() + "\n")
-    )
-    if new_content == current:
-        return None
-
-    skill.path.write_text(new_content, encoding="utf-8")
-    memory.record_skill_lifecycle_event(
-        skill.name,
-        "rollback",
-        status="rolled_back",
-        path=str(skill.path),
-        reason="Negative feedback or evaluator score reverted the last automatic rewrite",
-        evidence=feedback.evidence,
-        content_before=current,
-        content_after=new_content,
-    )
-    return UpdateResult(
-        path=str(skill.path),
-        strategy="skill_rollback",
-        has_changes=True,
-        old_content=current,
-        new_content=new_content,
-    )
-
-
-def _build_rewritten_instructions(
-    instructions_body: str,
-    result: AnalysisResult,
-    feedback: SkillFeedbackSummary,
-) -> str:
-    base = _strip_managed_adjustments(instructions_body).rstrip()
-    lines = ["## Instructions", ""]
-    if base:
-        lines.append(base)
-        lines.append("")
-
-    lines.append(_MANAGED_ADJUSTMENTS_HEADING)
-    lines.append("")
-    if result.top_performers:
-        exemplar_titles = ", ".join(record.title for record in result.top_performers[:2])
-        lines.append(
-            f"- Mirror the specificity and framing seen in top performers such as: {exemplar_titles}."
-        )
-    for pattern in result.patterns:
-        lines.append(f"- Reinforce this observed pattern: {pattern}.")
-    lines.append(
-        "- Keep the manual guidance above intact; treat these adjustments as evidence-backed overrides only."
-    )
-    if feedback.average_score is not None:
-        lines.append(
-            f"- Recent evaluator average is {feedback.average_score:.2f}; keep iterating only while evidence stays positive."
-        )
-    return "\n".join(lines)
 
 
 def _strip_managed_adjustments(instructions_body: str) -> str:
@@ -258,28 +182,51 @@ def _extract_section(body: str, heading: str) -> str | None:
     return None
 
 
-def build_skill_reference_content(section: str, result: AnalysisResult) -> str:
-    """Build the Reference Data section for an outcome-metrics skill.
-
-    Output: heading + timestamp + Top Performers + Patterns.
-    Bottom performers are omitted (not useful as positive guidance).
-    """
+def build_skill_reference_content(
+    section: str,
+    result: OutcomeAnalysisResult,
+    *,
+    primary_kpi: str,
+) -> str:
+    """Build the managed reference section for an outcome-governed skill."""
     lines = [section, ""]
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines.append(f"*Auto-updated by evidune on {timestamp}*")
     lines.append("")
+    lines.append(f"### KPI Window: {primary_kpi}")
+    summary = result.outcome_summary
+    if summary is None:
+        lines.append(f"- Status: {result.summary}")
+        return "\n".join(lines) + "\n"
 
-    if result.top_performers:
-        lines.append("### Top Performers")
-        for i, r in enumerate(result.top_performers, 1):
-            metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
-            lines.append(f"{i}. **{r.title}** — {metrics_str}")
+    lines.append(f"- Sample size: {summary.sample_count}")
+    if summary.current_value is not None:
+        lines.append(f"- Current value: {summary.current_value:.3f}")
+    if summary.baseline_value is not None:
+        lines.append(f"- Baseline value: {summary.baseline_value:.3f}")
+    if summary.delta is not None:
+        lines.append(f"- Delta: {summary.delta:.3f}")
+    lines.append(f"- Confidence: {summary.confidence:.2f}")
+    if summary.policy_state:
+        active = [key for key, value in summary.policy_state.items() if value is True]
+        lines.append(f"- Policy state: {', '.join(active) if active else 'stable'}")
+    lines.append("")
+
+    if summary.segment_breakdown:
+        lines.append("### Segment Breakdown")
+        for segment in summary.segment_breakdown:
+            label = ", ".join(f"{k}={v}" for k, v in segment.get("segment", {}).items())
+            lines.append(
+                f"- {label or '(unlabeled)'}: value={segment['value']:.3f}, "
+                f"samples={segment['sample_count']}"
+            )
         lines.append("")
 
-    if result.patterns:
-        lines.append("### Patterns")
-        for p in result.patterns:
-            lines.append(f"- {p}")
+    if result.exemplar_slice:
+        lines.append("### Exemplars")
+        for exemplar in result.exemplar_slice:
+            label = exemplar.get("exemplar") or exemplar["entity_id"]
+            lines.append(f"- {label} ({primary_kpi}={exemplar[primary_kpi]:.3f})")
         lines.append("")
 
     return "\n".join(lines)
@@ -290,13 +237,7 @@ def build_reference_content(
     section: str | None,
     result: AnalysisResult,
 ) -> str:
-    """Build new content for a standalone reference document.
-
-    Includes Top Performers, Bottom Performers, and Patterns. Used for
-    references listed in the `references:` section of evidune.yaml —
-    *not* for outcome-metrics skills (those use
-    `build_skill_reference_content` which omits bottoms).
-    """
+    """Build new content for a standalone reference document."""
     lines: list[str] = []
 
     if strategy == "replace_section" and section:
@@ -305,22 +246,22 @@ def build_reference_content(
 
     if result.top_performers:
         lines.append("### Top Performers")
-        for i, r in enumerate(result.top_performers, 1):
-            metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
-            lines.append(f"{i}. **{r.title}** — {metrics_str}")
+        for i, record in enumerate(result.top_performers, 1):
+            metrics_str = ", ".join(f"{k}={v}" for k, v in record.metrics.items())
+            lines.append(f"{i}. **{record.title}** — {metrics_str}")
         lines.append("")
 
     if result.bottom_performers:
         lines.append("### Bottom Performers")
-        for r in result.bottom_performers:
-            metrics_str = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
-            lines.append(f"- {r.title} — {metrics_str}")
+        for record in result.bottom_performers:
+            metrics_str = ", ".join(f"{k}={v}" for k, v in record.metrics.items())
+            lines.append(f"- {record.title} — {metrics_str}")
         lines.append("")
 
     if result.patterns:
         lines.append("### Patterns")
-        for p in result.patterns:
-            lines.append(f"- {p}")
+        for pattern in result.patterns:
+            lines.append(f"- {pattern}")
         lines.append("")
 
     return "\n".join(lines)

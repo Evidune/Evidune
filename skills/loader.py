@@ -14,7 +14,7 @@ A skill can be:
 
 SKILL.md frontmatter supports:
   name, description, version, tags, triggers, anti_triggers,
-  outcome_metrics, update_section, evaluation_contract, plus arbitrary meta fields.
+  execution_contract, outcome_contract, plus arbitrary meta fields.
 
 The markdown body may contain "## Triggers", "## Anti-Triggers",
 and "## Examples" sections that augment the frontmatter.
@@ -29,7 +29,12 @@ from typing import Any
 
 import yaml
 
-from skills.evaluation import EvaluationContract, parse_evaluation_contract
+from skills.evaluation import (
+    ExecutionContract,
+    OutcomeContract,
+    parse_execution_contract,
+    parse_outcome_contract,
+)
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
@@ -46,20 +51,35 @@ class Skill:
     tags: list[str] = field(default_factory=list)
     triggers: list[str] = field(default_factory=list)
     anti_triggers: list[str] = field(default_factory=list)
-    outcome_metrics: bool = False  # Evidune-specific: participates in iteration
+    outcome_metrics: bool = False  # Legacy compatibility flag; use outcome_contract instead
     update_section: str = "## Reference Data"
-    evaluation_contract: EvaluationContract | None = None
+    execution_contract: ExecutionContract | None = None
+    outcome_contract: OutcomeContract | None = None
     instructions: str = ""  # Full markdown body of SKILL.md
     examples: list[str] = field(default_factory=list)  # Parsed "## Examples" entries
     references: dict[str, str] = field(default_factory=dict)  # filename → content
     scripts: dict[str, Path] = field(default_factory=dict)  # filename → path
     assets: dict[str, Path] = field(default_factory=dict)  # filename → path
+    deprecations: list[str] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)  # remaining frontmatter
 
     @property
     def root(self) -> Path:
         """Directory containing SKILL.md (for directory-based skills)."""
         return self.path.parent
+
+    @property
+    def evaluation_contract(self) -> ExecutionContract | None:
+        """Backward-compatible alias for the renamed execution contract."""
+        return self.execution_contract
+
+    @evaluation_contract.setter
+    def evaluation_contract(self, value: ExecutionContract | None) -> None:
+        self.execution_contract = value
+
+    @property
+    def participates_in_outcome_governance(self) -> bool:
+        return self.outcome_contract is not None
 
 
 def _extract_section(body: str, heading: str) -> str | None:
@@ -215,8 +235,21 @@ def parse_skill(path: str | Path) -> Skill:
         "anti_triggers",
         "outcome_metrics",
         "update_section",
+        "execution_contract",
+        "outcome_contract",
         "evaluation_contract",
     }
+
+    execution_contract = parse_execution_contract(frontmatter.get("execution_contract"))
+    if execution_contract is None:
+        execution_contract = parse_execution_contract(frontmatter.get("evaluation_contract"))
+    outcome_contract = parse_outcome_contract(frontmatter.get("outcome_contract"))
+    deprecations: list[str] = []
+    if frontmatter.get("outcome_metrics", False) and outcome_contract is None:
+        deprecations.append(
+            "Frontmatter field `outcome_metrics` is deprecated; define `outcome_contract` "
+            "to participate in run-side outcome governance."
+        )
 
     return Skill(
         name=frontmatter.get("name", path.stem),
@@ -228,12 +261,14 @@ def parse_skill(path: str | Path) -> Skill:
         anti_triggers=anti_triggers,
         outcome_metrics=frontmatter.get("outcome_metrics", False),
         update_section=frontmatter.get("update_section", "## Reference Data"),
-        evaluation_contract=parse_evaluation_contract(frontmatter.get("evaluation_contract")),
+        execution_contract=execution_contract,
+        outcome_contract=outcome_contract,
         instructions=body,
         examples=examples,
         references=references,
         scripts=scripts,
         assets=assets,
+        deprecations=deprecations,
         meta={k: v for k, v in frontmatter.items() if k not in known_keys},
     )
 

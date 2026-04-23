@@ -1,9 +1,4 @@
-"""End-to-end integration tests for skill self-iteration.
-
-Verifies Evidune's core differentiator: SKILL.md files with outcome_metrics: true
-can be rewritten and rolled back by the iteration loop, based on
-real-world business metrics and execution evidence.
-"""
+"""End-to-end integration tests for outcome-governed skill iteration."""
 
 from pathlib import Path
 
@@ -25,20 +20,35 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
     # Metrics CSV
     _write(
         tmp_path / "data.csv",
-        "title,reads,upvotes\n"
-        "Golden Article,5000,200\n"
-        "Decent Article,1500,60\n"
-        "Mediocre Article,400,12\n"
-        "Flop Article,80,2\n",
+        "title,reads,upvotes,date,channel\n"
+        "Golden Article,5000,200,2026-04-10,search\n"
+        "Decent Article,1500,60,2026-04-09,social\n"
+        "Mediocre Article,400,12,2026-04-02,social\n"
+        "Flop Article,80,2,2026-04-01,search\n",
     )
 
-    # Skill WITH outcome_metrics
+    # Skill WITH an explicit outcome contract
     _write(
         tmp_path / "skills" / "write-article" / "SKILL.md",
         "---\n"
         "name: write-article\n"
         "description: Write compelling articles\n"
-        "outcome_metrics: true\n"
+        "outcome_contract:\n"
+        "  entity: article\n"
+        "  primary_kpi: reads\n"
+        "  supporting_kpis: [upvotes]\n"
+        "  dimensions: [channel]\n"
+        "  window:\n"
+        "    current_days: 7\n"
+        "    baseline_days: 7\n"
+        "  min_sample_size: 2\n"
+        "  rewrite_policy:\n"
+        "    target: 6000\n"
+        "    min_delta: 100\n"
+        "    require_segment: true\n"
+        "    severe_regression_delta: 500\n"
+        "  rollback_policy:\n"
+        "    max_negative_delta: 200\n"
         "---\n"
         "## Instructions\n"
         "Write good stuff.\n"
@@ -50,7 +60,7 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
         "Do not touch this section.\n",
     )
 
-    # Skill WITHOUT outcome_metrics — must NOT be modified
+    # Skill WITHOUT outcome contract — must NOT be modified
     _write(
         tmp_path / "skills" / "other-skill" / "SKILL.md",
         "---\n"
@@ -72,6 +82,8 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
             "config": {
                 "file": str(tmp_path / "data.csv"),
                 "title_field": "title",
+                "timestamp_field": "date",
+                "dimension_fields": ["channel"],
                 "metric_fields": ["reads", "upvotes"],
                 "sort_metric": "reads",
             },
@@ -101,10 +113,10 @@ class TestSkillSelfIteration:
 
         skill_content = (tmp_path / "skills" / "write-article" / "SKILL.md").read_text()
 
-        # Reference Data section should be replaced with real data
-        assert "Golden Article" in skill_content
-        assert "Decent Article" in skill_content
-        assert "reads=5000.0" in skill_content
+        # Reference Data section should be replaced with outcome governance data
+        assert "KPI Window: reads" in skill_content
+        assert "Current value:" in skill_content
+        assert "Baseline value:" in skill_content
         assert "Auto-updated by evidune" in skill_content
 
         # Placeholder text is gone
@@ -117,7 +129,7 @@ class TestSkillSelfIteration:
         assert "## Footer" in skill_content
         assert "Do not touch this section." in skill_content
 
-    def test_skips_skills_without_outcome_metrics(self, tmp_path: Path):
+    def test_skips_skills_without_outcome_contract(self, tmp_path: Path):
         cfg_path = _setup_project(tmp_path)
         config = load_config(cfg_path)
 
@@ -137,7 +149,7 @@ class TestSkillSelfIteration:
         run_iteration(config, base_dir=tmp_path)
         after = (tmp_path / "skills" / "write-article" / "SKILL.md").read_text()
 
-        # Even the outcome_metrics skill is untouched when auto_update=false
+        # Even the outcome-governed skill is untouched when auto_update=false
         assert original == after
 
     def test_report_includes_skill_updates(self, tmp_path: Path):
@@ -153,15 +165,30 @@ class TestSkillSelfIteration:
 
     def test_custom_update_section(self, tmp_path: Path):
         # Skill with custom update_section frontmatter
-        _write(tmp_path / "data.csv", "title,reads\nA,100\nB,50\n")
+        _write(
+            tmp_path / "data.csv",
+            "title,reads,date,channel\nA,100,2026-04-10,email\nB,50,2026-04-02,email\n",
+        )
 
         _write(
             tmp_path / "skills" / "custom" / "SKILL.md",
             "---\n"
             "name: custom\n"
             "description: Custom section skill\n"
-            "outcome_metrics: true\n"
             'update_section: "## My Custom Section"\n'
+            "outcome_contract:\n"
+            "  entity: article\n"
+            "  primary_kpi: reads\n"
+            "  dimensions: [channel]\n"
+            "  window:\n"
+            "    current_days: 7\n"
+            "    baseline_days: 7\n"
+            "  min_sample_size: 1\n"
+            "  rewrite_policy:\n"
+            "    min_delta: 10\n"
+            "    require_segment: false\n"
+            "  rollback_policy:\n"
+            "    max_negative_delta: 10\n"
             "---\n"
             "## Instructions\n"
             "Do things.\n"
@@ -179,6 +206,8 @@ class TestSkillSelfIteration:
                 "adapter": "generic_csv",
                 "config": {
                     "file": str(tmp_path / "data.csv"),
+                    "timestamp_field": "date",
+                    "dimension_fields": ["channel"],
                     "metric_fields": ["reads"],
                     "sort_metric": "reads",
                 },
@@ -199,7 +228,7 @@ class TestSkillSelfIteration:
 
         # Custom section was updated
         assert "Auto-updated by evidune" in skill_content
-        assert "A" in skill_content  # Top performer
+        assert "KPI Window: reads" in skill_content
         assert "(old data here)" not in skill_content
 
         # Default "## Reference Data" section was NOT touched

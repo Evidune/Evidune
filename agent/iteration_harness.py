@@ -33,11 +33,14 @@ class IterationDecisionPacket:
     update_section: str = "## Reference Data"
     current_content: str = ""
     metrics_summary: dict[str, Any] = field(default_factory=dict)
-    top_performers: list[dict[str, Any]] = field(default_factory=list)
-    patterns: list[str] = field(default_factory=list)
+    outcome_summary: dict[str, Any] | None = None
+    regression_summary: dict[str, Any] = field(default_factory=dict)
+    exemplar_slice: list[dict[str, Any]] = field(default_factory=list)
     executions: list[dict[str, Any]] = field(default_factory=list)
-    evaluation_contract: dict[str, Any] | None = None
-    contract_evaluations: list[dict[str, Any]] = field(default_factory=list)
+    execution_contract: dict[str, Any] | None = None
+    execution_evaluations: list[dict[str, Any]] = field(default_factory=list)
+    outcome_contract: dict[str, Any] | None = None
+    outcome_summaries: list[dict[str, Any]] = field(default_factory=list)
     feedback: SkillFeedbackSummary | None = None
     lifecycle_history: list[dict[str, Any]] = field(default_factory=list)
     surface: str = "run"
@@ -123,11 +126,15 @@ def _strip_managed_adjustments(instructions_body: str) -> str:
 
 def _build_rewritten_instructions(
     instructions_body: str,
-    top_performers: list[dict[str, Any]],
-    patterns: list[str],
+    *,
+    outcome_contract: dict[str, Any],
+    outcome_summary: dict[str, Any] | None,
+    regression_summary: dict[str, Any],
+    exemplar_slice: list[dict[str, Any]],
     feedback: SkillFeedbackSummary,
 ) -> str:
     base = _strip_managed_adjustments(instructions_body).rstrip()
+    primary_kpi = outcome_contract.get("primary_kpi") or "the primary KPI"
     lines = ["## Instructions", ""]
     if base:
         lines.append(base)
@@ -135,19 +142,38 @@ def _build_rewritten_instructions(
 
     lines.append(_MANAGED_ADJUSTMENTS_HEADING)
     lines.append("")
-    if top_performers:
-        exemplar_titles = ", ".join(item["title"] for item in top_performers[:2])
+    if outcome_summary:
+        current_value = outcome_summary.get("current_value")
+        baseline_value = outcome_summary.get("baseline_value")
+        delta = outcome_summary.get("delta")
+        if current_value is not None and baseline_value is not None and delta is not None:
+            lines.append(
+                f"- Optimize for `{primary_kpi}` using the latest window evidence: "
+                f"current={current_value:.3f}, baseline={baseline_value:.3f}, delta={delta:.3f}."
+            )
+    if regression_summary.get("rewrite_candidate"):
         lines.append(
-            f"- Mirror the specificity and framing seen in top performers such as: {exemplar_titles}."
+            f"- Prioritize changes that improve `{primary_kpi}` in the weakest current segment."
         )
-    for pattern in patterns:
+    for pattern in regression_summary.get("legacy_patterns", [])[:3]:
         lines.append(f"- Reinforce this observed pattern: {pattern}.")
+    for segment in (outcome_summary or {}).get("segment_breakdown", [])[:2]:
+        label = ", ".join(f"{k}={v}" for k, v in segment.get("segment", {}).items())
+        lines.append(
+            f"- Address the regression in segment `{label or 'default'}` "
+            f"(value={segment['value']:.3f}, samples={segment['sample_count']})."
+        )
+    for exemplar in exemplar_slice[:2]:
+        label = exemplar.get("exemplar") or exemplar.get("entity_id") or "example"
+        value = exemplar.get(primary_kpi)
+        if value is not None:
+            lines.append(f"- Learn from exemplar `{label}` ({primary_kpi}={value:.3f}).")
     lines.append(
         "- Keep the manual guidance above intact; treat these adjustments as evidence-backed overrides only."
     )
     if feedback.average_score is not None:
         lines.append(
-            f"- Recent evaluator average is {feedback.average_score:.2f}; keep iterating only while evidence stays positive."
+            f"- Recent execution evaluator average is {feedback.average_score:.2f}; do not trade execution quality for KPI gains."
         )
     return "\n".join(lines)
 
@@ -169,27 +195,34 @@ def build_decision_packet(
     emerged = memory.get_emerged_skill(skill.name)
     origin = state["origin"] if state else ("emerged" if emerged else "base")
     executions = memory.get_skill_executions(skill.name, limit=20)
-    contract_row = memory.get_skill_evaluation_contract(skill.name)
-    contract = contract_row.get("contract") if contract_row else None
-    contract_evaluations = memory.list_skill_evaluations(skill.name, limit=20)
-    top_performers = []
-    patterns: list[str] = []
-    metrics_summary: dict[str, Any] = {}
-    if result is not None:
-        top_performers = [
+    execution_contract_row = memory.get_skill_evaluation_contract(skill.name)
+    execution_contract = execution_contract_row.get("contract") if execution_contract_row else None
+    execution_evaluations = memory.list_skill_evaluations(skill.name, limit=20)
+    outcome_summaries = memory.list_outcome_window_summaries(skill.name, limit=20)
+
+    outcome_summary = getattr(result, "outcome_summary", None) if result is not None else None
+    regression_summary = dict(getattr(result, "regression_summary", {}) or {})
+    exemplar_slice = list(getattr(result, "exemplar_slice", []) or [])
+    metrics_summary = dict(getattr(result, "raw_stats", {}) or {})
+    if result is not None and not exemplar_slice:
+        top_performers = list(getattr(result, "top_performers", []) or [])
+        exemplar_slice = [
             {
-                "title": record.title,
-                "metrics": dict(record.metrics),
-                "metadata": dict(getattr(record, "metadata", {}) or {}),
+                "entity_id": getattr(item, "title", ""),
+                "exemplar": getattr(item, "title", ""),
+                **dict(getattr(item, "metrics", {}) or {}),
             }
-            for record in result.top_performers
+            for item in top_performers
         ]
-        patterns = list(result.patterns)
-        metrics_summary = {
-            "top_performer_count": len(top_performers),
-            "pattern_count": len(patterns),
-            "top_titles": [record["title"] for record in top_performers],
-        }
+        if top_performers:
+            metrics_summary.setdefault(
+                "top_titles",
+                [getattr(item, "title", "") for item in top_performers],
+            )
+    if result is not None and "legacy_patterns" not in regression_summary:
+        patterns = list(getattr(result, "patterns", []) or [])
+        if patterns:
+            regression_summary["legacy_patterns"] = patterns
 
     return IterationDecisionPacket(
         skill_name=skill.name,
@@ -198,11 +231,29 @@ def build_decision_packet(
         update_section=skill.update_section,
         current_content=current,
         metrics_summary=metrics_summary,
-        top_performers=top_performers,
-        patterns=patterns,
+        outcome_summary=(
+            {
+                "window": outcome_summary.window,
+                "sample_count": outcome_summary.sample_count,
+                "baseline_value": outcome_summary.baseline_value,
+                "current_value": outcome_summary.current_value,
+                "delta": outcome_summary.delta,
+                "confidence": outcome_summary.confidence,
+                "segment_breakdown": outcome_summary.segment_breakdown,
+                "policy_state": outcome_summary.policy_state,
+            }
+            if outcome_summary is not None
+            else None
+        ),
+        regression_summary=regression_summary,
+        exemplar_slice=exemplar_slice,
         executions=executions,
-        evaluation_contract=contract,
-        contract_evaluations=contract_evaluations,
+        execution_contract=(
+            skill.execution_contract.to_dict() if skill.execution_contract else execution_contract
+        ),
+        execution_evaluations=execution_evaluations,
+        outcome_contract=skill.outcome_contract.to_dict() if skill.outcome_contract else None,
+        outcome_summaries=outcome_summaries,
         feedback=feedback or summarise_skill_feedback(executions),
         lifecycle_history=memory.list_skill_lifecycle_events(skill.name, limit=20),
         surface=surface,
@@ -310,7 +361,7 @@ class IterationHarness:
             accepted=reviewer_ok,
             meta={"decision": decision},
         )
-        if decision in {"rewrite", "rollback"} and not reviewer_ok:
+        if decision in {"rewrite", "rollback", "refresh"} and not reviewer_ok:
             decision = "keep"
             proposed_content = ""
 
@@ -368,22 +419,26 @@ class IterationHarness:
         feedback = packet.feedback or summarise_skill_feedback(packet.executions)
         latest_rewrite = self._latest_rewrite_event(packet.lifecycle_history)
         reference_content = self._build_reference_content(packet)
-        contract_decision = self._contract_decision(packet)
+        execution_decision = self._execution_contract_decision(packet)
+        outcome_policy = (packet.outcome_summary or {}).get("policy_state", {})
 
-        if contract_decision == "disable":
-            if latest_rewrite and latest_rewrite.get("content_before"):
-                return (
-                    "rollback",
-                    self._build_rollback_content(
-                        restored=latest_rewrite["content_before"],
-                        section=packet.update_section,
-                        reference_content=reference_content,
-                    ),
-                )
-            return "disable", ""
+        if (
+            outcome_policy.get("rollback_candidate")
+            and latest_rewrite
+            and latest_rewrite.get("content_before")
+        ):
+            return (
+                "rollback",
+                self._build_rollback_content(
+                    restored=latest_rewrite["content_before"],
+                    section=packet.update_section,
+                    reference_content=reference_content,
+                ),
+            )
 
-        if feedback.should_disable and not (
-            packet.contract_evaluations and feedback.signal_samples == 0
+        if execution_decision == "disable" or (
+            feedback.should_disable
+            and not (packet.execution_evaluations and feedback.signal_samples == 0)
         ):
             if latest_rewrite and latest_rewrite.get("content_before"):
                 return (
@@ -396,7 +451,10 @@ class IterationHarness:
                 )
             return "disable", ""
 
-        if contract_decision == "rewrite":
+        if outcome_policy.get("severe_regression") and not latest_rewrite:
+            return "disable", ""
+
+        if outcome_policy.get("rewrite_candidate"):
             proposed = self._build_rewrite_content(
                 current=packet.current_content,
                 packet=packet,
@@ -405,7 +463,7 @@ class IterationHarness:
             if proposed:
                 return "rewrite", proposed
 
-        if self._has_metric_evidence(packet) and feedback.should_rewrite:
+        if packet.exemplar_slice and feedback.should_rewrite:
             proposed = self._build_rewrite_content(
                 current=packet.current_content,
                 packet=packet,
@@ -413,6 +471,24 @@ class IterationHarness:
             )
             if proposed:
                 return "rewrite", proposed
+
+        if execution_decision == "rewrite":
+            proposed = self._build_rewrite_content(
+                current=packet.current_content,
+                packet=packet,
+                reference_content=reference_content,
+            )
+            if proposed:
+                return "rewrite", proposed
+
+        if packet.surface == "run" and reference_content.strip():
+            refreshed = self._build_refresh_content(
+                current=packet.current_content,
+                section=packet.update_section,
+                reference_content=reference_content,
+            )
+            if refreshed and refreshed != packet.current_content:
+                return "refresh", refreshed
 
         return "keep", ""
 
@@ -522,6 +598,38 @@ class IterationHarness:
                 "disabled",
             )
 
+        if decision == "refresh" and proposed_content:
+            Path(packet.skill_path).write_text(proposed_content, encoding="utf-8")
+            self.memory.upsert_skill_state(
+                packet.skill_name,
+                origin=packet.skill_origin,
+                path=packet.skill_path,
+                status="active",
+                reason="Outcome evidence refreshed without changing instructions",
+                evidence=evidence,
+            )
+            self.memory.record_skill_lifecycle_event(
+                packet.skill_name,
+                "refresh",
+                status="active",
+                path=packet.skill_path,
+                harness_task_id=harness_task_id,
+                reason="Outcome evidence refreshed without changing instructions",
+                evidence=evidence,
+                content_before=packet.current_content,
+                content_after=proposed_content,
+            )
+            return (
+                UpdateResult(
+                    path=packet.skill_path,
+                    strategy="skill_reference_refresh",
+                    has_changes=True,
+                    old_content=packet.current_content,
+                    new_content=proposed_content,
+                ),
+                "active",
+            )
+
         return (
             UpdateResult(
                 path=packet.skill_path,
@@ -541,20 +649,14 @@ class IterationHarness:
         return None
 
     @staticmethod
-    def _has_metric_evidence(packet: IterationDecisionPacket) -> bool:
-        return bool(packet.top_performers) and (
-            len(packet.top_performers) >= 2 or bool(packet.patterns)
-        )
-
-    @staticmethod
-    def _contract_evidence_summary(packet: IterationDecisionPacket) -> dict[str, Any]:
+    def _execution_contract_evidence_summary(packet: IterationDecisionPacket) -> dict[str, Any]:
         scores = [
             float(item["aggregate_score"])
-            for item in packet.contract_evaluations
+            for item in packet.execution_evaluations
             if item.get("aggregate_score") is not None
         ]
         criteria_totals: dict[str, list[float]] = {}
-        for item in packet.contract_evaluations:
+        for item in packet.execution_evaluations:
             for name, score in (item.get("criteria_scores") or {}).items():
                 try:
                     criteria_totals.setdefault(name, []).append(float(score))
@@ -571,9 +673,9 @@ class IterationHarness:
             "lowest_criteria": lowest,
         }
 
-    def _contract_decision(self, packet: IterationDecisionPacket) -> str:
-        contract = packet.evaluation_contract or {}
-        summary = self._contract_evidence_summary(packet)
+    def _execution_contract_decision(self, packet: IterationDecisionPacket) -> str:
+        contract = packet.execution_contract or {}
+        summary = self._execution_contract_evidence_summary(packet)
         average = summary["average_score"]
         samples = summary["samples"]
         if average is None or samples <= 0:
@@ -599,8 +701,6 @@ class IterationHarness:
 
     @staticmethod
     def _split_frontmatter(content: str) -> tuple[str, str]:
-        import re
-
         match = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL).match(content)
         if not match:
             return "", content
@@ -619,9 +719,11 @@ class IterationHarness:
             return ""
         rewritten = _build_rewritten_instructions(
             instructions_body,
-            packet.top_performers,
-            packet.patterns,
-            packet.feedback or summarise_skill_feedback(packet.executions),
+            outcome_contract=packet.outcome_contract or {},
+            outcome_summary=packet.outcome_summary,
+            regression_summary=packet.regression_summary,
+            exemplar_slice=packet.exemplar_slice,
+            feedback=packet.feedback or summarise_skill_feedback(packet.executions),
         )
         new_body = replace_section(body, "## Instructions", rewritten)
         if reference_content.strip():
@@ -641,32 +743,84 @@ class IterationHarness:
         updated_body = replace_section(body, section, reference_content)
         return (prefix + updated_body.rstrip() + "\n") if prefix else (updated_body.rstrip() + "\n")
 
+    def _build_refresh_content(
+        self,
+        *,
+        current: str,
+        section: str,
+        reference_content: str,
+    ) -> str:
+        prefix, body = self._split_frontmatter(current)
+        updated_body = replace_section(body, section, reference_content)
+        return (prefix + updated_body.rstrip() + "\n") if prefix else (updated_body.rstrip() + "\n")
+
     def _build_reference_content(self, packet: IterationDecisionPacket) -> str:
-        if not packet.top_performers and not packet.patterns and not packet.contract_evaluations:
+        legacy_patterns = packet.regression_summary.get("legacy_patterns", [])
+        if (
+            not packet.outcome_summary
+            and not packet.execution_evaluations
+            and not packet.exemplar_slice
+            and not legacy_patterns
+        ):
             return ""
         lines = [packet.update_section, ""]
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         lines.append(f"*Auto-updated by evidune on {timestamp}*")
         lines.append("")
 
-        if packet.top_performers:
-            lines.append("### Top Performers")
-            for idx, performer in enumerate(packet.top_performers, 1):
-                metrics_str = ", ".join(
-                    f"{key}={value}" for key, value in performer.get("metrics", {}).items()
-                )
-                lines.append(f"{idx}. **{performer['title']}** — {metrics_str}")
+        primary_kpi = (packet.outcome_contract or {}).get("primary_kpi")
+        if packet.outcome_summary and primary_kpi:
+            lines.append(f"### KPI Window: {primary_kpi}")
+            lines.append(f"- Sample size: {packet.outcome_summary.get('sample_count', 0)}")
+            current_value = packet.outcome_summary.get("current_value")
+            baseline_value = packet.outcome_summary.get("baseline_value")
+            delta = packet.outcome_summary.get("delta")
+            if current_value is not None:
+                lines.append(f"- Current value: {current_value:.3f}")
+            if baseline_value is not None:
+                lines.append(f"- Baseline value: {baseline_value:.3f}")
+            if delta is not None:
+                lines.append(f"- Delta: {delta:.3f}")
+            lines.append(f"- Confidence: {packet.outcome_summary.get('confidence', 0.0):.2f}")
+            active = [
+                key
+                for key, value in (packet.outcome_summary.get("policy_state") or {}).items()
+                if value is True
+            ]
+            lines.append(f"- Policy state: {', '.join(active) if active else 'stable'}")
             lines.append("")
 
-        if packet.patterns:
-            lines.append("### Patterns")
-            for pattern in packet.patterns:
+        segments = (packet.outcome_summary or {}).get("segment_breakdown") or []
+        if segments:
+            lines.append("### Segment Breakdown")
+            for segment in segments:
+                label = ", ".join(f"{k}={v}" for k, v in segment.get("segment", {}).items())
+                lines.append(
+                    f"- {label or '(unlabeled)'}: value={segment['value']:.3f}, "
+                    f"samples={segment['sample_count']}"
+                )
+            lines.append("")
+
+        if packet.exemplar_slice:
+            lines.append("### Exemplars")
+            for exemplar in packet.exemplar_slice:
+                label = exemplar.get("exemplar") or exemplar.get("entity_id") or "example"
+                value = exemplar.get(primary_kpi, None) if primary_kpi else None
+                if value is None:
+                    lines.append(f"- {label}")
+                else:
+                    lines.append(f"- {label} ({primary_kpi}={value:.3f})")
+            lines.append("")
+
+        if legacy_patterns:
+            lines.append("### Observed Patterns")
+            for pattern in legacy_patterns[:3]:
                 lines.append(f"- {pattern}")
             lines.append("")
 
-        if packet.contract_evaluations:
-            summary = self._contract_evidence_summary(packet)
-            lines.append("### Evaluation Contract Evidence")
+        if packet.execution_evaluations:
+            summary = self._execution_contract_evidence_summary(packet)
+            lines.append("### Execution Contract Evidence")
             lines.append(f"- Samples: {summary['samples']}")
             if summary["average_score"] is not None:
                 lines.append(f"- Average score: {summary['average_score']:.2f}")
@@ -680,19 +834,15 @@ class IterationHarness:
         feedback = packet.feedback or summarise_skill_feedback(packet.executions)
         return {
             "origin": packet.skill_origin,
-            "metrics_summary": packet.metrics_summary,
-            "top_titles": [item["title"] for item in packet.top_performers],
-            "patterns": list(packet.patterns),
-            "execution_count": len(packet.executions),
-            "evaluation_contract": packet.evaluation_contract or {},
-            "contract_evaluation_summary": self._contract_evidence_summary(packet),
-            "feedback": feedback.evidence,
-            "lifecycle_events": len(packet.lifecycle_history),
+            "execution_summary": self._execution_contract_evidence_summary(packet),
+            "outcome_summary": packet.outcome_summary or {},
+            "feedback_summary": feedback.evidence,
+            "lifecycle_context": {
+                "lifecycle_events": len(packet.lifecycle_history),
+                "recent_actions": [event["action"] for event in packet.lifecycle_history[:5]],
+            },
+            "exemplar_count": len(packet.exemplar_slice),
         }
 
     def _lifecycle_evidence(self, packet: IterationDecisionPacket) -> dict[str, Any]:
-        payload = self._evidence_payload(packet)
-        payload["recent_lifecycle_actions"] = [
-            event["action"] for event in packet.lifecycle_history[:5]
-        ]
-        return payload
+        return self._evidence_payload(packet)

@@ -140,3 +140,39 @@ def row_to_skill_lifecycle_event(row) -> dict[str, Any]:
         "content_after": row["content_after"],
         "created_at": row["created_at"],
     }
+
+
+def row_to_outcome_observation(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "skill_name": row["skill_name"],
+        "entity_id": row["entity_id"],
+        "observed_at": row["observed_at"] or "",
+        "metrics": json.loads(row["metrics_json"] or "{}"),
+        "dimensions": json.loads(row["dimensions_json"] or "{}"),
+        "source": row["source"] or "",
+        "skill_version": row["skill_version"] or "",
+        "run_id": row["run_id"] or 0,
+        "metadata": json.loads(row["metadata_json"] or "{}"),
+        "created_at": row["created_at"],
+    }
+
+
+def row_to_outcome_summary(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "skill_name": row["skill_name"],
+        "primary_kpi": row["primary_kpi"],
+        "sample_count": row["sample_count"],
+        "baseline_value": row["baseline_value"],
+        "current_value": row["current_value"],
+        "delta": row["delta"],
+        "confidence": row["confidence"],
+        "window": json.loads(row["window_json"] or "{}"),
+        "segment_breakdown": json.loads(row["segment_breakdown_json"] or "[]"),
+        "policy_state": json.loads(row["policy_state_json"] or "{}"),
+        "raw_stats": json.loads(row["raw_stats_json"] or "{}"),
+        "exemplar_slice": json.loads(row["exemplar_slice_json"] or "[]"),
+        "run_id": row["run_id"] or 0,
+        "created_at": row["created_at"],
+    }

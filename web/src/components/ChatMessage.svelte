@@ -92,10 +92,10 @@
     <SkillCreationCard creation={message.skillCreation} />
   {/if}
 
-  {#if !isUser && message.skillEvaluations && message.skillEvaluations.length > 0}
+  {#if !isUser && message.executionEvaluations && message.executionEvaluations.length > 0}
     <div class="skill-evals" data-testid="skill-evaluations">
-      {#each message.skillEvaluations as evaluation}
-        <span class="skill-eval" title={evaluation.reasoning || 'Skill evaluation'}>
+      {#each message.executionEvaluations as evaluation}
+        <span class="skill-eval" title={evaluation.reasoning || 'Execution evaluation'}>
           {evaluation.skill_name}: {Math.round((evaluation.aggregate_score ?? 0) * 100)}%
         </span>
       {/each}

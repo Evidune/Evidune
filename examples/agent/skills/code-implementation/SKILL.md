@@ -13,8 +13,7 @@ triggers:
   - 修改代码
   - 接入 API
   - 调试服务
-outcome_metrics: false
-evaluation_contract:
+execution_contract:
   version: 1
   min_pass_score: 0.7
   rewrite_below_score: 0.55
@@ -31,7 +30,7 @@ evaluation_contract:
     - name: change_safety
       description: The work preserves unrelated changes and respects tool/security boundaries.
       weight: 0.3
-  observable_metrics:
+  observable_signals:
     - name: validation_command_recorded
       description: A validation command, test result, or explicit inability to validate is recorded.
       source: execution_metadata

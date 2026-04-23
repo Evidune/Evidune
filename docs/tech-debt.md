@@ -14,12 +14,14 @@ new debt without pretending the existing debt is resolved.
 - `agent/tools/external.py` (hard limit exception): split shell/file/http/python helpers from tool declarations
 - `agent/tools/harness_tools.py` (hard limit exception): split runtime, validation, delivery, and maintenance tool declarations
 - `core/config.py` (hard limit exception): split config dataclasses from YAML loading
+- `core/analyzer.py` (hard limit exception): split legacy ranking analysis from outcome window aggregation helpers
 - `core/project_init.py` (hard limit exception): move starter project templates into package data files
-- `core/iteration_helpers.py` (hard limit exception): split outcome iteration orchestration from markdown transform helpers
 - `core/loop.py` (hard limit exception): split CLI parsing from runtime wiring
 - `gateway/web.py` (hard limit exception): split HTTP handlers from gateway lifecycle
 - `memory/schema.py` (hard limit exception): split DDL from migrations and index maintenance helpers
 - `memory/store.py` (hard limit exception): split conversation and fact/execution APIs into focused modules
+- `skills/evaluation.py` (hard limit exception): split execution contract models from outcome contract parsing and frontmatter writers
+- `skills/registry.py` (hard limit exception): split matching, indexing, and registry serialization helpers
 - `web/src/App.svelte` (hard limit exception): split state orchestration from page layout
 - `web/src/components/ConversationList.svelte` (hard limit exception): split rendering from sidebar actions
 

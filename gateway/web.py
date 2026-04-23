@@ -371,7 +371,8 @@ class WebGateway(Gateway):
             "execution_ids": response.metadata.get("execution_ids", []),
             "emerged_skill": response.metadata.get("emerged_skill"),
             "skill_creation": response.metadata.get("skill_creation"),
-            "skill_evaluations": response.metadata.get("skill_evaluations", []),
+            "execution_evaluations": response.metadata.get("execution_evaluations", []),
+            "outcome_governance": response.metadata.get("outcome_governance", []),
             "facts_extracted": response.metadata.get("facts_extracted", 0),
             "identity": response.metadata.get("identity"),
             "mode": response.metadata.get("mode"),
@@ -444,6 +445,8 @@ class WebGateway(Gateway):
                         name=skill_name,
                         path=skill_path,
                         update_section="## Reference Data",
+                        execution_contract=None,
+                        outcome_contract=None,
                     )
                     current = (
                         Path(skill_path).read_text(encoding="utf-8")

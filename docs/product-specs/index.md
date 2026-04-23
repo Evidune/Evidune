@@ -10,6 +10,7 @@ Current gaps to fill:
 Tracked specs:
 
 - [Conversation Mode](conversation-mode.md): persisted `plan` / `execute` behavior and plan state
+- [Outcome Governance](outcome-governance.md): split execution-quality evidence from business KPI governance and define the normalized outcome loop
 - [Swarm Harness](swarm-harness.md): bounded multi-role orchestration, squad persistence,
   task artifacts, and streaming event surfaces
 - [Skill Iteration](skill-iteration.md): shared governance workflow, lifecycle semantics,

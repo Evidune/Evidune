@@ -23,7 +23,9 @@ class SkillRecord:
     references: list[str] = field(default_factory=list)
     triggers: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
-    evaluation_contract: dict | None = None
+    execution_contract: dict | None = None
+    outcome_contract: dict | None = None
+    warnings: list[str] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
     last_loaded_at: str = ""
@@ -31,6 +33,11 @@ class SkillRecord:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @property
+    def evaluation_contract(self) -> dict | None:
+        """Backward-compatible alias for older tests and callers."""
+        return self.execution_contract
 
 
 @dataclass(frozen=True)

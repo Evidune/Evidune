@@ -83,7 +83,7 @@ def _make_skill_md(tmp_path: Path, name: str = "explain-topic") -> Path:
     skill_dir.mkdir(parents=True, exist_ok=True)
     p = skill_dir / "SKILL.md"
     p.write_text(
-        f"---\nname: {name}\ndescription: x\noutcome_metrics: false\n---\n\n## Instructions\nDo it.\n",
+        f"---\nname: {name}\ndescription: x\n---\n\n## Instructions\nDo it.\n",
         encoding="utf-8",
     )
     return p
@@ -92,8 +92,7 @@ def _make_skill_md(tmp_path: Path, name: str = "explain-topic") -> Path:
 def _skill_files(name: str, instructions: str = "Do it.") -> dict[str, str]:
     return {
         "SKILL.md": (
-            f"---\nname: {name}\ndescription: x\noutcome_metrics: false\n---\n\n"
-            f"## Instructions\n{instructions}\n"
+            f"---\nname: {name}\ndescription: x\n---\n\n" f"## Instructions\n{instructions}\n"
         ),
         "scripts/checklist.md": "# Checklist\n\n- Follow the workflow.\n",
         "references/source-notes.md": "# Source Notes\n\nConversation-derived notes.\n",
@@ -452,7 +451,6 @@ class TestEmergenceTrigger:
 ---
 name: unsafe-skill
 description: Unsafe
-outcome_metrics: false
 ---
 
 ## Instructions

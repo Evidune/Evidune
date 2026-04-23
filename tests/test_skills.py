@@ -18,7 +18,15 @@ SAMPLE_SKILL = """---
 name: write-article
 description: Write a compelling long-form article
 tags: [writing, long-form, content]
-outcome_metrics: true
+outcome_contract:
+  entity: article
+  primary_kpi: reads
+  supporting_kpis: [upvotes]
+  dimensions: [channel]
+  window:
+    current_days: 7
+    baseline_days: 7
+  min_sample_size: 3
 ---
 
 ## Instructions
@@ -44,7 +52,6 @@ triggers:
 anti_triggers:
   - user imports openai SDK
   - task is about general programming
-outcome_metrics: false
 update_section: "## Reference Data"
 ---
 
@@ -87,7 +94,9 @@ class TestParseSkill:
         assert skill.name == "write-article"
         assert skill.description == "Write a compelling long-form article"
         assert "writing" in skill.tags
-        assert skill.outcome_metrics is True
+        assert skill.outcome_contract is not None
+        assert skill.participates_in_outcome_governance is True
+        assert skill.outcome_contract.primary_kpi == "reads"
         assert "Be practical" in skill.instructions
         assert skill.version == "1.0.0"  # default
         assert skill.update_section == "## Reference Data"  # default
@@ -181,11 +190,11 @@ Body
         skill = parse_skill(path)
         assert skill.update_section == "## My Custom Section"
 
-    def test_evaluation_contract_frontmatter(self, tmp_path: Path):
+    def test_execution_contract_frontmatter(self, tmp_path: Path):
         content = """---
 name: triage
 description: Triage incidents
-evaluation_contract:
+execution_contract:
   version: 1
   min_pass_score: 0.7
   rewrite_below_score: 0.55
@@ -199,7 +208,7 @@ evaluation_contract:
     - name: evidence_quality
       description: Uses evidence
       weight: 0.4
-  observable_metrics:
+  observable_signals:
     - name: tool_verification_used
       description: Tool evidence was checked
       source: tool_trace
@@ -214,11 +223,43 @@ Do triage.
 """
         path = _write_skill(tmp_path / "SKILL.md", content)
         skill = parse_skill(path)
-        assert skill.evaluation_contract is not None
-        assert skill.evaluation_contract.criteria[0].name == "goal_completion"
-        assert skill.evaluation_contract.observable_metrics[0].source == "tool_trace"
-        assert "skipped_required_verification" in skill.evaluation_contract.failure_modes
+        assert skill.execution_contract is not None
+        assert skill.execution_contract.criteria[0].name == "goal_completion"
+        assert skill.execution_contract.observable_signals[0].source == "tool_trace"
+        assert "skipped_required_verification" in skill.execution_contract.failure_modes
         assert skill.meta["custom_field"] == "hello"
+
+    def test_legacy_evaluation_contract_reads_as_execution_contract(self, tmp_path: Path):
+        content = """---
+name: triage
+description: Triage incidents
+evaluation_contract:
+  version: 1
+  criteria:
+    - name: goal_completion
+      description: Completes the triage outcome
+      weight: 1.0
+---
+## Instructions
+Do triage.
+"""
+        skill = parse_skill(_write_skill(tmp_path / "SKILL.md", content))
+        assert skill.execution_contract is not None
+        assert skill.execution_contract.criteria[0].name == "goal_completion"
+
+    def test_legacy_outcome_metrics_flag_is_deprecated_without_contract(self, tmp_path: Path):
+        content = """---
+name: legacy
+description: Legacy outcome skill
+outcome_metrics: true
+---
+## Instructions
+Legacy.
+"""
+        skill = parse_skill(_write_skill(tmp_path / "SKILL.md", content))
+        assert skill.outcome_contract is None
+        assert skill.deprecations
+        assert "deprecated" in skill.deprecations[0]
 
 
 class TestLoadSkillsFromDir:
@@ -300,19 +341,19 @@ class TestSkillRegistry:
         assert record.path.endswith("SKILL.md")
         assert "writing" in record.tags
 
-    def test_records_expose_evaluation_contract_summary(self, tmp_path: Path):
+    def test_records_expose_execution_contract_summary(self, tmp_path: Path):
         _write_skill(
             tmp_path / "triage" / "SKILL.md",
             """---
 name: triage
 description: Triage incidents
-evaluation_contract:
+execution_contract:
   version: 1
   criteria:
     - name: goal_completion
       description: Completes triage
       weight: 1.0
-  observable_metrics:
+  observable_signals:
     - name: tool_verification_used
       description: Tool evidence was checked
       source: tool_trace
@@ -326,8 +367,8 @@ Do triage.
         registry = SkillRegistry()
         registry.load_directory(tmp_path)
         record = registry.records()[0]
-        assert record.evaluation_contract["criteria"] == ["goal_completion"]
-        assert record.evaluation_contract["observable_metrics"] == ["tool_verification_used"]
+        assert record.execution_contract["criteria"] == ["goal_completion"]
+        assert record.execution_contract["observable_signals"] == ["tool_verification_used"]
 
     def test_find_matches_reports_reasons(self, registry: SkillRegistry):
         matches = registry.find_matches("write a long-form article")

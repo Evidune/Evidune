@@ -23,8 +23,23 @@ class MetricsSnapshot:
     """A collection of metric records from a single fetch."""
 
     domain: str
-    records: list[MetricRecord]
+    records: list[MetricRecord] = field(default_factory=list)
+    observations: list[OutcomeObservation] = field(default_factory=list)
     fetched_at: str = ""
+
+
+@dataclass
+class OutcomeObservation:
+    """One normalized business outcome observation."""
+
+    entity_id: str
+    timestamp: str
+    metrics: dict[str, float | int]
+    dimensions: dict[str, Any] = field(default_factory=dict)
+    source: str = ""
+    skill_name: str = ""
+    skill_version: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class MetricsAdapter(ABC):

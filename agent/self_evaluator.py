@@ -76,7 +76,7 @@ Respond ONLY with a JSON object in this exact format:
 {{"score": <number 0-1>, "reasoning": "<2-3 sentence explanation>"}}
 """
 
-_CONTRACT_EVAL_PROMPT_TEMPLATE = """You are an impartial judge evaluating an AI assistant's response against a skill-specific evaluation contract.
+_CONTRACT_EVAL_PROMPT_TEMPLATE = """You are an impartial judge evaluating an AI assistant's response against a skill-specific execution contract.
 
 # Skill Definition
 
@@ -86,7 +86,7 @@ _CONTRACT_EVAL_PROMPT_TEMPLATE = """You are an impartial judge evaluating an AI 
 **Instructions**:
 {instructions}
 
-# Evaluation Contract
+# Execution Contract
 
 {contract}
 
@@ -124,7 +124,7 @@ Respond ONLY with JSON:
 }}
 """
 
-_DISCOVER_CONTRACT_PROMPT_TEMPLATE = """You are designing an evaluation contract for a reusable AI skill.
+_DISCOVER_CONTRACT_PROMPT_TEMPLATE = """You are designing an execution contract for a reusable AI skill.
 
 # Skill
 
@@ -143,7 +143,7 @@ Description: {skill_description}
 
 {assistant_output}
 
-Create a compact evaluation contract that can judge future executions of this
+Create a compact execution contract that can judge future executions of this
 skill. Prefer objective criteria and observable signals available from user
 input, assistant output, tool trace, feedback, execution metadata, or configured
 metrics. Do not require external integrations that are not already available.
@@ -159,7 +159,7 @@ Respond ONLY with JSON in this shape:
   "criteria": [
     {{"name": "goal_completion", "description": "...", "weight": 0.4}}
   ],
-  "observable_metrics": [
+  "observable_signals": [
     {{"name": "tool_verification_used", "description": "...", "source": "tool_trace", "weight": 0.2}}
   ],
   "failure_modes": ["hallucinated_external_state"]
@@ -209,7 +209,7 @@ def _format_contract(contract: EvaluationContract) -> str:
     )
     observables = "\n".join(
         f"- {item.name} ({item.source}, weight={item.weight}): {item.description}"
-        for item in contract.observable_metrics
+        for item in contract.observable_signals
     )
     failures = "\n".join(f"- {item}" for item in contract.failure_modes)
     return (
@@ -218,7 +218,7 @@ def _format_contract(contract: EvaluationContract) -> str:
         f"rewrite_below={contract.rewrite_below_score}, "
         f"disable_below={contract.disable_below_score}\n\n"
         f"Criteria:\n{criteria or '(none)'}\n\n"
-        f"Observable metrics:\n{observables or '(none)'}\n\n"
+        f"Observable signals:\n{observables or '(none)'}\n\n"
         f"Failure modes:\n{failures or '(none)'}"
     )
 

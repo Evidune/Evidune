@@ -46,9 +46,11 @@ metrics:
   adapter: generic_csv
   config:
     file: data/task-metrics.csv
-    title_field: task
+    entity_id_field: task_id
+    exemplar_field: task
+    timestamp_field: date
     metric_fields: [success_score, reuse_count]
-    metadata_fields: [date, outcome]
+    dimension_fields: [channel, outcome]
     sort_metric: success_score
 
 references:

@@ -12,8 +12,7 @@ triggers:
   - 创建 skill
   - 创建能力
   - 更新 skill
-outcome_metrics: false
-evaluation_contract:
+execution_contract:
   version: 1
   min_pass_score: 0.7
   rewrite_below_score: 0.55
@@ -30,7 +29,7 @@ evaluation_contract:
     - name: lifecycle_clarity
       description: The response and metadata explain lifecycle state and next availability.
       weight: 0.3
-  observable_metrics:
+  observable_signals:
     - name: skill_creation_metadata
       description: Response metadata includes the skill creation status when a transaction occurred.
       source: execution_metadata

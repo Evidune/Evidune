@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
-from core.metrics import MetricRecord, MetricsSnapshot
+from core.metrics import MetricRecord, MetricsSnapshot, OutcomeObservation
+from skills.evaluation import OutcomeContract
 
 
 @dataclass
@@ -18,6 +20,33 @@ class AnalysisResult:
     bottom_performers: list[MetricRecord]
     patterns: list[str]
     summary: str
+    raw_stats: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OutcomeWindowSummary:
+    """Outcome KPI summary for one skill over the configured windows."""
+
+    window: dict[str, Any]
+    sample_count: int
+    baseline_value: float | None
+    current_value: float | None
+    delta: float | None
+    confidence: float
+    segment_breakdown: list[dict[str, Any]] = field(default_factory=list)
+    policy_state: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OutcomeAnalysisResult:
+    """Structured result for run-side outcome governance."""
+
+    skill_name: str
+    total_observations: int
+    summary: str
+    outcome_summary: OutcomeWindowSummary | None = None
+    regression_summary: dict[str, Any] = field(default_factory=dict)
+    exemplar_slice: list[dict[str, Any]] = field(default_factory=list)
     raw_stats: dict[str, Any] = field(default_factory=dict)
 
 
@@ -128,4 +157,257 @@ def analyze(
         patterns=patterns,
         summary=summary,
         raw_stats=stats,
+    )
+
+
+def _parse_observed_at(value: str) -> datetime | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    candidates = [text]
+    if text.endswith("Z"):
+        candidates.append(text[:-1] + "+00:00")
+    for candidate in candidates:
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _sort_outcomes(
+    observations: list[OutcomeObservation],
+) -> list[tuple[datetime, OutcomeObservation]]:
+    ordered: list[tuple[datetime, OutcomeObservation]] = []
+    for observation in observations:
+        observed_at = _parse_observed_at(observation.timestamp)
+        if observed_at is None:
+            continue
+        ordered.append((observed_at, observation))
+    ordered.sort(key=lambda item: item[0], reverse=True)
+    return ordered
+
+
+def _filter_observations(
+    snapshot: MetricsSnapshot,
+    *,
+    skill_name: str,
+) -> list[OutcomeObservation]:
+    observations = snapshot.observations or []
+    if not skill_name:
+        return list(observations)
+    filtered = [
+        item for item in observations if not item.skill_name or item.skill_name == skill_name
+    ]
+    return filtered
+
+
+def _average_metric(observations: list[OutcomeObservation], metric: str) -> float | None:
+    values = []
+    for observation in observations:
+        value = observation.metrics.get(metric)
+        if value is None:
+            continue
+        try:
+            values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _confidence(sample_count: int, min_sample_size: int) -> float:
+    if min_sample_size <= 0:
+        return 1.0
+    return max(0.0, min(1.0, sample_count / float(min_sample_size)))
+
+
+def _segment_breakdown(
+    observations: list[OutcomeObservation],
+    contract: OutcomeContract,
+) -> list[dict[str, Any]]:
+    if not contract.dimensions:
+        return []
+    grouped: dict[tuple[tuple[str, Any], ...], list[float]] = {}
+    for observation in observations:
+        value = observation.metrics.get(contract.primary_kpi)
+        if value is None:
+            continue
+        segment = tuple(
+            (name, observation.dimensions.get(name))
+            for name in contract.dimensions
+            if observation.dimensions.get(name) not in (None, "")
+        )
+        if not segment:
+            continue
+        try:
+            grouped.setdefault(segment, []).append(float(value))
+        except (TypeError, ValueError):
+            continue
+    segments = []
+    for segment, values in grouped.items():
+        segments.append(
+            {
+                "segment": {name: value for name, value in segment},
+                "sample_count": len(values),
+                "value": sum(values) / len(values),
+            }
+        )
+    segments.sort(key=lambda item: item["value"])
+    return segments[: contract.reference_update_policy.max_segments]
+
+
+def _exemplar_slice(
+    observations: list[OutcomeObservation],
+    contract: OutcomeContract,
+) -> list[dict[str, Any]]:
+    exemplars = []
+    for observation in observations:
+        value = observation.metrics.get(contract.primary_kpi)
+        if value is None:
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        exemplars.append(
+            {
+                "entity_id": observation.entity_id,
+                "timestamp": observation.timestamp,
+                contract.primary_kpi: numeric,
+                "dimensions": dict(observation.dimensions),
+                "source": observation.source,
+                "skill_name": observation.skill_name,
+                "skill_version": observation.skill_version,
+                "exemplar": observation.metadata.get("exemplar", ""),
+            }
+        )
+    exemplars.sort(key=lambda item: item[contract.primary_kpi])
+    return exemplars[: contract.reference_update_policy.max_exemplars]
+
+
+def _outcome_stats(
+    observations: list[OutcomeObservation],
+    contract: OutcomeContract,
+) -> dict[str, Any]:
+    stats: dict[str, Any] = {}
+    for metric in [contract.primary_kpi, *contract.supporting_kpis]:
+        value = _average_metric(observations, metric)
+        if value is None:
+            continue
+        stats[metric] = {"average": value}
+    return stats
+
+
+def analyze_outcomes(
+    snapshot: MetricsSnapshot,
+    contract: OutcomeContract,
+    *,
+    skill_name: str = "",
+) -> OutcomeAnalysisResult:
+    observations = _filter_observations(snapshot, skill_name=skill_name)
+    if not observations:
+        return OutcomeAnalysisResult(
+            skill_name=skill_name,
+            total_observations=0,
+            summary=f"{skill_name}: no outcome observations available.",
+        )
+
+    ordered = _sort_outcomes(observations)
+    if not ordered:
+        return OutcomeAnalysisResult(
+            skill_name=skill_name,
+            total_observations=len(observations),
+            summary=f"{skill_name}: outcome observations missing timestamps; governance skipped.",
+            raw_stats=_outcome_stats(observations, contract),
+            outcome_summary=OutcomeWindowSummary(
+                window=contract.window.to_dict(),
+                sample_count=0,
+                baseline_value=None,
+                current_value=None,
+                delta=None,
+                confidence=0.0,
+                segment_breakdown=[],
+                policy_state={
+                    "missing_timestamp": True,
+                    "insufficient_sample": True,
+                    "rewrite_candidate": False,
+                    "rollback_candidate": False,
+                },
+            ),
+        )
+
+    latest = ordered[0][0]
+    current_cutoff = latest - timedelta(days=contract.window.current_days)
+    baseline_cutoff = current_cutoff - timedelta(days=contract.window.baseline_days)
+
+    current_window = [item for observed_at, item in ordered if observed_at >= current_cutoff]
+    baseline_window = [
+        item for observed_at, item in ordered if baseline_cutoff <= observed_at < current_cutoff
+    ]
+    current_value = _average_metric(current_window, contract.primary_kpi)
+    baseline_value = _average_metric(baseline_window, contract.primary_kpi)
+    delta = (
+        None if current_value is None or baseline_value is None else current_value - baseline_value
+    )
+    sample_count = len(current_window)
+    segment_breakdown = _segment_breakdown(current_window, contract)
+    exemplar_slice = _exemplar_slice(current_window, contract)
+    insufficient_sample = sample_count < contract.min_sample_size
+    target_breached = (
+        contract.rewrite_policy.target is not None
+        and current_value is not None
+        and current_value < contract.rewrite_policy.target
+    )
+    delta_breached = delta is not None and delta <= -contract.rewrite_policy.min_delta
+    severe_regression = (
+        delta is not None and delta <= -contract.rewrite_policy.severe_regression_delta
+    )
+    rewrite_candidate = not insufficient_sample and (target_breached or delta_breached)
+    if contract.rewrite_policy.require_segment:
+        rewrite_candidate = rewrite_candidate and bool(segment_breakdown or exemplar_slice)
+    rollback_candidate = delta is not None and delta <= -contract.rollback_policy.max_negative_delta
+    outcome_summary = OutcomeWindowSummary(
+        window=contract.window.to_dict(),
+        sample_count=sample_count,
+        baseline_value=baseline_value,
+        current_value=current_value,
+        delta=delta,
+        confidence=_confidence(sample_count, contract.min_sample_size),
+        segment_breakdown=segment_breakdown,
+        policy_state={
+            "missing_timestamp": False,
+            "insufficient_sample": insufficient_sample,
+            "target_breached": target_breached,
+            "delta_breached": delta_breached,
+            "severe_regression": severe_regression,
+            "rewrite_candidate": rewrite_candidate,
+            "rollback_candidate": rollback_candidate,
+        },
+    )
+    summary = (
+        f"{skill_name}: {contract.primary_kpi} current={current_value:.3f} "
+        f"baseline={baseline_value:.3f} delta={delta:.3f} samples={sample_count}"
+        if current_value is not None and baseline_value is not None and delta is not None
+        else f"{skill_name}: {contract.primary_kpi} samples={sample_count}, insufficient comparison."
+    )
+    return OutcomeAnalysisResult(
+        skill_name=skill_name,
+        total_observations=len(observations),
+        summary=summary,
+        outcome_summary=outcome_summary,
+        regression_summary={
+            "primary_kpi": contract.primary_kpi,
+            "rewrite_candidate": rewrite_candidate,
+            "rollback_candidate": rollback_candidate,
+            "severe_regression": severe_regression,
+        },
+        exemplar_slice=exemplar_slice,
+        raw_stats=_outcome_stats(observations, contract),
     )

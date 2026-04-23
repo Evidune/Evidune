@@ -196,7 +196,7 @@ def test_swarm_tool_permissions_respect_role_and_mode(tmp_path: Path, memory: Me
 def test_iteration_harness_rewrites_skill(tmp_path: Path, memory: MemoryStore):
     skill_path = _write(
         tmp_path / "skills" / "writer" / "SKILL.md",
-        "---\nname: writer\ndescription: Write\noutcome_metrics: true\n---\n"
+        "---\nname: writer\ndescription: Write\noutcome_contract:\n  entity: article\n  primary_kpi: reads\n---\n"
         "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
     )
     registry = SkillRegistry()
@@ -247,7 +247,7 @@ def test_iteration_harness_rewrites_from_contract_evidence_without_metrics(
 ):
     skill_path = _write(
         tmp_path / "skills" / "triage" / "SKILL.md",
-        "---\nname: triage\ndescription: Triage incidents\noutcome_metrics: true\n---\n"
+        "---\nname: triage\ndescription: Triage incidents\noutcome_contract:\n  entity: incident\n  primary_kpi: resolution_score\n---\n"
         "## Instructions\nDiagnose with evidence.\n\n## Reference Data\nplaceholder\n",
     )
     registry = SkillRegistry()
@@ -298,14 +298,14 @@ def test_iteration_harness_rewrites_from_contract_evidence_without_metrics(
 
     assert decision.decision == "rewrite"
     updated = skill_path.read_text(encoding="utf-8")
-    assert "Evaluation Contract Evidence" in updated
+    assert "Execution Contract Evidence" in updated
     assert "Average score" in updated
 
 
 def test_iteration_harness_disables_from_contract_threshold(tmp_path: Path, memory: MemoryStore):
     skill_path = _write(
         tmp_path / "skills" / "emerged-low" / "SKILL.md",
-        "---\nname: emerged-low\ndescription: Low scorer\noutcome_metrics: true\n---\n"
+        "---\nname: emerged-low\ndescription: Low scorer\noutcome_contract:\n  entity: task\n  primary_kpi: success_score\n---\n"
         "## Instructions\nHelp.\n\n## Reference Data\nplaceholder\n",
     )
     registry = SkillRegistry()
@@ -361,7 +361,7 @@ def test_iteration_harness_disables_from_contract_threshold(tmp_path: Path, memo
 def test_iteration_harness_disables_negative_emerged_skill(tmp_path: Path, memory: MemoryStore):
     skill_path = _write(
         tmp_path / "skills" / "emerged" / "SKILL.md",
-        "---\nname: emerged\ndescription: Emerged\noutcome_metrics: true\n---\n"
+        "---\nname: emerged\ndescription: Emerged\noutcome_contract:\n  entity: task\n  primary_kpi: success_score\n---\n"
         "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
     )
     registry = SkillRegistry()
@@ -406,7 +406,7 @@ def test_iteration_harness_disables_base_skill_without_rewrite_history(
 ):
     skill_path = _write(
         tmp_path / "skills" / "base-writer" / "SKILL.md",
-        "---\nname: base-writer\ndescription: Base\noutcome_metrics: true\n---\n"
+        "---\nname: base-writer\ndescription: Base\noutcome_contract:\n  entity: article\n  primary_kpi: reads\n---\n"
         "## Instructions\nWrite carefully.\n\n## Reference Data\nplaceholder\n",
     )
     registry = SkillRegistry()
@@ -458,7 +458,7 @@ def test_iteration_harness_rolls_back_after_negative_feedback_on_rewritten_skill
 ):
     skill_path = _write(
         tmp_path / "skills" / "writer" / "SKILL.md",
-        "---\nname: writer\ndescription: Write\noutcome_metrics: true\n---\n"
+        "---\nname: writer\ndescription: Write\noutcome_contract:\n  entity: article\n  primary_kpi: reads\n---\n"
         "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
     )
     registry = SkillRegistry()

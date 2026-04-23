@@ -15,7 +15,7 @@ Move skill self-iteration from a partial loop into a durable product behavior:
 
 ## Current State
 
-- `evidune run` updates reference sections for `outcome_metrics: true` skills
+- `evidune run` updates reference sections for skills with an explicit `outcome_contract`
 - `evidune serve` can detect reusable patterns and synthesise new skills
 - feedback signals and evaluator scores are persisted but not consumed
 - emerged skills are marked `pending_review` in storage but are still inserted

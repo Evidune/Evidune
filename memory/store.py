@@ -22,6 +22,8 @@ from memory.rows import (
     row_to_harness_step,
     row_to_harness_task,
     row_to_iteration_run,
+    row_to_outcome_observation,
+    row_to_outcome_summary,
     row_to_skill_lifecycle_event,
     row_to_skill_state,
 )
@@ -742,6 +744,101 @@ class MemoryStore:
             )
             result.append(payload)
         return result
+
+    def record_outcome_observations(
+        self,
+        skill_name: str,
+        observations: list[Any],
+        *,
+        run_id: int = 0,
+    ) -> int:
+        """Persist normalized outcome observations for audit and later comparison."""
+        with self._lock:
+            now = self._now()
+            inserted = 0
+            for observation in observations:
+                self._conn.execute(
+                    """INSERT INTO outcome_observations
+                       (skill_name, entity_id, observed_at, metrics_json, dimensions_json,
+                        source, skill_version, run_id, metadata_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        skill_name,
+                        getattr(observation, "entity_id", "") or "",
+                        getattr(observation, "timestamp", "") or "",
+                        self._json_dump(getattr(observation, "metrics", {}) or {}),
+                        self._json_dump(getattr(observation, "dimensions", {}) or {}),
+                        getattr(observation, "source", "") or "",
+                        getattr(observation, "skill_version", "") or "",
+                        run_id,
+                        self._json_dump(getattr(observation, "metadata", {}) or {}),
+                        now,
+                    ),
+                )
+                inserted += 1
+            self._conn.commit()
+            return inserted
+
+    def list_outcome_observations(self, skill_name: str, limit: int = 200) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT * FROM outcome_observations
+                   WHERE skill_name = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (skill_name, limit),
+            ).fetchall()
+        return [row_to_outcome_observation(row) for row in rows]
+
+    def record_outcome_window_summary(
+        self,
+        *,
+        skill_name: str,
+        primary_kpi: str,
+        summary: dict[str, Any],
+        raw_stats: dict[str, Any] | None = None,
+        exemplar_slice: list[dict[str, Any]] | None = None,
+        run_id: int = 0,
+    ) -> int:
+        """Persist one outcome KPI window summary for governance."""
+        with self._lock:
+            now = self._now()
+            cursor = self._conn.execute(
+                """INSERT INTO outcome_window_summaries
+                   (skill_name, primary_kpi, sample_count, baseline_value, current_value,
+                    delta, confidence, window_json, segment_breakdown_json, policy_state_json,
+                    raw_stats_json, exemplar_slice_json, run_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    skill_name,
+                    primary_kpi,
+                    int(summary.get("sample_count", 0) or 0),
+                    summary.get("baseline_value"),
+                    summary.get("current_value"),
+                    summary.get("delta"),
+                    float(summary.get("confidence", 0.0) or 0.0),
+                    self._json_dump(summary.get("window", {}) or {}),
+                    self._json_dump(summary.get("segment_breakdown", []) or []),
+                    self._json_dump(summary.get("policy_state", {}) or {}),
+                    self._json_dump(raw_stats or {}),
+                    self._json_dump(exemplar_slice or []),
+                    run_id,
+                    now,
+                ),
+            )
+            self._conn.commit()
+            return cursor.lastrowid or 0
+
+    def list_outcome_window_summaries(self, skill_name: str, limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT * FROM outcome_window_summaries
+                   WHERE skill_name = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (skill_name, limit),
+            ).fetchall()
+        return [row_to_outcome_summary(row) for row in rows]
 
     def get_skill_executions_by_id(self, execution_id: int) -> dict | None:
         """Get a single execution by id, with parsed signals."""

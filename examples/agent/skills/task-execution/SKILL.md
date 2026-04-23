@@ -12,9 +12,8 @@ triggers:
   - 执行任务
   - 排查问题
   - 验证结果
-outcome_metrics: true
 update_section: '## Reference Data'
-evaluation_contract:
+execution_contract:
   version: 1
   min_pass_score: 0.7
   rewrite_below_score: 0.55
@@ -31,7 +30,7 @@ evaluation_contract:
     - name: durable_learning
       description: Reusable lessons are captured or routed to skill creation when appropriate.
       weight: 0.25
-  observable_metrics:
+  observable_signals:
     - name: relevant_tool_trace
       description: Relevant tool calls or an explicit no-tool limitation are present.
       source: tool_trace
@@ -40,6 +39,25 @@ evaluation_contract:
     - skipped_required_verification
     - hallucinated_external_state
     - failed_to_capture_reusable_workflow
+outcome_contract:
+  entity: task
+  primary_kpi: success_score
+  supporting_kpis: [reuse_count]
+  dimensions: [channel, outcome]
+  window:
+    current_days: 7
+    baseline_days: 7
+  min_sample_size: 2
+  rewrite_policy:
+    target: 90
+    min_delta: 5
+    require_segment: true
+    severe_regression_delta: 15
+  rollback_policy:
+    max_negative_delta: 10
+  reference_update_policy:
+    max_segments: 3
+    max_exemplars: 2
 ---
 
 ## Instructions

@@ -723,7 +723,8 @@ class AgentCore:
                     "plan": current_plan,
                     "facts_extracted": extracted_count,
                     "evaluations_recorded": 0,
-                    "skill_evaluations": [],
+                    "execution_evaluations": [],
+                    "outcome_governance": [],
                     "emerged_skill": emergence_decision.emerged_skill,
                     "skill_creation": emergence_decision.skill_creation,
                     "skill_lifecycle_updates": [],
@@ -823,7 +824,7 @@ class AgentCore:
                 harness_task_id=task_id,
             )
             execution_ids.append(eid)
-        skill_evaluations = await self._maybe_evaluate_executions(
+        execution_evaluations = await self._maybe_evaluate_executions(
             execution_skills,
             message.text,
             response_text,
@@ -846,7 +847,7 @@ class AgentCore:
             emergence_counter=current_emergence_count,
         )
         self._attach_skill_snapshot(emergence_decision, skill_snapshot)
-        self._attach_evaluation_summary(emergence_decision, skill_evaluations)
+        self._attach_evaluation_summary(emergence_decision, execution_evaluations)
 
         # 11. Auto-title the conversation once it has enough content
         new_title = await self._maybe_generate_title(message.conversation_id)
@@ -867,8 +868,9 @@ class AgentCore:
                 "mode": mode,
                 "plan": current_plan,
                 "facts_extracted": extracted_count,
-                "evaluations_recorded": len(skill_evaluations),
-                "skill_evaluations": skill_evaluations,
+                "evaluations_recorded": len(execution_evaluations),
+                "execution_evaluations": execution_evaluations,
+                "outcome_governance": [],
                 "emerged_skill": emergence_decision.emerged_skill,
                 "skill_creation": emergence_decision.skill_creation,
                 "skill_lifecycle_updates": lifecycle_updates,

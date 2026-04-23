@@ -26,7 +26,7 @@ from agent.utils import format_conversation, strip_code_fence
 from skills.evaluation import (
     default_contract_for_skill,
     parse_evaluation_contract,
-    upsert_contract_frontmatter,
+    upsert_execution_contract_frontmatter,
 )
 from skills.loader import Skill
 
@@ -90,8 +90,7 @@ SKILL.md must contain:
    - tags: list of 2-4 relevant kebab-case tags
    - triggers: list of 2-4 phrases that should activate this skill
    - anti_triggers: list of 1-3 phrases that should NOT activate it
-   - outcome_metrics: false (this skill emerged from chat, not from outcome data)
-   - evaluation_contract with version, criteria, observable_metrics, failure_modes,
+   - execution_contract with version, criteria, observable_signals, failure_modes,
      min_pass_score, rewrite_below_score, disable_below_score,
      min_samples_for_rewrite, and min_samples_for_disable
 2. ## Instructions section: 5-15 actionable rules an LLM should follow when invoked
@@ -103,7 +102,7 @@ are not executable code.
 
 references/*.md should contain durable background notes, source categories,
 examples, or operating constraints extracted from the conversation.
-references/evaluation-contract.md must explain the contract in human-readable
+references/evaluation-contract.md must explain the execution contract in human-readable
 terms: success criteria, observable signals, failure modes, and thresholds.
 
 Be concrete and useful. Do not include placeholder text like "TODO" or
@@ -148,7 +147,7 @@ def _default_evaluation_reference(pattern: DetectedPattern) -> str:
     )
     failures = "\n".join(f"- {item}" for item in contract.failure_modes)
     return (
-        f"# {pattern.suggested_name} Evaluation Contract\n\n"
+        f"# {pattern.suggested_name} Execution Contract\n\n"
         "## Success Criteria\n\n"
         f"{criteria}\n\n"
         "## Observable Signals\n\n"
@@ -223,12 +222,14 @@ def _ensure_evaluation_contract(files: dict[str, str], pattern: DetectedPattern)
     if skill_md.startswith("---"):
         try:
             frontmatter = safe_load(skill_md.split("---", 2)[1]) or {}
-            contract = parse_evaluation_contract(frontmatter.get("evaluation_contract"))
+            contract = parse_evaluation_contract(
+                frontmatter.get("execution_contract") or frontmatter.get("evaluation_contract")
+            )
         except (IndexError, YAMLError):
             contract = None
     if contract is None:
         contract = default_contract_for_skill(pattern.suggested_name, pattern.description)
-        files["SKILL.md"] = upsert_contract_frontmatter(skill_md, contract)
+        files["SKILL.md"] = upsert_execution_contract_frontmatter(skill_md, contract)
 
 
 def _safe_bundle_path(rel_path: str) -> bool:

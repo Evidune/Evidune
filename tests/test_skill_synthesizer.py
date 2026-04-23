@@ -17,7 +17,6 @@ triggers:
   - user asks "explain X"
 anti_triggers:
   - user wants code
-outcome_metrics: false
 ---
 
 ## Instructions
@@ -92,8 +91,8 @@ class TestSynthesizer:
         assert "checklist.md" in skill.scripts
         assert "source-notes.md" in skill.references
         assert "evaluation-contract.md" in skill.references
-        assert skill.evaluation_contract is not None
-        assert skill.evaluation_contract.criteria[0].name == "goal_completion"
+        assert skill.execution_contract is not None
+        assert skill.execution_contract.criteria[0].name == "goal_completion"
 
     @pytest.mark.asyncio
     async def test_skips_when_pattern_not_skill(self, tmp_path: Path):
@@ -164,7 +163,7 @@ class TestSynthesizer:
         assert (tmp_path / "explain-topic" / "scripts" / "checklist.md").exists()
         assert (tmp_path / "explain-topic" / "references" / "source-notes.md").exists()
         assert (tmp_path / "explain-topic" / "references" / "evaluation-contract.md").exists()
-        assert parse_skill(result.path).evaluation_contract is not None
+        assert parse_skill(result.path).execution_contract is not None
 
     @pytest.mark.asyncio
     async def test_rejects_unsafe_bundle_path(self, tmp_path: Path):

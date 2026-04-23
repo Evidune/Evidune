@@ -85,7 +85,7 @@ def run_iteration(config: EviduneConfig, base_dir: Path | None = None) -> Iterat
 
         # 3b. Self-iterate outcome skills (Evidune's unique differentiator)
         if config.skills.auto_update:
-            updates.extend(update_outcome_skills(config, base_dir, result, memory))
+            updates.extend(update_outcome_skills(config, base_dir, snapshot, memory))
 
         # 4. Git commit
         commit_sha = None
@@ -252,20 +252,26 @@ def _skill_records_payload(skill_registry, memory) -> list[dict]:
         if emerged is not None:
             payload["version"] = str(emerged["version"])
         contract = memory.get_skill_evaluation_contract(record.name)
-        if contract is not None and not payload.get("evaluation_contract"):
+        if contract is not None and not payload.get("execution_contract"):
             active_contract = contract.get("contract") or {}
-            payload["evaluation_contract"] = {
+            observable_names = [
+                item.get("name")
+                for item in (
+                    active_contract.get("observable_signals")
+                    or active_contract.get("observable_metrics")
+                    or []
+                )
+                if isinstance(item, dict) and item.get("name")
+            ]
+            payload["execution_contract"] = {
                 "version": active_contract.get("version", 1),
                 "criteria": [
                     item.get("name")
                     for item in active_contract.get("criteria", [])
                     if isinstance(item, dict) and item.get("name")
                 ],
-                "observable_metrics": [
-                    item.get("name")
-                    for item in active_contract.get("observable_metrics", [])
-                    if isinstance(item, dict) and item.get("name")
-                ],
+                "observable_signals": observable_names,
+                "observable_metrics": observable_names,
                 "failure_modes": active_contract.get("failure_modes", []),
                 "min_pass_score": active_contract.get("min_pass_score", 0.7),
                 "rewrite_below_score": active_contract.get("rewrite_below_score", 0.55),
@@ -295,6 +301,9 @@ def _skill_records_payload(skill_registry, memory) -> list[dict]:
             "references": [],
             "triggers": [],
             "tags": [],
+            "execution_contract": None,
+            "outcome_contract": None,
+            "warnings": [],
             "created_at": state["created_at"],
             "updated_at": state["updated_at"],
             "last_loaded_at": "",

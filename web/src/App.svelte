@@ -182,7 +182,8 @@
                 deliverySummary: resp.delivery_summary ?? null,
                 artifactManifest: resp.artifact_manifest ?? null,
                 skillCreation: resp.skill_creation ?? null,
-                skillEvaluations: resp.skill_evaluations ?? [],
+                executionEvaluations: resp.execution_evaluations ?? [],
+                outcomeGovernance: resp.outcome_governance ?? [],
               }
             : msg,
         ),

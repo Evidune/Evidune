@@ -440,11 +440,11 @@ class TestAgentCore:
             )
         )
 
-        assert response.metadata["skill_evaluations"][0]["skill_name"] == "incident-triage"
-        assert response.metadata["skill_evaluations"][0]["contract_status"] == "written"
-        assert response.metadata["skill_evaluations"][0]["aggregate_score"] == 0.66
+        assert response.metadata["execution_evaluations"][0]["skill_name"] == "incident-triage"
+        assert response.metadata["execution_evaluations"][0]["contract_status"] == "written"
+        assert response.metadata["execution_evaluations"][0]["aggregate_score"] == 0.66
         assert memory.get_skill_evaluation_contract("incident-triage")["source"] == "written"
-        assert "evaluation_contract:" in skill_path.read_text(encoding="utf-8")
+        assert "execution_contract:" in skill_path.read_text(encoding="utf-8")
         events = memory.list_skill_lifecycle_events("incident-triage")
         assert events[0]["action"] == "contract_discover"
 
@@ -495,9 +495,9 @@ class TestAgentCore:
             )
         )
 
-        assert response.metadata["skill_evaluations"][0]["contract_status"] == "runtime"
+        assert response.metadata["execution_evaluations"][0]["contract_status"] == "runtime"
         assert memory.get_skill_evaluation_contract("ops-helper")["source"] == "runtime"
-        assert "evaluation_contract:" not in skill_path.read_text(encoding="utf-8")
+        assert "execution_contract:" not in skill_path.read_text(encoding="utf-8")
         assert memory.list_skill_lifecycle_events("ops-helper") == []
 
     @pytest.mark.asyncio

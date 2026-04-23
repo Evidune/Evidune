@@ -101,6 +101,38 @@ CREATE TABLE IF NOT EXISTS skill_evaluations (
     FOREIGN KEY (execution_id) REFERENCES skill_executions(id)
 );
 
+CREATE TABLE IF NOT EXISTS outcome_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    skill_name TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    observed_at TEXT DEFAULT '',
+    metrics_json TEXT DEFAULT '{}',
+    dimensions_json TEXT DEFAULT '{}',
+    source TEXT DEFAULT '',
+    skill_version TEXT DEFAULT '',
+    run_id INTEGER DEFAULT 0,
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS outcome_window_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    skill_name TEXT NOT NULL,
+    primary_kpi TEXT NOT NULL,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    baseline_value REAL,
+    current_value REAL,
+    delta REAL,
+    confidence REAL NOT NULL DEFAULT 0,
+    window_json TEXT DEFAULT '{}',
+    segment_breakdown_json TEXT DEFAULT '[]',
+    policy_state_json TEXT DEFAULT '{}',
+    raw_stats_json TEXT DEFAULT '{}',
+    exemplar_slice_json TEXT DEFAULT '[]',
+    run_id INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS squad_profiles (
     name TEXT PRIMARY KEY,
     roles_json TEXT DEFAULT '[]',
@@ -373,6 +405,18 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skill_evaluations_execution ON skill_evaluations(execution_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_outcome_observations_skill ON outcome_observations(skill_name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_outcome_observations_run ON outcome_observations(run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_outcome_summaries_skill ON outcome_window_summaries(skill_name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_outcome_summaries_run ON outcome_window_summaries(run_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_harness_tasks_conv ON harness_tasks(conversation_id)"

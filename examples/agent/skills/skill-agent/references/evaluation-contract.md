@@ -1,4 +1,4 @@
-# skill-agent Evaluation Contract
+# skill-agent Execution Contract
 
 ## Success Criteria
 

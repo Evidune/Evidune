@@ -30,10 +30,10 @@ def _write(path: Path, content: str) -> Path:
 def _setup_iteration_project(tmp_path: Path) -> Path:
     data_path = _write(
         tmp_path / "data.csv",
-        "title,reads,upvotes\n"
-        "Golden Article,5000,200\n"
-        "Decent Article,1500,60\n"
-        "Flop Article,80,2\n",
+        "title,reads,upvotes,date,channel\n"
+        "Golden Article,5000,200,2026-04-10,search\n"
+        "Decent Article,1500,60,2026-04-09,social\n"
+        "Flop Article,80,2,2026-04-01,search\n",
     )
 
     _write(
@@ -41,7 +41,21 @@ def _setup_iteration_project(tmp_path: Path) -> Path:
         "---\n"
         "name: write-article\n"
         "description: Write compelling articles\n"
-        "outcome_metrics: true\n"
+        "outcome_contract:\n"
+        "  entity: article\n"
+        "  primary_kpi: reads\n"
+        "  supporting_kpis: [upvotes]\n"
+        "  dimensions: [channel]\n"
+        "  window:\n"
+        "    current_days: 7\n"
+        "    baseline_days: 7\n"
+        "  min_sample_size: 2\n"
+        "  rewrite_policy:\n"
+        "    target: 6000\n"
+        "    min_delta: 100\n"
+        "    require_segment: true\n"
+        "  rollback_policy:\n"
+        "    max_negative_delta: 200\n"
         "---\n"
         "## Instructions\n"
         "Write strong articles.\n"
@@ -61,6 +75,8 @@ def _setup_iteration_project(tmp_path: Path) -> Path:
             "config": {
                 "file": str(data_path),
                 "title_field": "title",
+                "timestamp_field": "date",
+                "dimension_fields": ["channel"],
                 "metric_fields": ["reads", "upvotes"],
                 "sort_metric": "reads",
             },

@@ -5,7 +5,7 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from skills.evaluation import contract_summary
+from skills.evaluation import execution_contract_summary, outcome_contract_summary
 from skills.loader import Skill, load_skills_from_dir
 from skills.models import (
     SkillMatch,
@@ -73,7 +73,9 @@ class SkillRegistry:
             references=sorted(skill.references.keys()),
             triggers=list(skill.triggers),
             tags=list(skill.tags),
-            evaluation_contract=contract_summary(skill.evaluation_contract),
+            execution_contract=execution_contract_summary(skill.execution_contract),
+            outcome_contract=outcome_contract_summary(skill.outcome_contract),
+            warnings=list(skill.deprecations),
             created_at=loaded_at,
             updated_at=loaded_at,
             last_loaded_at=loaded_at,
@@ -91,7 +93,7 @@ class SkillRegistry:
 
     def get_outcome_skills(self) -> list[Skill]:
         """Get skills that participate in outcome-driven iteration."""
-        return [s for s in self._skills.values() if s.outcome_metrics]
+        return [s for s in self._skills.values() if s.participates_in_outcome_governance]
 
     def find_matches(self, query: str, max_results: int = 3) -> list[SkillMatch]:
         """Find skills relevant to a query.

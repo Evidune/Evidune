@@ -95,7 +95,7 @@ class TestWebGatewayChat:
         assert result["skill_creation"]["skill_name"] == "collect-intel"
 
     @pytest.mark.asyncio
-    async def test_handle_chat_passes_skill_evaluations_metadata(self):
+    async def test_handle_chat_passes_execution_evaluations_metadata(self):
         gw = WebGateway()
 
         async def handler(message: InboundMessage) -> OutboundMessage:
@@ -103,7 +103,7 @@ class TestWebGatewayChat:
                 text="evaluated",
                 conversation_id=message.conversation_id,
                 metadata={
-                    "skill_evaluations": [
+                    "execution_evaluations": [
                         {
                             "skill_name": "collect-intel",
                             "execution_id": 7,
@@ -115,8 +115,8 @@ class TestWebGatewayChat:
 
         gw._handler = handler
         result = await gw._handle_chat("use skill", "conv4")
-        assert result["skill_evaluations"][0]["skill_name"] == "collect-intel"
-        assert result["skill_evaluations"][0]["aggregate_score"] == 0.71
+        assert result["execution_evaluations"][0]["skill_name"] == "collect-intel"
+        assert result["execution_evaluations"][0]["aggregate_score"] == 0.71
 
     def test_skills_payload_uses_dynamic_provider(self):
         gw = WebGateway()

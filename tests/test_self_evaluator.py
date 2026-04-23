@@ -156,7 +156,7 @@ class TestSelfEvaluator:
         assert result.observed_metrics["tool_verification_used"] == "no"
         assert result.missing_observations == ["tool trace"]
         prompt = judge.last_messages[0]["content"]
-        assert "Evaluation Contract" in prompt
+        assert "Execution Contract" in prompt
         assert "goal_completion" in prompt
 
     @pytest.mark.asyncio
