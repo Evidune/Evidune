@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_AUTH_PATH = Path.home() / ".codex" / "auth.json"
-CODEX_OAUTH_TOKEN_URL = "https://chatgpt.com/backend-api/oauth/token"
+CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 
