@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store'
+import { generateConversationId } from './ids'
 import type { Message, Skill } from './types'
 
 export const messages = writable<Message[]>([
@@ -13,4 +14,4 @@ export const messages = writable<Message[]>([
 export const skills = writable<Skill[]>([])
 export const activeSkills = writable<string[]>([])
 export const isLoading = writable(false)
-export const conversationId = writable(`web-${crypto.randomUUID().slice(0, 8)}`)
+export const conversationId = writable(generateConversationId())

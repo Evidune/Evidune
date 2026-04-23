@@ -10,6 +10,7 @@
     sendMessage,
     streamMessage,
   } from './lib/api'
+  import { generateClientId, generateConversationId } from './lib/ids'
   import type {
     ChatResponse,
     ConversationMode,
@@ -54,7 +55,7 @@
   }
 
   function freshConversationId(): string {
-    return `web-${crypto.randomUUID().slice(0, 8)}`
+    return generateConversationId()
   }
 
   function resetWelcome() {
@@ -137,7 +138,7 @@
 
   async function handleSend(text: string) {
     const userMsg: Message = {
-      id: crypto.randomUUID(),
+      id: generateClientId(),
       role: 'user',
       content: text,
       timestamp: Date.now(),
@@ -147,7 +148,7 @@
     isLoading.set(true)
     activeSkills.set([])
     await scrollToBottom()
-    const botId = crypto.randomUUID()
+    const botId = generateClientId()
     messages.update(m => [
       ...m,
       {
