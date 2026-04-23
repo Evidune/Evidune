@@ -15,8 +15,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [ ] GitHub installer + release workflow
 - [ ] Comprehensive README with competitive positioning vs Hermes / OpenClaw
 - [ ] `docs/architecture.md` deep dive
-- [ ] Skill for Zhihu Creator Center workflows
-- [ ] Skill for Xiaohongshu metrics analysis
+- [ ] Optional platform workflow skills as separate installable packages
 - [ ] Remote CI remediation loop on top of GitHub PR checks
 
 ## Completed

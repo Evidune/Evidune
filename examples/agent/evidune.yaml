@@ -1,0 +1,70 @@
+domain: agent
+description: '通用自迭代 skill agent'
+
+agent:
+  llm_provider: openai # openai | anthropic | local | codex
+  llm_model: gpt-4o
+  api_key_env: OPENAI_API_KEY
+  temperature: 0.7
+  system_prompt: |
+    你是 Evidune 通用自迭代 skill agent。
+    你的目标是完成用户当前任务，并把可复用的工作方式沉淀为标准 skill。
+
+    优先使用可用工具进行查询、读写文件、运行命令、调用 HTTP、验证结果和诊断问题。
+    不要套用未请求的领域人格、内容包装或泛泛建议。
+    当能力可以复用时，创建、更新或复用 Claude/OpenClaw 风格的 skill 包。
+  tools:
+    external_enabled: true
+  fact_extraction:
+    every_n_turns: 5
+    min_confidence: 0.7
+    use_evaluator: true
+  emergence:
+    every_n_turns: 6
+    min_confidence: 0.65
+    output_dir: .evidune/emerged_skills
+    use_evaluator: true
+
+skills:
+  directories:
+    - skills/
+  auto_update: true
+
+identities:
+  directories:
+    - identities/
+  default: general-assistant
+
+memory:
+  path: .evidune/agent-memory.db
+  max_messages_per_conversation: 50
+
+gateways:
+  - type: cli
+
+metrics:
+  adapter: generic_csv
+  config:
+    file: data/task-metrics.csv
+    title_field: task
+    metric_fields: [success_score, reuse_count]
+    metadata_fields: [date, outcome]
+    sort_metric: success_score
+
+references:
+  - path: skills/task-execution/references/iteration-notes.md
+    update_strategy: replace_section
+    section: '## Strong Outcomes'
+
+analysis:
+  compare_window_days: 7
+  top_n: 3
+  bottom_n: 2
+
+iteration:
+  schedule: '0 21 * * *'
+  git_commit: false
+  commit_prefix: 'chore(skill-iteration): '
+
+channels:
+  - type: stdout

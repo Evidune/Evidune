@@ -205,9 +205,24 @@ class TestIterationLedger:
         assert writer["load_error"] == "operator disabled"
         assert writer["path"] == str(base_path)
 
+    def test_skill_records_payload_skips_stale_active_base_state(self, tmp_path: Path):
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            store.upsert_skill_state(
+                "old-base-skill",
+                origin="base",
+                path=str(tmp_path / "missing" / "SKILL.md"),
+                status="active",
+            )
+            payload = _skill_records_payload(SkillRegistry(), store)
+        finally:
+            store.close()
+
+        assert "old-base-skill" not in {item["name"] for item in payload}
+
     def test_deploy_config_uses_persistent_runtime_paths(self):
         repo_root = Path(__file__).resolve().parents[1]
-        cfg_path = repo_root / "examples" / "content" / "evidune.deploy.yaml"
+        cfg_path = repo_root / "examples" / "agent" / "evidune.deploy.yaml"
         config = load_config(cfg_path)
         base_dir = cfg_path.parent
 
@@ -218,8 +233,8 @@ class TestIterationLedger:
         assert emergence_path.is_absolute()
         assert base_dir.resolve() not in memory_path.parents
         assert base_dir.resolve() not in emergence_path.parents
-        assert str(memory_path).endswith(".evidune-deploy/state/content/content-memory.db")
-        assert str(emergence_path).endswith(".evidune-deploy/state/content/emerged_skills")
+        assert str(memory_path).endswith(".evidune-deploy/state/agent/agent-memory.db")
+        assert str(emergence_path).endswith(".evidune-deploy/state/agent/emerged_skills")
 
     @pytest.mark.asyncio
     async def test_serve_initialises_core_learning_subsystems_when_blocks_are_omitted(
@@ -422,10 +437,10 @@ class TestIterationLedger:
 
     def test_examples_and_init_template_do_not_emit_core_enabled_flags(self):
         repo_root = Path(__file__).resolve().parents[1]
-        example_text = (repo_root / "examples" / "content" / "evidune.yaml").read_text(
+        example_text = (repo_root / "examples" / "agent" / "evidune.yaml").read_text(
             encoding="utf-8"
         )
-        deploy_text = (repo_root / "examples" / "content" / "evidune.deploy.yaml").read_text(
+        deploy_text = (repo_root / "examples" / "agent" / "evidune.deploy.yaml").read_text(
             encoding="utf-8"
         )
         starter_text = _config_template("demo")

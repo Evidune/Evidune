@@ -455,13 +455,13 @@ class TestAgentWithIdentity:
         reg = IdentityRegistry()
         reg.register(
             Identity(
-                name="老拐",
-                display_name="老拐",
-                soul="你说话直接，不端着。",
-                identity="你是老拐，长文写作专家。",
-                user="你把用户当同行，不装老师。",
+                name="general-assistant",
+                display_name="Evidune",
+                soul="你说话直接，基于证据。",
+                identity="你是 Evidune 通用任务专家。",
+                user="你和用户协作完成任务。",
                 default=True,
-                path=Path("/tmp/identities/content-writer"),
+                path=Path("/tmp/identities/general-assistant"),
             )
         )
         reg.register(
@@ -487,9 +487,9 @@ class TestAgentWithIdentity:
         msg = InboundMessage(text="hi", sender_id="u", channel="cli", conversation_id="c1")
         resp = await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
-        assert "老拐" in system_content
-        assert "长文写作专家" in system_content
-        assert resp.metadata["identity"] == "老拐"
+        assert "Evidune" in system_content
+        assert "通用任务专家" in system_content
+        assert resp.metadata["identity"] == "general-assistant"
 
     @pytest.mark.asyncio
     async def test_explicit_identity_via_metadata(self, agent_with_identity, llm: MockLLM):
@@ -503,21 +503,23 @@ class TestAgentWithIdentity:
         resp = await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "polite, formal tone" in system_content
-        assert "长文写作专家" not in system_content
+        assert "通用任务专家" not in system_content
         assert resp.metadata["identity"] == "formal-helper"
 
     @pytest.mark.asyncio
     async def test_identity_facts_isolated(
         self, agent_with_identity, llm: MockLLM, memory: MemoryStore
     ):
-        memory.set_fact("style", "uses 老拐 voice", namespace="identity:老拐")
+        memory.set_fact(
+            "style", "uses evidence-first voice", namespace="identity:general-assistant"
+        )
         memory.set_fact("style", "polite English", namespace="identity:formal-helper")
         memory.set_fact("global_fact", "shared across identities")
 
         msg = InboundMessage(text="hi", sender_id="u", channel="cli", conversation_id="c3")
         await agent_with_identity.handle(msg)
         system_content = llm.last_messages[0]["content"]
-        assert "uses 老拐 voice" in system_content
+        assert "uses evidence-first voice" in system_content
         assert "polite English" not in system_content  # other identity's fact
         assert "shared across identities" in system_content  # global fact
 

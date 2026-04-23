@@ -1,0 +1,4 @@
+task,success_score,reuse_count,date,outcome
+Investigate service failure and verify the fix,95,4,2026-04-01,verified_fix
+Convert a repeated workflow into a reusable skill,90,3,2026-04-03,reusable_skill
+Answer without checking available tools,40,0,2026-04-05,insufficient_evidence

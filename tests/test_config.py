@@ -66,6 +66,22 @@ class TestLoadConfig:
         assert config.agent.harness.validation.slow_mo_ms == 50
         assert config.agent.harness.delivery.branch_prefix == "feature/"
         assert config.agent.harness.delivery.github_enabled is False
+        assert config.agent.tools.external_enabled is True
+
+    def test_agent_external_tools_default_on(self, tmp_path: Path):
+        data = {"domain": "test", "agent": {}}
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+        assert config.agent is not None
+        assert config.agent.tools.external_enabled is True
+
+    def test_agent_external_tools_can_be_disabled_explicitly(self, tmp_path: Path):
+        data = {
+            "domain": "test",
+            "agent": {"tools": {"external_enabled": False}},
+        }
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+        assert config.agent is not None
+        assert config.agent.tools.external_enabled is False
 
     def test_env_expansion(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TEST_WEBHOOK", "https://feishu.example.com/hook/abc")

@@ -23,17 +23,21 @@ class TestInitProject:
         assert exit_code == 0
         assert (project_dir / "evidune.yaml").exists()
         assert (project_dir / "data" / "metrics.csv").exists()
-        assert (project_dir / "skills" / "write-article" / "SKILL.md").exists()
+        assert (project_dir / "skills" / "task-execution" / "SKILL.md").exists()
+        assert (project_dir / "skills" / "skill-agent" / "SKILL.md").exists()
+        assert (project_dir / "skills" / "code-implementation" / "SKILL.md").exists()
+        assert (project_dir / "identities" / "general-assistant" / "IDENTITY.md").exists()
 
         config = load_config(project_dir / "evidune.yaml")
         assert config.memory.path == ".evidune/memory.db"
         assert config.agent is not None
         assert config.agent.emergence.output_dir == ".evidune/emerged_skills"
+        assert config.identities.default == "general-assistant"
 
         exit_code = main(["run", "--config", str(project_dir / "evidune.yaml")])
         assert exit_code == 0
 
-        skill_content = (project_dir / "skills" / "write-article" / "SKILL.md").read_text(
+        skill_content = (project_dir / "skills" / "task-execution" / "SKILL.md").read_text(
             encoding="utf-8"
         )
         assert "Auto-updated by evidune" in skill_content
@@ -54,13 +58,13 @@ class TestInitProject:
             init_project(project_dir)
 
 
-def test_bundled_content_example_runs_one_iteration(tmp_path: Path):
-    copied = tmp_path / "content"
-    shutil.copytree(ROOT / "examples" / "content", copied)
+def test_bundled_agent_example_runs_one_iteration(tmp_path: Path):
+    copied = tmp_path / "agent"
+    shutil.copytree(ROOT / "examples" / "agent", copied)
 
     exit_code = main(["run", "--config", str(copied / "evidune.yaml")])
     assert exit_code == 0
 
-    assert (copied / ".evidune" / "content-memory.db").exists()
-    skill_content = (copied / "skills" / "write-article" / "SKILL.md").read_text(encoding="utf-8")
+    assert (copied / ".evidune" / "agent-memory.db").exists()
+    skill_content = (copied / "skills" / "task-execution" / "SKILL.md").read_text(encoding="utf-8")
     assert "Auto-updated by evidune" in skill_content

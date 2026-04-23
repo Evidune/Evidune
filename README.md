@@ -42,11 +42,11 @@ cd demo
 evidune run --config evidune.yaml
 ```
 
-Run the bundled content-writing example from the repo root:
+Run the bundled generic skill-agent example from the repo root:
 
 ```bash
-python -m core.loop run --config examples/content/evidune.yaml
-python -m core.loop iterations list --config examples/content/evidune.yaml
+python -m core.loop run --config examples/agent/evidune.yaml
+python -m core.loop iterations list --config examples/agent/evidune.yaml
 ```
 
 Start the interactive agent:

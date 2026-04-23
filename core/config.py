@@ -93,11 +93,11 @@ class ToolsConfig:
 
     Internal tools (memory/skills/conversations) are always on when
     the agent runs. External tools (shell/file/http/python/grep/glob)
-    are opt-in via `external_enabled` since they can touch the real
-    filesystem and network.
+    are enabled by default for serve so the agent can actually inspect,
+    edit, run, and fetch within the configured safety limits.
     """
 
-    external_enabled: bool = False
+    external_enabled: bool = True
     shell_timeout_s: int = 60
     shell_output_bytes: int = 20_000
     file_read_max_bytes: int = 200_000
@@ -332,7 +332,8 @@ def load_config(path: str | Path) -> EviduneConfig:
     # Agent config (optional)
     agent = None
     agent_raw = raw.get("agent")
-    if agent_raw:
+    if agent_raw is not None:
+        agent_raw = agent_raw or {}
         evaluator = None
         eval_raw = agent_raw.get("evaluator")
         if eval_raw:
@@ -357,7 +358,7 @@ def load_config(path: str | Path) -> EviduneConfig:
         )
         tools_raw = agent_raw.get("tools", {}) or {}
         tools_cfg = ToolsConfig(
-            external_enabled=tools_raw.get("external_enabled", False),
+            external_enabled=tools_raw.get("external_enabled", True),
             shell_timeout_s=tools_raw.get("shell_timeout_s", 60),
             shell_output_bytes=tools_raw.get("shell_output_bytes", 20_000),
             file_read_max_bytes=tools_raw.get("file_read_max_bytes", 200_000),

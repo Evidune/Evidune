@@ -256,6 +256,11 @@ def _skill_records_payload(skill_registry, memory) -> list[dict]:
     for state in memory.list_skill_states():
         if state["skill_name"] in payload_by_name:
             continue
+        if state["origin"] != "emerged" and state["status"] == "active":
+            # Active base/project skills must be loaded from the current registry.
+            # A persisted active state without a loaded package is stale data from
+            # an older profile and should not appear as a runtime skill.
+            continue
         evidence = state.get("evidence", {})
         payload_by_name[state["skill_name"]] = {
             "name": state["skill_name"],

@@ -96,8 +96,8 @@ pip install -e ".[all,dev]"
 python -m pytest tests/ -v
 python -m core.docs_lint
 pre-commit run --all-files
-evidune run -c examples/content/evidune.yaml
-evidune serve -c examples/content/evidune.yaml
+evidune run -c examples/agent/evidune.yaml
+evidune serve -c examples/agent/evidune.yaml
 cd web && npm install && npm run build
 ```
 

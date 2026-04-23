@@ -15,18 +15,18 @@ def _write(path: Path, content: str) -> Path:
 
 
 IDENTITY_META = """---
-name: content-writer
-display_name: 老拐
-description: 资深内容创作者
+name: general-assistant
+display_name: Evidune
+description: 通用任务助手
 language: zh-CN
-expertise: [content, writing]
-voice: 实在、不端着
+expertise: [task execution, diagnostics]
+voice: 直接、务实
 default: true
 ---
 
 ## 你是谁
 
-你叫老拐，写长文超过 5 年。
+你是 Evidune 通用任务助手。
 """
 
 IDENTITY_MINIMAL = """---
@@ -38,12 +38,12 @@ just the identity body
 
 SOUL_SAMPLE = """## 风格
 
-实在话、有钩子、不水。
+直接、准确、可验证。
 """
 
 USER_SAMPLE = """## 关系
 
-你把用户当同行。
+你和用户协作完成任务。
 """
 
 TOOLS_SAMPLE = """## 工具偏好
@@ -70,18 +70,18 @@ def _write_identity(
 
 class TestParseIdentity:
     def test_full_identity(self, tmp_path: Path):
-        root = _write_identity(tmp_path / "content-writer", tools_md=TOOLS_SAMPLE)
+        root = _write_identity(tmp_path / "general-assistant", tools_md=TOOLS_SAMPLE)
         identity = parse_identity(root)
-        assert identity.name == "content-writer"
-        assert identity.display_name == "老拐"
-        assert identity.description == "资深内容创作者"
+        assert identity.name == "general-assistant"
+        assert identity.display_name == "Evidune"
+        assert identity.description == "通用任务助手"
         assert identity.language == "zh-CN"
-        assert "content" in identity.expertise
-        assert identity.voice == "实在、不端着"
+        assert "diagnostics" in identity.expertise
+        assert identity.voice == "直接、务实"
         assert identity.default is True
-        assert "实在话" in identity.soul
-        assert "你叫老拐" in identity.identity
-        assert "你把用户当同行" in identity.user
+        assert "可验证" in identity.soul
+        assert "通用任务助手" in identity.identity
+        assert "协作完成任务" in identity.user
         assert "先读上下文" in identity.tools
         assert identity.path == root
 
@@ -145,7 +145,7 @@ class TestLoadIdentitiesFromDir:
         _write_identity(tmp_path, identity_md=IDENTITY_META)
         identities = load_identities_from_dir(tmp_path)
         assert len(identities) == 1
-        assert identities[0].name == "content-writer"
+        assert identities[0].name == "general-assistant"
 
 
 class TestIdentityRegistry:
@@ -161,14 +161,14 @@ class TestIdentityRegistry:
         assert len(registry) == 2
 
     def test_get_by_name(self, registry: IdentityRegistry):
-        identity = registry.get("content-writer")
+        identity = registry.get("general-assistant")
         assert identity is not None
-        assert identity.display_name == "老拐"
+        assert identity.display_name == "Evidune"
 
     def test_default_picks_marked_identity(self, registry: IdentityRegistry):
         default = registry.default()
         assert default is not None
-        assert default.name == "content-writer"
+        assert default.name == "general-assistant"
 
     def test_default_falls_back_to_first(self, tmp_path: Path):
         _write_identity(tmp_path / "p1", identity_md=IDENTITY_MINIMAL)
@@ -188,7 +188,7 @@ class TestIdentityRegistry:
     def test_resolve_no_name_returns_default(self, registry: IdentityRegistry):
         identity = registry.resolve(None)
         assert identity is not None
-        assert identity.name == "content-writer"
+        assert identity.name == "general-assistant"
 
     def test_set_default_explicit(self, registry: IdentityRegistry):
         registry.set_default("minimal")
