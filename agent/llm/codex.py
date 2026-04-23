@@ -16,8 +16,9 @@ Requirements (empirically discovered):
 
 The SSE stream emits `response.output_text.delta` events for text and
 `response.output_item.done` events (with item.type == "function_call")
-for tool calls. On 401 we re-read auth.json once (Codex CLI may have
-refreshed the token in the background) and retry the call.
+for tool calls. On 401 we recover auth once: first by re-reading
+auth.json in case another process refreshed it, then by using the
+stored refresh_token to update auth.json, and finally retrying the call.
 """
 
 from __future__ import annotations
@@ -55,10 +56,23 @@ class CodexClient(LLMClient):
         self._token = auth.access_token
         self._account_id = auth.account_id or ""
 
-    def _refresh_from_disk(self) -> None:
+    def _reload_from_disk(self) -> None:
         from agent.codex_auth import read_codex_auth
 
         auth = read_codex_auth(self._auth_path)
+        self._token = auth.access_token
+        self._account_id = auth.account_id or ""
+
+    def _recover_after_unauthorized(self) -> None:
+        from agent.codex_auth import read_codex_auth, refresh_codex_auth
+
+        auth = read_codex_auth(self._auth_path)
+        if auth.access_token != self._token:
+            self._token = auth.access_token
+            self._account_id = auth.account_id or ""
+            return
+
+        auth = refresh_codex_auth(self._auth_path)
         self._token = auth.access_token
         self._account_id = auth.account_id or ""
 
@@ -213,7 +227,7 @@ class CodexClient(LLMClient):
         try:
             text, _ = await self._post(payload)
         except _CodexUnauthorized:
-            self._refresh_from_disk()
+            self._recover_after_unauthorized()
             text, _ = await self._post(payload)
         return text
 
@@ -227,7 +241,7 @@ class CodexClient(LLMClient):
         try:
             text, tool_calls = await self._post(payload)
         except _CodexUnauthorized:
-            self._refresh_from_disk()
+            self._recover_after_unauthorized()
             text, tool_calls = await self._post(payload)
         return CompletionResult(text=text, tool_calls=tool_calls)
 

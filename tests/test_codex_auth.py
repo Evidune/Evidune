@@ -2,11 +2,19 @@
 
 import json
 import stat
+import urllib.parse
 from pathlib import Path
 
 import pytest
 
-from agent.codex_auth import CodexAuth, CodexAuthError, get_access_token, read_codex_auth
+from agent.codex_auth import (
+    CODEX_CLIENT_ID,
+    CodexAuth,
+    CodexAuthError,
+    get_access_token,
+    read_codex_auth,
+    refresh_codex_auth,
+)
 
 
 def _write_auth(path: Path, payload: dict) -> Path:
@@ -88,3 +96,71 @@ class TestGetAccessToken:
     def test_propagates_error(self, tmp_path: Path):
         with pytest.raises(CodexAuthError):
             get_access_token(tmp_path / "nope.json")
+
+
+class TestRefreshCodexAuth:
+    def test_refresh_updates_auth_file_atomically(self, tmp_path: Path, monkeypatch):
+        path = _write_auth(
+            tmp_path / "auth.json",
+            {
+                **VALID_AUTH,
+                "OPENAI_API_KEY": "sk-codex-access-token-abc",
+            },
+        )
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "access_token": "sk-new-access",
+                        "refresh_token": "new-refresh",
+                        "id_token": "new-id",
+                        "chatgpt_account_id": "acct-new",
+                    }
+                ).encode()
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            captured["content_type"] = request.get_header("Content-type")
+            captured["form"] = urllib.parse.parse_qs(request.data.decode())
+            return FakeResponse()
+
+        monkeypatch.setattr("agent.codex_auth.urllib.request.urlopen", fake_urlopen)
+
+        auth = refresh_codex_auth(path, token_url="https://chatgpt.test/oauth/token", timeout_s=9)
+
+        assert captured["url"] == "https://chatgpt.test/oauth/token"
+        assert captured["timeout"] == 9
+        assert captured["content_type"] == "application/x-www-form-urlencoded"
+        assert captured["form"] == {
+            "grant_type": ["refresh_token"],
+            "refresh_token": ["refresh-token-456"],
+            "client_id": [CODEX_CLIENT_ID],
+        }
+        assert auth.access_token == "sk-new-access"
+        assert auth.refresh_token == "new-refresh"
+        assert auth.id_token == "new-id"
+        assert auth.account_id == "acct-new"
+
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        assert raw["OPENAI_API_KEY"] == "sk-new-access"
+        assert raw["tokens"]["access_token"] == "sk-new-access"
+        assert raw["tokens"]["refresh_token"] == "new-refresh"
+        assert raw["tokens"]["id_token"] == "new-id"
+        assert raw["tokens"]["account_id"] == "acct-new"
+        assert raw["last_refresh"].endswith("Z")
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_missing_refresh_token_raises(self, tmp_path: Path):
+        path = _write_auth(tmp_path / "auth.json", {"tokens": {"access_token": "sk-old"}})
+
+        with pytest.raises(CodexAuthError, match="tokens.refresh_token"):
+            refresh_codex_auth(path)

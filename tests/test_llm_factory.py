@@ -162,6 +162,38 @@ class TestCodexClient:
         assert call_count["n"] == 2
 
     @pytest.mark.asyncio
+    async def test_401_refreshes_auth_when_disk_token_is_stale(self, tmp_path: Path):
+        from agent.codex_auth import CodexAuth
+        from agent.llm import _CodexUnauthorized
+
+        auth_path = _write_codex_auth(tmp_path / "auth.json", "sk-old")
+        client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
+        call_count = {"n": 0}
+        refresh_calls: list[str | None] = []
+
+        async def flaky_post(payload):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise _CodexUnauthorized("401")
+            return ("recovered", [])
+
+        def fake_refresh(path):
+            refresh_calls.append(path)
+            return CodexAuth(access_token="sk-refreshed", account_id="acct-refreshed")
+
+        with (
+            patch.object(client, "_post", side_effect=flaky_post),
+            patch("agent.codex_auth.refresh_codex_auth", side_effect=fake_refresh),
+        ):
+            result = await client.complete([{"role": "user", "content": "hi"}])
+
+        assert result == "recovered"
+        assert client._token == "sk-refreshed"
+        assert client._account_id == "acct-refreshed"
+        assert refresh_calls == [str(auth_path)]
+        assert call_count["n"] == 2
+
+    @pytest.mark.asyncio
     async def test_non_auth_error_propagates(self, tmp_path: Path):
         auth_path = _write_codex_auth(tmp_path / "auth.json")
         client = CodexClient(model="gpt-5.4", auth_path=str(auth_path))
