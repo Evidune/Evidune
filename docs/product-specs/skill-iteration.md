@@ -8,6 +8,12 @@ Skill iteration has two loops:
 - `evidune run`: outcome-driven updates to existing skills
 - `evidune serve`: conversation-driven emergence of new skills
 
+In `serve`, skills are first-class runtime objects. A skill has a parsed
+`SKILL.md` package, lifecycle state, source, path, version, loaded resources,
+matching diagnostics, and API/UI representation. Chat does not treat skills as
+hidden prompt fragments; the runtime can explain which skills were visible,
+matched, created, updated, reused, or skipped.
+
 ## Target Behavior
 
 ### Outcome-Driven Iteration
@@ -36,7 +42,8 @@ In `evidune serve`, high-confidence reusable patterns from conversation should
 become active skills by default.
 
 - Explicit requests to create, implement, or turn something into a reusable
-  skill bypass the implicit `every_n_turns` cadence and run emergence immediately
+  skill enter a skill-creation transaction immediately instead of first getting
+  a generic prose answer
 - Implicit reusable patterns are still detected on the configured cadence to
   avoid running the detector on every ordinary turn
 - A new skill package is synthesised, written under
@@ -45,8 +52,13 @@ become active skills by default.
   prompt-readable `scripts/*.md`, and `references/*.md`
 - Active emerged skills must be loaded again on later process starts so the
   behavior survives restart
-- Name collisions must be prevented without silently overwriting an unrelated
-  existing skill
+- Name collisions and high-similarity candidates are resolved before writing:
+  active emerged skills are updated, base/project skills are reused, and only
+  genuinely new capabilities create new packages
+- `/api/skills` returns first-class skill records, including source, status,
+  version, path, loaded resources, timestamps, and load errors
+- `/api/chat` returns `skill_creation` metadata for created, updated, reused,
+  queued, and failed skill transactions
 - Manual review remains optional, but it is no longer the default gate for
   activation
 

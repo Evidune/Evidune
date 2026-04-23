@@ -72,3 +72,31 @@ class TestWebGatewayChat:
         assert seen["metadata"] == {"mode": "plan"}
         assert result["mode"] == "plan"
         assert result["plan"]["items"][0]["step"] == "Write the plan"
+
+    @pytest.mark.asyncio
+    async def test_handle_chat_passes_skill_creation_metadata(self):
+        gw = WebGateway()
+
+        async def handler(message: InboundMessage) -> OutboundMessage:
+            return OutboundMessage(
+                text="created",
+                conversation_id=message.conversation_id,
+                metadata={
+                    "skill_creation": {
+                        "status": "created",
+                        "skill_name": "collect-intel",
+                    }
+                },
+            )
+
+        gw._handler = handler
+        result = await gw._handle_chat("create skill", "conv3")
+        assert result["skill_creation"]["status"] == "created"
+        assert result["skill_creation"]["skill_name"] == "collect-intel"
+
+    def test_skills_payload_uses_dynamic_provider(self):
+        gw = WebGateway()
+        gw.set_skills([{"name": "old", "description": "Old"}])
+        gw.set_skill_provider(lambda: [{"name": "new", "description": "New", "status": "active"}])
+
+        assert gw._skills_payload()[0]["name"] == "new"

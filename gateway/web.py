@@ -39,10 +39,15 @@ class WebGateway(Gateway):
         self._thread: Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._skills_json: str = "[]"
+        self._skill_provider: Any = None
         self._memory_store: Any = None  # Optional MemoryStore for /api/feedback
 
     def set_skills(self, skills: list[dict[str, str]]) -> None:
         self._skills_json = json.dumps(skills, ensure_ascii=False)
+
+    def set_skill_provider(self, provider: Any) -> None:
+        """Wire a dynamic skill metadata provider for /api/skills."""
+        self._skill_provider = provider
 
     def set_memory_store(self, store: Any) -> None:
         """Wire a MemoryStore so /api/feedback can persist signals."""
@@ -78,7 +83,7 @@ class WebGateway(Gateway):
 
                 # API routes
                 if path == "/api/skills":
-                    self._json_resp(200, json.loads(gateway._skills_json))
+                    self._json_resp(200, gateway._skills_payload())
                     return
 
                 if path == "/api/chat/stream":
@@ -365,6 +370,7 @@ class WebGateway(Gateway):
             "skills": response.metadata.get("skills", []),
             "execution_ids": response.metadata.get("execution_ids", []),
             "emerged_skill": response.metadata.get("emerged_skill"),
+            "skill_creation": response.metadata.get("skill_creation"),
             "facts_extracted": response.metadata.get("facts_extracted", 0),
             "identity": response.metadata.get("identity"),
             "mode": response.metadata.get("mode"),
@@ -383,6 +389,14 @@ class WebGateway(Gateway):
             "delivery_summary": response.metadata.get("delivery_summary"),
             "artifact_manifest": response.metadata.get("artifact_manifest"),
         }
+
+    def _skills_payload(self) -> list[dict[str, Any]]:
+        if callable(self._skill_provider):
+            try:
+                return self._skill_provider()
+            except Exception:
+                return []
+        return json.loads(self._skills_json)
 
     def _handle_feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist a user feedback signal for a previous execution.

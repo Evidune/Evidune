@@ -253,6 +253,29 @@ class TestSkillRegistry:
         reg.register(skill)
         assert reg.get("write-article") is skill
 
+    def test_records_expose_first_class_skill_metadata(self, registry: SkillRegistry):
+        records = {record.name: record for record in registry.records()}
+        record = records["write-article"]
+        assert record.source == "base"
+        assert record.status == "active"
+        assert record.path.endswith("SKILL.md")
+        assert "writing" in record.tags
+
+    def test_find_matches_reports_reasons(self, registry: SkillRegistry):
+        matches = registry.find_matches("write a long-form article")
+        assert matches
+        assert matches[0].skill.name == "write-article"
+        assert matches[0].reasons
+
+    def test_find_similar_detects_duplicate_skill(self, registry: SkillRegistry):
+        matches = registry.find_similar(
+            name="write-article",
+            text="Create a reusable writing workflow",
+        )
+        assert matches
+        assert matches[0].skill.name == "write-article"
+        assert "exact_name" in matches[0].reasons
+
 
 class TestRegistryTriggerMatching:
     @pytest.fixture

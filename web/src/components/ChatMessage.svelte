@@ -2,6 +2,7 @@
   import type { Message, SignalType } from '../lib/types'
   import { sendFeedback } from '../lib/api'
   import HarnessSummary from './HarnessSummary.svelte'
+  import SkillCreationCard from './SkillCreationCard.svelte'
   import TaskTimeline from './TaskTimeline.svelte'
   import ToolTrace from './ToolTrace.svelte'
 
@@ -85,6 +86,10 @@
       deliverySummary={message.deliverySummary}
       artifactManifest={message.artifactManifest}
     />
+  {/if}
+
+  {#if !isUser && message.skillCreation}
+    <SkillCreationCard creation={message.skillCreation} />
   {/if}
 
   <div

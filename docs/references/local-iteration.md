@@ -15,7 +15,7 @@ evidune iterations list --config evidune.yaml
 ## Runtime Artifacts
 
 - `.evidune/memory.db`: shared SQLite store for conversations, facts, and iteration runs
-- `.evidune/emerged_skills/`: output directory for conversation-synthesized skills when enabled
+- `.evidune/emerged_skills/`: output directory for conversation-synthesized skills
 - `.evidune/runtime/<environment_id>/`: task-scoped harness environments with service state,
   structured observability, and validation artifacts
 

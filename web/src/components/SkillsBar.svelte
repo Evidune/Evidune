@@ -14,9 +14,13 @@
       <span
         class="skill-tag"
         class:active={active.includes(skill.name)}
-        title={skill.description}
+        class:inactive={skill.status && skill.status !== 'active'}
+        title={`${skill.description || skill.name}${skill.status ? ` · ${skill.status}` : ''}`}
       >
         {skill.name}
+        {#if skill.source === 'emerged'}
+          <small>learned</small>
+        {/if}
       </span>
     {/each}
   </div>
@@ -49,5 +53,14 @@
     border-color: var(--accent);
     color: var(--accent2);
     background: rgba(99, 102, 241, 0.1);
+  }
+
+  .skill-tag.inactive {
+    opacity: 0.55;
+  }
+
+  .skill-tag small {
+    margin-left: 6px;
+    color: var(--text2);
   }
 </style>

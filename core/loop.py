@@ -186,7 +186,7 @@ def _load_persisted_emerged_skills(skill_registry, memory, output_dir: str | Pat
             )
             continue
 
-        skill_registry.register(skill)
+        skill_registry.register(skill, source="emerged")
         loaded += 1
 
     return loaded
@@ -205,6 +205,78 @@ def _apply_skill_state_overrides(skill_registry, memory) -> int:
             if skill_registry.unregister(skill_state["skill_name"]):
                 removed += 1
     return removed
+
+
+def _sync_loaded_skill_states(skill_registry, memory) -> None:
+    """Ensure active loaded skills have first-class lifecycle rows."""
+    for skill in skill_registry.all():
+        existing = memory.get_skill_state(skill.name)
+        emerged = memory.get_emerged_skill(skill.name)
+        origin = (
+            existing["origin"]
+            if existing is not None
+            else ("emerged" if emerged is not None else "base")
+        )
+        status = existing["status"] if existing is not None else "active"
+        memory.upsert_skill_state(
+            skill.name,
+            origin=origin,
+            path=str(skill.path),
+            status=status,
+            reason=(existing or {}).get("reason", ""),
+            evidence=(existing or {}).get("evidence", {}),
+        )
+
+
+def _skill_records_payload(skill_registry, memory) -> list[dict]:
+    """Merge loaded skill metadata with persisted lifecycle state for APIs."""
+    payload_by_name: dict[str, dict] = {}
+    for record in skill_registry.records():
+        payload = record.to_dict()
+        state = memory.get_skill_state(record.name)
+        emerged = memory.get_emerged_skill(record.name)
+        if state is not None:
+            payload["source"] = state["origin"]
+            payload["status"] = state["status"]
+            payload["path"] = state["path"] or payload["path"]
+            payload["created_at"] = state["created_at"] or payload["created_at"]
+            payload["updated_at"] = state["updated_at"] or payload["updated_at"]
+            if state["status"] != "active":
+                payload["load_error"] = state["reason"] or payload["load_error"]
+        elif emerged is not None:
+            payload["source"] = "emerged"
+            payload["status"] = emerged["status"]
+            payload["path"] = emerged["path"] or payload["path"]
+            payload["created_at"] = emerged["created_at"] or payload["created_at"]
+            payload["updated_at"] = emerged["updated_at"] or payload["updated_at"]
+        if emerged is not None:
+            payload["version"] = str(emerged["version"])
+        payload_by_name[record.name] = payload
+
+    for state in memory.list_skill_states():
+        if state["skill_name"] in payload_by_name:
+            continue
+        evidence = state.get("evidence", {})
+        payload_by_name[state["skill_name"]] = {
+            "name": state["skill_name"],
+            "description": "",
+            "source": state["origin"],
+            "status": state["status"],
+            "version": "",
+            "path": state["path"],
+            "scripts": [],
+            "references": [],
+            "triggers": [],
+            "tags": [],
+            "created_at": state["created_at"],
+            "updated_at": state["updated_at"],
+            "last_loaded_at": "",
+            "load_error": evidence.get("error", "") or state["reason"],
+        }
+
+    return sorted(
+        payload_by_name.values(), key=lambda item: (item["status"] != "active", item["name"])
+    )
 
 
 def _handle_docs_command(base_dir: Path, subcommand: str | None) -> int:
@@ -545,6 +617,7 @@ async def serve(
     filtered = _apply_skill_state_overrides(skill_registry, memory)
     if filtered > 0:
         print(f"Skipped {filtered} non-active skill(s) via lifecycle state")
+    _sync_loaded_skill_states(skill_registry, memory)
 
     # Title generator (always on when agent is configured — cheap, high value)
     from agent.title_generator import TitleGenerator
@@ -615,10 +688,9 @@ async def serve(
     # Initialize web gateways with skill metadata + memory store for /api/feedback
     from gateway.web import WebGateway
 
-    skills_meta = [{"name": s.name, "description": s.description} for s in skill_registry.all()]
     for gw in gateways_list:
         if isinstance(gw, WebGateway):
-            gw.set_skills(skills_meta)
+            gw.set_skill_provider(lambda: _skill_records_payload(skill_registry, memory))
             gw.set_memory_store(memory)
 
     router = Router(agent=agent, gateways=gateways_list)

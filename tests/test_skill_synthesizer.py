@@ -179,3 +179,32 @@ bad
         result = await synth.synthesize(pattern, [{"role": "user", "content": "x"}])
         assert result is None
         assert not (tmp_path / "explain-topic").exists()
+
+    @pytest.mark.asyncio
+    async def test_update_existing_skill_uses_existing_package_path(self, tmp_path: Path):
+        existing_dir = tmp_path / "existing"
+        existing_dir.mkdir()
+        existing_path = existing_dir / "SKILL.md"
+        existing_path.write_text(
+            "---\nname: explain-topic\ndescription: Old\n---\n\n## Instructions\nOld.\n",
+            encoding="utf-8",
+        )
+        existing = parse_skill(existing_path)
+        judge = MockJudge(SAMPLE_SKILL_PACKAGE)
+        synth = SkillSynthesizer(judge=judge, output_dir=tmp_path / "new")
+        pattern = DetectedPattern(
+            is_skill=True,
+            suggested_name="ignored-new-name",
+            description="Explain",
+            confidence=0.9,
+            rationale="useful",
+        )
+
+        result = await synth.synthesize(
+            pattern, [{"role": "user", "content": "x"}], existing_skill=existing
+        )
+
+        assert result is not None
+        assert result.name == "explain-topic"
+        assert result.path == existing_path
+        assert "Update the existing skill package" in judge.last_messages[0]["content"]

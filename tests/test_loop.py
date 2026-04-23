@@ -7,7 +7,14 @@ import yaml
 
 import core.loop as loop_module
 from core.config import load_config
-from core.loop import _apply_skill_state_overrides, _load_active_emerged_skills, main, run_iteration
+from core.loop import (
+    _apply_skill_state_overrides,
+    _load_active_emerged_skills,
+    _skill_records_payload,
+    _sync_loaded_skill_states,
+    main,
+    run_iteration,
+)
 from core.project_init import _config_template
 from core.runtime_paths import resolve_emergence_output_dir, resolve_memory_path
 from memory.store import MemoryStore
@@ -171,6 +178,32 @@ class TestIterationLedger:
         assert removed == 2
         assert registry.get("writer") is None
         assert registry.get("helper") is None
+
+    def test_skill_records_payload_merges_registry_and_lifecycle_state(self, tmp_path: Path):
+        base_path = _write(
+            tmp_path / "skills" / "writer" / "SKILL.md",
+            "---\nname: writer\ndescription: Write\n---\n\n## Instructions\nDo it.\n",
+        )
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            registry = SkillRegistry()
+            registry.load_directory(tmp_path / "skills")
+            _sync_loaded_skill_states(registry, store)
+            store.set_skill_state(
+                "writer",
+                "disabled",
+                reason="operator disabled",
+                path=str(base_path),
+            )
+            payload = _skill_records_payload(registry, store)
+        finally:
+            store.close()
+
+        writer = next(item for item in payload if item["name"] == "writer")
+        assert writer["source"] == "base"
+        assert writer["status"] == "disabled"
+        assert writer["load_error"] == "operator disabled"
+        assert writer["path"] == str(base_path)
 
     def test_deploy_config_uses_persistent_runtime_paths(self):
         repo_root = Path(__file__).resolve().parents[1]

@@ -68,11 +68,35 @@ export interface Message {
   validationSummary?: Record<string, unknown> | null
   deliverySummary?: Record<string, unknown> | null
   artifactManifest?: Record<string, unknown> | null
+  skillCreation?: SkillCreation | null
 }
 
 export interface Skill {
   name: string
   description: string
+  source?: 'base' | 'emerged' | string
+  status?: 'active' | 'pending_review' | 'disabled' | 'rolled_back' | string
+  version?: string
+  path?: string
+  scripts?: string[]
+  references?: string[]
+  triggers?: string[]
+  tags?: string[]
+  created_at?: string
+  updated_at?: string
+  last_loaded_at?: string
+  load_error?: string
+}
+
+export interface SkillCreation {
+  status: 'created' | 'updated' | 'reused' | 'queued' | 'failed'
+  skill_name: string
+  path?: string
+  files?: string[]
+  confidence?: number | null
+  reason?: string
+  duplicate_of?: string
+  trigger_reason?: 'explicit_skill_request' | 'cadence' | string
 }
 
 export interface ChatResponse {
@@ -81,6 +105,7 @@ export interface ChatResponse {
   skills?: string[]
   execution_ids?: number[]
   emerged_skill?: string | null
+  skill_creation?: SkillCreation | null
   facts_extracted?: number
   identity?: string | null
   mode?: ConversationMode | null

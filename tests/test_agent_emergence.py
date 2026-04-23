@@ -13,14 +13,17 @@ from agent.skill_synthesizer import SkillSynthesizer, SynthesisResult
 from core.loop import _load_active_emerged_skills
 from gateway.base import InboundMessage
 from memory.store import MemoryStore
+from skills.loader import parse_skill
 from skills.registry import SkillRegistry
 
 
 class MockLLM(LLMClient):
     def __init__(self, response: str = "ok"):
         self.response = response
+        self.calls = 0
 
     async def complete(self, messages, **kwargs):
+        self.calls += 1
         return self.response
 
 
@@ -84,6 +87,17 @@ def _make_skill_md(tmp_path: Path, name: str = "explain-topic") -> Path:
         encoding="utf-8",
     )
     return p
+
+
+def _skill_files(name: str, instructions: str = "Do it.") -> dict[str, str]:
+    return {
+        "SKILL.md": (
+            f"---\nname: {name}\ndescription: x\noutcome_metrics: false\n---\n\n"
+            f"## Instructions\n{instructions}\n"
+        ),
+        "scripts/checklist.md": "# Checklist\n\n- Follow the workflow.\n",
+        "references/source-notes.md": "# Source Notes\n\nConversation-derived notes.\n",
+    }
 
 
 def _read_last_log(capsys) -> dict:
@@ -222,6 +236,90 @@ class TestEmergenceTrigger:
         assert log["trigger_reason"] == "explicit_skill_request"
 
     @pytest.mark.asyncio
+    async def test_explicit_skill_request_does_not_call_normal_chat_llm(self, memory, tmp_path):
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="collect-intel",
+                description="Collect public information into a brief",
+                confidence=0.9,
+                rationale="The user explicitly asked to create a reusable skill.",
+            )
+        )
+
+        def factory(pattern, write):
+            path = _make_skill_md(tmp_path, "collect-intel")
+            return SynthesisResult(
+                name=pattern.suggested_name, skill_md=path.read_text(), path=path
+            )
+
+        synth = MockSynthesizer(tmp_path, factory)
+        agent = _make_agent(memory, detector=detector, synthesizer=synth, every_n=6)
+        resp = await agent.handle(
+            InboundMessage(
+                text="建立一个收集资讯的 skill",
+                sender_id="u",
+                channel="web",
+                conversation_id="c",
+            )
+        )
+
+        assert agent.llm.calls == 0
+        assert "已创建并激活" in resp.text
+        assert resp.metadata["skill_creation"]["status"] == "created"
+        assert resp.metadata["skill_creation"]["skill_name"] == "collect-intel"
+
+    @pytest.mark.asyncio
+    async def test_existing_emerged_skill_is_updated_instead_of_duplicated(self, memory, tmp_path):
+        existing_path = _make_skill_md(tmp_path, "collect-intel")
+        memory.register_emerged_skill(
+            name="collect-intel",
+            status="active",
+            path=str(existing_path),
+        )
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="collect-intel",
+                description="Collect public information into a brief",
+                confidence=0.9,
+                rationale="The user explicitly asked to improve a reusable skill.",
+            )
+        )
+
+        def factory(pattern, write):
+            files = _skill_files("collect-intel", instructions="Use the updated workflow.")
+            return SynthesisResult(
+                name=pattern.suggested_name,
+                skill_md=files["SKILL.md"],
+                path=existing_path,
+                files=files,
+            )
+
+        synth = MockSynthesizer(tmp_path, factory)
+        agent = _make_agent(memory, detector=detector, synthesizer=synth, every_n=6)
+        agent.skills.register(parse_skill(existing_path), source="emerged")
+
+        resp = await agent.handle(
+            InboundMessage(
+                text="更新并沉淀 collect-intel skill",
+                sender_id="u",
+                channel="web",
+                conversation_id="c",
+            )
+        )
+
+        assert resp.metadata["emerged_skill"] == "collect-intel"
+        assert resp.metadata["skill_creation"]["status"] == "updated"
+        assert "Use the updated workflow." in existing_path.read_text(encoding="utf-8")
+        rec = memory.get_emerged_skill("collect-intel")
+        assert rec is not None
+        assert rec["version"] == 2
+        event = memory.get_latest_skill_lifecycle_event("collect-intel", action="update")
+        assert event is not None
+        assert event["content_before"]
+
+    @pytest.mark.asyncio
     async def test_duplicate_name_skipped(self, memory, tmp_path):
         # Pre-load a skill with the same name
         existing_dir = tmp_path / "explain-topic"
@@ -249,6 +347,8 @@ class TestEmergenceTrigger:
         msg = InboundMessage(text="x", sender_id="u", channel="cli", conversation_id="c")
         resp = await agent.handle(msg)
         assert resp.metadata["emerged_skill"] is None
+        assert resp.metadata["skill_creation"]["status"] == "reused"
+        assert resp.metadata["skill_creation"]["skill_name"] == "explain-topic"
         # Synthesiser should NOT have been called
         assert synth.calls == 0
 
@@ -419,8 +519,9 @@ bad
                 conversation_id="c",
             )
         )
-        assert resp.text == "ok"
+        assert "后台队列" in resp.text
         assert resp.metadata["emerged_skill"] is None
+        assert resp.metadata["skill_creation"]["status"] == "queued"
         queued_log = _read_last_log(capsys)
         assert queued_log["skip_reason"] == "emergence_queued"
         assert queued_log["activation_status"] == "pending"

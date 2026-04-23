@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from agent.fact_extractor import FactExtractor
 from agent.harness import TaskBrief
@@ -26,7 +28,8 @@ from gateway.base import InboundMessage, OutboundMessage
 from identities.loader import Identity
 from identities.registry import IdentityRegistry
 from memory.store import MemoryStore
-from skills.loader import parse_skill
+from skills.loader import Skill, parse_skill
+from skills.models import SkillMatch
 from skills.registry import SkillRegistry
 
 _CONVERSATION_MODES = {"plan", "execute"}
@@ -63,6 +66,13 @@ class EmergenceDecision:
     emerged_skill_path: str = ""
     emerged_skill: str | None = None
     trigger_reason: str = ""
+    skill_snapshot_count: int = 0
+    skill_prompt_token_estimate: int = 0
+    skill_match_reasons: dict[str, list[str]] = field(default_factory=dict)
+    skill_creation: dict[str, Any] | None = None
+    resolver_action: str = ""
+    duplicate_of: str = ""
+    load_error: str = ""
 
 
 class AgentCore:
@@ -437,8 +447,60 @@ class AgentCore:
             "activation_status": decision.activation_status,
             "emerged_skill_path": decision.emerged_skill_path,
             "trigger_reason": decision.trigger_reason,
+            "skill_snapshot_count": decision.skill_snapshot_count,
+            "skill_match_reasons": decision.skill_match_reasons,
+            "skill_prompt_token_estimate": decision.skill_prompt_token_estimate,
+            "skill_creation_status": (decision.skill_creation or {}).get("status", ""),
+            "resolver_action": decision.resolver_action,
+            "duplicate_of": decision.duplicate_of,
+            "load_error": decision.load_error,
         }
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+
+    def _attach_skill_snapshot(self, decision: EmergenceDecision, snapshot) -> None:
+        """Copy registry snapshot diagnostics onto an emergence decision."""
+        log_data = snapshot.to_log_dict()
+        decision.skill_snapshot_count = log_data["skill_snapshot_count"]
+        decision.skill_match_reasons = log_data["skill_match_reasons"]
+        decision.skill_prompt_token_estimate = log_data["skill_prompt_token_estimate"]
+
+    def _skill_creation_response(self, decision: EmergenceDecision) -> str:
+        creation = decision.skill_creation or {}
+        status = creation.get("status") or "failed"
+        name = creation.get("skill_name") or decision.detected_name or "unknown"
+        reason = creation.get("reason") or decision.skip_reason or "unknown"
+
+        if status == "created":
+            return f"Skill `{name}` 已创建并激活。后续相似请求会优先匹配这个 skill。"
+        if status == "updated":
+            return f"Skill `{name}` 已更新并保持激活。没有创建重复 skill。"
+        if status == "reused":
+            return f"已复用现有 skill `{name}`，没有创建重复 skill。原因：{reason}"
+        if status == "queued":
+            if name == "unknown":
+                return "Skill 创建已进入后台队列。完成后会写入 skill registry 并在后续请求中可用。"
+            return f"Skill `{name}` 的创建已进入后台队列。完成后会写入 skill registry 并在后续请求中可用。"
+        return f"Skill 创建失败：{reason}"
+
+    def _failed_skill_creation(
+        self,
+        decision: EmergenceDecision,
+        *,
+        reason: str,
+        status: str = "failed",
+    ) -> EmergenceDecision:
+        skill_name = decision.detected_name or ""
+        decision.skill_creation = {
+            "status": status,
+            "skill_name": skill_name,
+            "path": decision.emerged_skill_path,
+            "files": [],
+            "confidence": decision.detected_confidence,
+            "reason": reason,
+            "duplicate_of": decision.duplicate_of,
+            "trigger_reason": decision.trigger_reason,
+        }
+        return decision
 
     def _track_background_emergence(
         self,
@@ -548,11 +610,69 @@ class AgentCore:
             facts = self.memory.get_facts()
 
         # 4. Relevant skills
-        matched_skills = self.skills.find_relevant(message.text)
+        skill_snapshot = self.skills.snapshot(message.text)
+        matched_skills = [match.skill for match in skill_snapshot.matches]
         relevant_skills = matched_skills if matched_skills else self.skills.all()
         execution_skills = matched_skills if matched_skills else []
         matched_skill_names = [skill.name for skill in matched_skills]
         execution_skill_names = [skill.name for skill in execution_skills]
+
+        if (
+            _is_explicit_skill_request(message.text)
+            and self.pattern_detector
+            and self.skill_synthesizer
+        ):
+            self.memory.add_message(message.conversation_id, "user", message.text)
+            current_turn_count = self._sync_turn_counter(self._turn_counts, message.conversation_id)
+            current_emergence_count = self._sync_turn_counter(
+                self._emergence_counts, message.conversation_id
+            )
+            emergence_decision = await self._maybe_emerge_skill(
+                message,
+                mode=mode,
+                matched_skill_names=matched_skill_names,
+                execution_skill_names=[],
+                emergence_counter=current_emergence_count,
+            )
+            self._attach_skill_snapshot(emergence_decision, skill_snapshot)
+            response_text = self._skill_creation_response(emergence_decision)
+            self.memory.add_message(message.conversation_id, "assistant", response_text)
+            extracted_count = await self._maybe_extract_facts(
+                message, identity, turn_count=current_turn_count
+            )
+            new_title = await self._maybe_generate_title(message.conversation_id)
+            current_plan = self.memory.get_conversation_plan(message.conversation_id)
+            self._log_emergence_turn(emergence_decision)
+            self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
+            return OutboundMessage(
+                text=response_text,
+                conversation_id=message.conversation_id,
+                metadata={
+                    "skills": [],
+                    "execution_ids": [],
+                    "identity": identity.name if identity else None,
+                    "mode": mode,
+                    "plan": current_plan,
+                    "facts_extracted": extracted_count,
+                    "evaluations_recorded": 0,
+                    "emerged_skill": emergence_decision.emerged_skill,
+                    "skill_creation": emergence_decision.skill_creation,
+                    "skill_lifecycle_updates": [],
+                    "new_title": new_title,
+                    "tool_trace": [],
+                    "task_id": None,
+                    "squad": None,
+                    "task_status": None,
+                    "task_events": [],
+                    "convergence_summary": None,
+                    "budget_summary": None,
+                    "environment_id": None,
+                    "environment_status": None,
+                    "validation_summary": None,
+                    "delivery_summary": None,
+                    "artifact_manifest": None,
+                },
+            )
 
         task_id: str | None = None
         squad_name: str | None = None
@@ -655,6 +775,7 @@ class AgentCore:
             execution_skill_names=execution_skill_names,
             emergence_counter=current_emergence_count,
         )
+        self._attach_skill_snapshot(emergence_decision, skill_snapshot)
 
         # 11. Auto-title the conversation once it has enough content
         new_title = await self._maybe_generate_title(message.conversation_id)
@@ -677,6 +798,7 @@ class AgentCore:
                 "facts_extracted": extracted_count,
                 "evaluations_recorded": evaluated_count,
                 "emerged_skill": emergence_decision.emerged_skill,
+                "skill_creation": emergence_decision.skill_creation,
                 "skill_lifecycle_updates": lifecycle_updates,
                 "new_title": new_title,
                 "tool_trace": tool_trace,
@@ -774,6 +896,67 @@ class AgentCore:
             for skill_meta in self.memory.list_skill_states(status=status):
                 self.skills.unregister(skill_meta["skill_name"])
 
+    def _resolve_skill_creation_target(
+        self,
+        pattern,
+        history: list[dict[str, str]],
+    ) -> tuple[str, Skill | None, SkillMatch | None]:
+        """Return create/update/reuse for a detected skill candidate."""
+        source_text = " ".join(item.get("content", "") for item in history[-8:])
+        matches = self.skills.find_similar(
+            name=pattern.suggested_name,
+            text=f"{pattern.description} {pattern.rationale} {source_text}",
+            max_results=1,
+        )
+        if not matches:
+            return "create", None, None
+
+        match = matches[0]
+        origin = self._skill_origin(match.skill.name)
+        if origin == "emerged":
+            return "update", match.skill, match
+        return "reuse", match.skill, match
+
+    def _write_synthesis_bundle(self, result) -> None:
+        """Persist a synthesised safe markdown bundle to its target directory."""
+        skill_dir = result.path.parent
+        for rel_path, content in result.files.items():
+            target = skill_dir / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content.strip() + "\n", encoding="utf-8")
+
+    def _parse_synthesis_bundle_in_temp(self, result) -> Skill:
+        """Validate a bundle before overwriting an existing active skill."""
+        with tempfile.TemporaryDirectory(prefix="evidune-skill-") as temp:
+            skill_dir = Path(temp) / result.name
+            for rel_path, content in result.files.items():
+                target = skill_dir / rel_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content.strip() + "\n", encoding="utf-8")
+            return parse_skill(skill_dir / "SKILL.md")
+
+    def _set_skill_creation(
+        self,
+        decision: EmergenceDecision,
+        *,
+        status: str,
+        skill_name: str,
+        reason: str,
+        path: str = "",
+        files: list[str] | None = None,
+        duplicate_of: str = "",
+    ) -> None:
+        decision.skill_creation = {
+            "status": status,
+            "skill_name": skill_name,
+            "path": path,
+            "files": files or [],
+            "confidence": decision.detected_confidence,
+            "reason": reason,
+            "duplicate_of": duplicate_of,
+            "trigger_reason": decision.trigger_reason,
+        }
+
     def _maybe_reconcile_skill_feedback(self, skills: list) -> list[str]:
         """Use stored signals and evaluator scores through the shared governance harness."""
         updated: list[str] = []
@@ -830,11 +1013,18 @@ class AgentCore:
             emergence_counter=current_counter,
         )
 
+        explicit_request = _is_explicit_skill_request(message.text)
+
         if not (self.pattern_detector and self.skill_synthesizer):
             decision.skip_reason = "disabled_by_config"
+            if explicit_request:
+                decision.trigger_reason = "explicit_skill_request"
+                decision.activation_status = "failed"
+                self._failed_skill_creation(
+                    decision, reason="skill emergence subsystem unavailable"
+                )
             return decision
 
-        explicit_request = _is_explicit_skill_request(message.text)
         due_by_cadence = (
             self.emergence_every_n_turns > 0 and current_counter % self.emergence_every_n_turns == 0
         )
@@ -863,6 +1053,16 @@ class AgentCore:
             decision.skip_reason = "emergence_queued"
             decision.activation_status = "pending"
             decision.trigger_reason = attempt_decision.trigger_reason
+            decision.skill_creation = {
+                "status": "queued",
+                "skill_name": "",
+                "path": "",
+                "files": [],
+                "confidence": None,
+                "reason": "emergence attempt is running in the background",
+                "duplicate_of": "",
+                "trigger_reason": attempt_decision.trigger_reason,
+            }
             return decision
 
     async def _run_emergence_attempt(
@@ -881,6 +1081,8 @@ class AgentCore:
         except Exception:
             decision.skip_reason = "detector_failed"
             decision.activation_status = "failed"
+            if decision.trigger_reason == "explicit_skill_request":
+                self._failed_skill_creation(decision, reason="detector_failed")
             return decision
 
         decision.detected_name = pattern.suggested_name
@@ -888,53 +1090,96 @@ class AgentCore:
 
         if not pattern.is_skill or pattern.confidence < self.emergence_min_confidence:
             decision.skip_reason = "below_threshold"
+            if decision.trigger_reason == "explicit_skill_request":
+                self._failed_skill_creation(decision, reason="below_threshold")
             return decision
-        if pattern.suggested_name in existing_names:
+
+        resolver_action, existing_skill, match = self._resolve_skill_creation_target(
+            pattern, history
+        )
+        decision.resolver_action = resolver_action
+        if match is not None:
+            decision.duplicate_of = match.skill.name
+
+        if resolver_action == "reuse" and existing_skill is not None:
             decision.skip_reason = "duplicate_name"
+            decision.activation_status = "reused"
+            decision.emerged_skill_path = str(existing_skill.path)
+            reason = (
+                "Existing base/project skill already covers this capability "
+                f"(score={match.score if match else 0})."
+            )
+            self._set_skill_creation(
+                decision,
+                status="reused",
+                skill_name=existing_skill.name,
+                path=str(existing_skill.path),
+                reason=reason,
+                duplicate_of=existing_skill.name,
+            )
             return decision
 
         try:
-            result = await self.skill_synthesizer.synthesize(pattern, history)
+            result = await self.skill_synthesizer.synthesize(
+                pattern,
+                history,
+                write=resolver_action != "update",
+                existing_skill=existing_skill if resolver_action == "update" else None,
+            )
         except Exception:
             decision.skip_reason = "synthesis_failed"
             decision.activation_status = "failed"
+            if decision.trigger_reason == "explicit_skill_request":
+                self._failed_skill_creation(decision, reason="synthesis_failed")
             return decision
         if result is None:
             decision.skip_reason = "synthesis_failed"
             decision.activation_status = "failed"
+            if decision.trigger_reason == "explicit_skill_request":
+                self._failed_skill_creation(decision, reason="synthesis_failed")
             return decision
 
         decision.emerged_skill_path = str(result.path)
+        content_before = ""
 
         try:
+            if resolver_action == "update":
+                if existing_skill is not None and existing_skill.path.is_file():
+                    content_before = existing_skill.path.read_text(encoding="utf-8")
+                self._parse_synthesis_bundle_in_temp(result)
+                self._write_synthesis_bundle(result)
             skill = parse_skill(result.path)
         except Exception:
             decision.skip_reason = "parse_failed"
             decision.activation_status = "failed"
+            decision.load_error = "Synthesised skill could not be parsed for activation"
             reason = "Synthesised skill could not be parsed for activation"
             evidence = {
                 "pattern_confidence": pattern.confidence,
                 "pattern_rationale": pattern.rationale,
             }
-            self.memory.register_emerged_skill(
-                name=result.name,
-                source_conversation_id=conv_id,
-                evaluation_criteria=pattern.rationale,
-                status="disabled",
-                path=str(result.path),
-                reason=reason,
-                evidence=evidence,
-            )
-            self.memory.record_skill_lifecycle_event(
-                result.name,
-                "activation_failed",
-                status="disabled",
-                path=str(result.path),
-                harness_task_id="",
-                reason=reason,
-                evidence=evidence,
-                content_after=result.skill_md,
-            )
+            if resolver_action != "update":
+                self.memory.register_emerged_skill(
+                    name=result.name,
+                    source_conversation_id=conv_id,
+                    evaluation_criteria=pattern.rationale,
+                    status="disabled",
+                    path=str(result.path),
+                    reason=reason,
+                    evidence=evidence,
+                )
+                self.memory.record_skill_lifecycle_event(
+                    result.name,
+                    "activation_failed",
+                    status="disabled",
+                    path=str(result.path),
+                    harness_task_id="",
+                    reason=reason,
+                    evidence=evidence,
+                    content_after=result.skill_md,
+                )
+            if decision.trigger_reason == "explicit_skill_request":
+                self._failed_skill_creation(decision, reason="parse_failed")
             return decision
 
         evidence = {
@@ -942,6 +1187,12 @@ class AgentCore:
             "pattern_rationale": pattern.rationale,
             "pattern_description": pattern.description,
         }
+        action = "update" if resolver_action == "update" else "activate"
+        status_reason = (
+            "Updated active emerged skill from explicit skill transaction"
+            if resolver_action == "update"
+            else "Auto-activated from conversation pattern"
+        )
         try:
             self.memory.register_emerged_skill(
                 name=result.name,
@@ -949,27 +1200,39 @@ class AgentCore:
                 evaluation_criteria=pattern.rationale,
                 status="active",
                 path=str(result.path),
-                reason="Auto-activated from conversation pattern",
+                reason=status_reason,
                 evidence=evidence,
             )
             self.memory.record_skill_lifecycle_event(
                 result.name,
-                "activate",
+                action,
                 status="active",
                 path=str(result.path),
                 harness_task_id="",
-                reason="Auto-activated from conversation pattern",
+                reason=status_reason,
                 evidence=evidence,
+                content_before=content_before,
                 content_after=result.skill_md,
             )
-            self.skills.register(skill)
+            self.skills.register(skill, source="emerged")
         except Exception:
             decision.skip_reason = "activation_failed"
             decision.activation_status = "failed"
+            if decision.trigger_reason == "explicit_skill_request":
+                self._failed_skill_creation(decision, reason="activation_failed")
             return decision
 
-        decision.activation_status = "activated"
+        decision.activation_status = "updated" if resolver_action == "update" else "activated"
         decision.emerged_skill = result.name
+        self._set_skill_creation(
+            decision,
+            status="updated" if resolver_action == "update" else "created",
+            skill_name=result.name,
+            path=str(result.path),
+            files=sorted(result.files.keys()),
+            reason=status_reason,
+            duplicate_of=decision.duplicate_of,
+        )
         return decision
 
     async def _maybe_generate_title(self, conversation_id: str) -> str | None:

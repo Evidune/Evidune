@@ -23,6 +23,7 @@ from typing import Any
 from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern
 from agent.utils import format_conversation, strip_code_fence
+from skills.loader import Skill
 
 DEFAULT_OUTPUT_DIR = Path.home() / ".evidune" / "emerged_skills"
 
@@ -45,6 +46,10 @@ into a complete, reusable standard Claude/OpenClaw directory-based skill.
 - Suggested name: {name}
 - Description: {description}
 - Why: {rationale}
+
+# Existing skill package
+
+{existing_skill_block}
 
 # Source conversation
 
@@ -124,6 +129,28 @@ def _default_reference(pattern: DetectedPattern) -> str:
     )
 
 
+def _format_existing_skill(skill: Skill | None) -> str:
+    if skill is None:
+        return "No existing skill package. Create a new skill."
+
+    scripts = ", ".join(sorted(skill.scripts)) or "(none)"
+    references = ", ".join(sorted(skill.references)) or "(none)"
+    return "\n".join(
+        [
+            "Update the existing skill package instead of creating a duplicate.",
+            f"- Existing name: {skill.name}",
+            f"- Existing path: {skill.path}",
+            f"- Existing scripts: {scripts}",
+            f"- Existing references: {references}",
+            "",
+            "Current SKILL.md:",
+            skill.path.read_text(encoding="utf-8"),
+            "",
+            "Return a complete replacement bundle. Preserve the existing skill name.",
+        ]
+    )
+
+
 def _parse_file_bundle(raw: str, pattern: DetectedPattern) -> dict[str, str] | None:
     cleaned = strip_code_fence(raw)
     markers = list(_FILE_MARKER_RE.finditer(cleaned))
@@ -194,6 +221,7 @@ class SkillSynthesizer:
         pattern: DetectedPattern,
         history: list[dict[str, str]],
         write: bool = True,
+        existing_skill: Skill | None = None,
         **llm_kwargs: Any,
     ) -> SynthesisResult | None:
         """Generate and (optionally) persist a directory-based skill package.
@@ -204,10 +232,12 @@ class SkillSynthesizer:
         if not pattern.is_skill or not pattern.suggested_name:
             return None
 
+        target_name = existing_skill.name if existing_skill is not None else pattern.suggested_name
         prompt = _PROMPT_TEMPLATE.format(
-            name=pattern.suggested_name,
+            name=target_name,
             description=pattern.description or "(none)",
             rationale=pattern.rationale or "(none)",
+            existing_skill_block=_format_existing_skill(existing_skill),
             conversation_block=_format_conversation(history),
         )
         kwargs = {"temperature": 0.3, **llm_kwargs}
@@ -220,7 +250,9 @@ class SkillSynthesizer:
         if files is None or not _validate_file_bundle(files):
             return None
 
-        skill_dir = self.output_dir / pattern.suggested_name
+        skill_dir = (
+            existing_skill.root if existing_skill is not None else self.output_dir / target_name
+        )
         skill_path = skill_dir / "SKILL.md"
 
         if write:
@@ -230,7 +262,7 @@ class SkillSynthesizer:
                 target.write_text(content.strip() + "\n", encoding="utf-8")
 
         return SynthesisResult(
-            name=pattern.suggested_name,
+            name=target_name,
             skill_md=files["SKILL.md"],
             path=skill_path,
             files=files,

@@ -181,6 +181,7 @@
                 validationSummary: resp.validation_summary ?? null,
                 deliverySummary: resp.delivery_summary ?? null,
                 artifactManifest: resp.artifact_manifest ?? null,
+                skillCreation: resp.skill_creation ?? null,
               }
             : msg,
         ),
@@ -196,8 +197,26 @@
       }
       currentPlan = resp.plan ?? null
 
-      if (resp.emerged_skill) {
-        showToast(`✨ New skill emerged: ${resp.emerged_skill}`, 'success')
+      if (resp.skill_creation) {
+        const creation = resp.skill_creation
+        const name = creation.skill_name || 'skill'
+        if (creation.status === 'created') {
+          showToast(`Skill created: ${name}`, 'success')
+        } else if (creation.status === 'updated') {
+          showToast(`Skill updated: ${name}`, 'success')
+        } else if (creation.status === 'reused') {
+          showToast(`Using existing skill: ${name}`, 'info')
+        } else if (creation.status === 'queued') {
+          showToast('Skill creation queued', 'info')
+        } else {
+          showToast(`Skill creation failed: ${creation.reason ?? 'unknown'}`, 'error')
+        }
+        if (creation.status === 'created' || creation.status === 'updated') {
+          const updated = await fetchSkills()
+          skills.set(updated)
+        }
+      } else if (resp.emerged_skill) {
+        showToast(`New skill emerged: ${resp.emerged_skill}`, 'success')
         const updated = await fetchSkills()
         skills.set(updated)
       }
