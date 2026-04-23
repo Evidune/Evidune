@@ -291,6 +291,7 @@ class TestAgentCore:
         assert response.metadata["mode"] == "plan"
         assert memory.get_conversation("c-plan-mode")["mode"] == "plan"
         assert "update_plan" in llm.tool_names
+        assert "get_identity" in llm.tool_names
         assert "set_fact" not in llm.tool_names
         assert "noop" not in llm.tool_names
         assert "Operating Mode: Plan" in llm.last_messages[0]["content"]
@@ -329,6 +330,7 @@ class TestAgentCore:
 
         assert response.metadata["mode"] == "execute"
         assert "set_fact" in llm.tool_names
+        assert "get_identity" in llm.tool_names
         assert "noop" in llm.tool_names
         assert "Operating Mode: Execute" in llm.last_messages[0]["content"]
 

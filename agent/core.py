@@ -22,7 +22,13 @@ from agent.self_evaluator import SelfEvaluator
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
-from agent.tools.internal import conversation_tools, memory_tools, plan_tools, skill_tools
+from agent.tools.internal import (
+    conversation_tools,
+    identity_tools,
+    memory_tools,
+    plan_tools,
+    skill_tools,
+)
 from agent.tools.registry import ToolRegistry
 from gateway.base import InboundMessage, OutboundMessage
 from identities.loader import Identity
@@ -163,6 +169,7 @@ class AgentCore:
         registry = ToolRegistry()
         namespace = identity.namespace if identity is not None else ""
         registry.register_many(skill_tools(self.skills))
+        registry.register_many(identity_tools(self.identities))
         registry.register_many(
             memory_tools(
                 self.memory,
@@ -390,6 +397,7 @@ class AgentCore:
         def base_registry(*, allow_write: bool, include_external: bool, include_tools: bool = True):
             registry = ToolRegistry()
             if include_tools:
+                registry.register_many(identity_tools(self.identities))
                 registry.register_many(
                     memory_tools(
                         self.memory,

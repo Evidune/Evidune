@@ -6,8 +6,16 @@ import pytest
 
 from agent.tools.base import CompletionResult, Tool, ToolCall, ToolResult
 from agent.tools.external import ExternalToolsConfig, external_tools
-from agent.tools.internal import conversation_tools, memory_tools, plan_tools, skill_tools
+from agent.tools.internal import (
+    conversation_tools,
+    identity_tools,
+    memory_tools,
+    plan_tools,
+    skill_tools,
+)
 from agent.tools.registry import ToolRegistry
+from identities.loader import Identity
+from identities.registry import IdentityRegistry
 from memory.store import MemoryStore
 from skills.loader import Skill
 from skills.registry import SkillRegistry
@@ -154,6 +162,71 @@ class TestSkillTools:
         assert listing == [{"name": "writer", "description": "Write text"}]
         full = await tools["get_skill"].handler(name="writer")
         assert "writer" in full and "Body here" in full
+
+
+class TestIdentityTools:
+    @pytest.mark.asyncio
+    async def test_list_get_and_read_identity(self, tmp_path: Path):
+        root = tmp_path / "identities" / "general-assistant"
+        root.mkdir(parents=True)
+        (root / "SOUL.md").write_text("Stay direct.", encoding="utf-8")
+        (root / "IDENTITY.md").write_text(
+            "---\nname: general-assistant\ndescription: Help with general tasks\ndefault: true\n---\n\nYou are Evidune.\n",
+            encoding="utf-8",
+        )
+        (root / "USER.md").write_text("Collaborate closely with the user.", encoding="utf-8")
+        (root / "TOOLS.md").write_text("Prefer verified tool output.", encoding="utf-8")
+
+        registry = IdentityRegistry()
+        registry.register(
+            Identity(
+                name="general-assistant",
+                display_name="general-assistant",
+                description="Help with general tasks",
+                default=True,
+                soul="Stay direct.",
+                identity="You are Evidune.",
+                user="Collaborate closely with the user.",
+                tools="Prefer verified tool output.",
+                path=root,
+            )
+        )
+        tools = {t.name: t for t in identity_tools(registry)}
+
+        listing = await tools["list_identities"].handler()
+        assert listing == [
+            {
+                "name": "general-assistant",
+                "display_name": "general-assistant",
+                "description": "Help with general tasks",
+                "language": "",
+                "voice": "",
+                "default": True,
+            }
+        ]
+
+        full = await tools["get_identity"].handler(name="general-assistant")
+        assert "# general-assistant" in full
+        assert "Stay direct." in full
+        assert "Collaborate closely with the user." in full
+
+        raw = await tools["read_identity_file"].handler(
+            identity_name="general-assistant",
+            file="IDENTITY.md",
+        )
+        assert "You are Evidune." in raw
+
+    @pytest.mark.asyncio
+    async def test_read_identity_file_rejects_unknown_file(self):
+        registry = IdentityRegistry()
+        registry.register(Identity(name="demo", path=Path("/tmp/demo")))
+        tools = {t.name: t for t in identity_tools(registry)}
+
+        result = await tools["read_identity_file"].handler(
+            identity_name="demo",
+            file="secret.txt",
+        )
+        assert "unsupported identity file" in result
 
 
 class TestConversationTools:

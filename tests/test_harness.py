@@ -185,12 +185,16 @@ def test_swarm_tool_permissions_respect_role_and_mode(tmp_path: Path, memory: Me
     execute_tools = agent._swarm_tool_registries("task-1", "c1", None, "execute")
     assert "run_shell" in execute_tools["worker"].names()
     assert "set_fact" in execute_tools["worker"].names()
+    assert "get_identity" in execute_tools["worker"].names()
     assert "run_shell" not in execute_tools["planner"].names()
+    assert "get_identity" in execute_tools["planner"].names()
     assert "set_fact" not in execute_tools["critic"].names()
+    assert "get_identity" in execute_tools["critic"].names()
 
     plan_tools = agent._swarm_tool_registries("task-1", "c1", None, "plan")
     assert "run_shell" not in plan_tools["worker"].names()
     assert "set_fact" not in plan_tools["worker"].names()
+    assert "get_identity" in plan_tools["worker"].names()
 
 
 def test_iteration_harness_rewrites_skill(tmp_path: Path, memory: MemoryStore):
