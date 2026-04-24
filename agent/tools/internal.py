@@ -8,6 +8,7 @@ always available in tool-use mode. Pair them with external tools
 from __future__ import annotations
 
 from agent.tools.base import Tool
+from agent.tools.identity_tools import identity_tools as identity_tools
 from memory.store import MemoryStore
 from skills.registry import SkillRegistry
 
