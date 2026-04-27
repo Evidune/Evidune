@@ -15,6 +15,7 @@ new debt without pretending the existing debt is resolved.
 - `agent/tools/harness_tools.py` (hard limit exception): split runtime, validation, delivery, and maintenance tool declarations
 - `core/config.py` (hard limit exception): split config dataclasses from YAML loading
 - `core/analyzer.py` (hard limit exception): split legacy ranking analysis from outcome window aggregation helpers
+- `core/runtime_tools.py` (hard limit exception): split config inspection, config patching, and restart signaling helpers
 - `core/project_init.py` (hard limit exception): move starter project templates into package data files
 - `core/loop.py` (hard limit exception): split CLI parsing from runtime wiring
 - `gateway/web.py` (hard limit exception): split HTTP handlers from gateway lifecycle

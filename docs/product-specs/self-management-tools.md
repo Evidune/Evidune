@@ -6,10 +6,13 @@ restart signaling remain explicit tool calls with bounded scope.
 
 ## Tool Set
 
-- `config_get`: read the active `evidune.yaml`, or a dotted path inside it
+- `config_get`: read the effective active `evidune.yaml` with loader defaults,
+  or a dotted path inside it; `source=raw` reads only YAML-authored values
 - `config_validate`: parse the active config through `core.config.load_config`
+  and return the effective agent runtime summary
 - `config_patch`: apply dotted-path updates after validation; defaults to
-  `dry_run=true` and writes a timestamped backup when applied
+  `dry_run=true`, reports before/after agent runtime summaries, and writes a
+  timestamped backup when applied
 - `request_runtime_restart`: write `.evidune/restart-request.json` for a
   supervisor or operator to consume
 
@@ -19,6 +22,8 @@ restart signaling remain explicit tool calls with bounded scope.
   external tools.
 - `agent.tools.self_management_enabled` controls availability and defaults to
   `true` for local-first developer preview usage.
+- The effective agent runtime summary includes the configured `llm_provider`,
+  `llm_model`, `llm_base_url`, and `api_key_env`; secret values are not read.
 - `config_patch` never writes an invalid config. It validates the candidate
   file before replacing the configured `evidune.yaml`.
 - Applying a config patch reports `restart_required=true`; hot reload is not

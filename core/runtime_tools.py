@@ -8,13 +8,14 @@ import shutil
 import tempfile
 import time
 from copy import deepcopy
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from agent.tools.base import Tool
-from core.config import load_config
+from core.config import EviduneConfig, load_config
 
 
 def _load_raw_config(config_path: Path) -> dict[str, Any]:
@@ -96,20 +97,47 @@ def _dump_config(data: dict[str, Any]) -> str:
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
 
-def _validate_config_data(config_path: Path, data: dict[str, Any]) -> None:
+def _timestamp() -> str:
+    return time.strftime("%Y%m%d%H%M%S", time.gmtime())
+
+
+def _effective_config(path: Path) -> dict[str, Any]:
+    return asdict(load_config(path))
+
+
+def _agent_runtime_summary(config: EviduneConfig) -> dict[str, Any]:
+    if config.agent is None:
+        return {"agent_configured": False}
+    return {
+        "agent_configured": True,
+        "llm_provider": config.agent.llm_provider,
+        "llm_model": config.agent.llm_model,
+        "llm_base_url": config.agent.llm_base_url,
+        "api_key_env": config.agent.api_key_env,
+    }
+
+
+def _load_agent_runtime_summary(path: Path) -> dict[str, Any]:
+    return _agent_runtime_summary(load_config(path))
+
+
+def _safe_agent_runtime_summary(path: Path) -> dict[str, Any]:
+    try:
+        return _load_agent_runtime_summary(path)
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _validate_and_summarise_config_data(config_path: Path, data: dict[str, Any]) -> dict[str, Any]:
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", suffix=".yaml", dir=str(config_path.parent), delete=False
     ) as handle:
         handle.write(_dump_config(data))
         temp_path = Path(handle.name)
     try:
-        load_config(temp_path)
+        return _load_agent_runtime_summary(temp_path)
     finally:
         temp_path.unlink(missing_ok=True)
-
-
-def _timestamp() -> str:
-    return time.strftime("%Y%m%d%H%M%S", time.gmtime())
 
 
 def runtime_tools(config_path: Path, base_dir: Path) -> list[Tool]:
@@ -118,22 +146,40 @@ def runtime_tools(config_path: Path, base_dir: Path) -> list[Tool]:
     resolved_config_path = Path(config_path).resolve()
     resolved_base_dir = Path(base_dir).resolve()
 
-    async def config_get(path: str = "") -> dict[str, Any]:
-        raw = _load_raw_config(resolved_config_path)
+    async def config_get(path: str = "", source: str = "effective") -> dict[str, Any]:
+        if source not in {"effective", "raw"}:
+            return {"ok": False, "error": "source must be either 'effective' or 'raw'"}
         try:
-            value = _get_value(raw, path)
+            data = (
+                _effective_config(resolved_config_path)
+                if source == "effective"
+                else _load_raw_config(resolved_config_path)
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "config_path": str(resolved_config_path),
+                "path": path,
+                "source": source,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        try:
+            value = _get_value(data, path)
         except (KeyError, ValueError) as exc:
             return {
                 "ok": False,
                 "config_path": str(resolved_config_path),
                 "path": path,
+                "source": source,
                 "error": str(exc),
             }
         return {
             "ok": True,
             "config_path": str(resolved_config_path),
             "path": path,
+            "source": source,
             "value": value,
+            "agent_runtime": _safe_agent_runtime_summary(resolved_config_path),
         }
 
     async def config_validate() -> dict[str, Any]:
@@ -151,6 +197,7 @@ def runtime_tools(config_path: Path, base_dir: Path) -> list[Tool]:
             "domain": parsed.domain,
             "agent_configured": parsed.agent is not None,
             "gateway_count": len(parsed.gateways),
+            "agent_runtime": _agent_runtime_summary(parsed),
         }
 
     async def config_patch(
@@ -165,6 +212,7 @@ def runtime_tools(config_path: Path, base_dir: Path) -> list[Tool]:
         updated = deepcopy(raw)
         changes = []
         try:
+            before_runtime = _load_agent_runtime_summary(resolved_config_path)
             for update in updates:
                 path = str(update.get("path", ""))
                 if "value" not in update:
@@ -182,7 +230,7 @@ def runtime_tools(config_path: Path, base_dir: Path) -> list[Tool]:
                         "after": after,
                     }
                 )
-            _validate_config_data(resolved_config_path, updated)
+            after_runtime = _validate_and_summarise_config_data(resolved_config_path, updated)
         except Exception as exc:
             return {
                 "ok": False,
@@ -198,6 +246,8 @@ def runtime_tools(config_path: Path, base_dir: Path) -> list[Tool]:
             "reason": reason,
             "changes": changes,
             "restart_required": True,
+            "agent_runtime_before": before_runtime,
+            "agent_runtime_after": after_runtime,
         }
         if dry_run:
             return response
@@ -236,25 +286,39 @@ def runtime_tools(config_path: Path, base_dir: Path) -> list[Tool]:
     return [
         Tool(
             name="config_get",
-            description="Read the active evidune.yaml config or one dotted path within it.",
+            description=(
+                "Read effective active evidune.yaml config by default, including loader "
+                "defaults. Use path agent.llm_provider or agent.llm_model to inspect the "
+                "current configured model; set source='raw' to read only the YAML text."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "e.g. agent.tools.external_enabled"}
+                    "path": {"type": "string", "description": "e.g. agent.llm_model"},
+                    "source": {
+                        "type": "string",
+                        "enum": ["effective", "raw"],
+                        "default": "effective",
+                    },
                 },
             },
             handler=config_get,
         ),
         Tool(
             name="config_validate",
-            description="Validate the active evidune.yaml file with the Evidune config loader.",
+            description=(
+                "Validate active evidune.yaml and return the effective agent runtime summary, "
+                "including configured LLM provider and model."
+            ),
             parameters={"type": "object", "properties": {}},
             handler=config_validate,
         ),
         Tool(
             name="config_patch",
             description=(
-                "Apply validated dotted-path patches to evidune.yaml. Defaults to dry_run."
+                "Apply validated dotted-path patches to evidune.yaml. Defaults to dry_run. "
+                "Model/provider patches such as agent.llm_model and agent.llm_provider are "
+                "validated and reported with before/after runtime summaries."
             ),
             parameters={
                 "type": "object",

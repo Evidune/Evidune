@@ -47,11 +47,25 @@ class TestRuntimeTools:
     async def test_config_get_reads_root_and_dotted_path(self, tools):
         root = await tools["config_get"].handler()
         assert root["ok"] is True
+        assert root["source"] == "effective"
         assert root["value"]["domain"] == "agent"
 
         value = await tools["config_get"].handler(path="agent.tools.external_enabled")
         assert value["ok"] is True
         assert value["value"] is True
+
+    @pytest.mark.asyncio
+    async def test_config_get_reads_effective_model_defaults(self, tools):
+        value = await tools["config_get"].handler(path="agent.llm_model")
+        assert value["ok"] is True
+        assert value["source"] == "effective"
+        assert value["value"] == "gpt-4o"
+        assert value["agent_runtime"]["llm_provider"] == "openai"
+        assert value["agent_runtime"]["llm_model"] == "gpt-4o"
+
+        raw = await tools["config_get"].handler(path="agent.llm_model", source="raw")
+        assert raw["ok"] is False
+        assert raw["source"] == "raw"
 
     @pytest.mark.asyncio
     async def test_config_validate_returns_summary(self, tools):
@@ -60,6 +74,8 @@ class TestRuntimeTools:
         assert result["domain"] == "agent"
         assert result["agent_configured"] is True
         assert result["gateway_count"] == 1
+        assert result["agent_runtime"]["llm_provider"] == "openai"
+        assert result["agent_runtime"]["llm_model"] == "gpt-4o"
 
     @pytest.mark.asyncio
     async def test_config_patch_dry_run_does_not_write(self, tools, config_path: Path):
@@ -71,9 +87,26 @@ class TestRuntimeTools:
         assert result["ok"] is True
         assert result["dry_run"] is True
         assert result["restart_required"] is True
+        assert result["agent_runtime_before"]["llm_model"] == "gpt-4o"
+        assert result["agent_runtime_after"]["llm_model"] == "gpt-4o"
 
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert raw["agent"]["tools"]["external_enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_config_patch_reports_model_runtime_changes(self, tools, config_path: Path):
+        result = await tools["config_patch"].handler(
+            updates=[{"path": "agent.llm_model", "value": "gpt-5.4"}],
+            dry_run=True,
+            reason="switch model",
+        )
+        assert result["ok"] is True
+        assert result["agent_runtime_before"]["llm_model"] == "gpt-4o"
+        assert result["agent_runtime_after"]["llm_model"] == "gpt-5.4"
+        assert result["restart_required"] is True
+
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        assert "llm_model" not in raw["agent"]
 
     @pytest.mark.asyncio
     async def test_config_patch_apply_writes_backup_and_config(self, tools, config_path: Path):
