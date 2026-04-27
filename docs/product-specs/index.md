@@ -15,3 +15,5 @@ Tracked specs:
   task artifacts, and streaming event surfaces
 - [Skill Iteration](skill-iteration.md): shared governance workflow, lifecycle semantics,
   and restart-safe runtime behavior across `run` and `serve`
+- [Self-Management Tools](self-management-tools.md): structured config
+  inspection, validated config patching, and restart request behavior

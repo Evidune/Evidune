@@ -347,6 +347,8 @@ class TestIterationLedger:
         assert captured["fact_extractor"] is not None
         assert captured["pattern_detector"] is not None
         assert captured["skill_synthesizer"] is not None
+        assert "config_get" in captured["tool_registry"].names()
+        assert "request_runtime_restart" in captured["tool_registry"].names()
 
     @pytest.mark.asyncio
     async def test_serve_ignores_legacy_disabled_flags_for_core_learning_subsystems(
@@ -374,6 +376,7 @@ class TestIterationLedger:
                             "use_evaluator": False,
                             "output_dir": ".evidune/custom-emerged",
                         },
+                        "tools": {"self_management_enabled": False},
                     },
                     "skills": {"directories": ["skills/"]},
                     "identities": {"directories": ["identities/"]},
@@ -450,6 +453,7 @@ class TestIterationLedger:
         assert captured["fact_extractor"] is not None
         assert captured["pattern_detector"] is not None
         assert captured["skill_synthesizer"] is not None
+        assert "config_get" not in captured["tool_registry"].names()
 
     def test_examples_and_init_template_do_not_emit_core_enabled_flags(self):
         repo_root = Path(__file__).resolve().parents[1]

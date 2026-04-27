@@ -95,9 +95,12 @@ class ToolsConfig:
     the agent runs. External tools (shell/file/http/python/grep/glob)
     are enabled by default for serve so the agent can actually inspect,
     edit, run, and fetch within the configured safety limits.
+    Runtime self-management tools expose structured config patching and
+    restart requests without requiring broad file or shell access.
     """
 
     external_enabled: bool = True
+    self_management_enabled: bool = True
     shell_timeout_s: int = 60
     shell_output_bytes: int = 20_000
     file_read_max_bytes: int = 200_000
@@ -359,6 +362,7 @@ def load_config(path: str | Path) -> EviduneConfig:
         tools_raw = agent_raw.get("tools", {}) or {}
         tools_cfg = ToolsConfig(
             external_enabled=tools_raw.get("external_enabled", True),
+            self_management_enabled=tools_raw.get("self_management_enabled", True),
             shell_timeout_s=tools_raw.get("shell_timeout_s", 60),
             shell_output_bytes=tools_raw.get("shell_output_bytes", 20_000),
             file_read_max_bytes=tools_raw.get("file_read_max_bytes", 200_000),

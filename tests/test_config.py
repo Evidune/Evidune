@@ -73,6 +73,7 @@ class TestLoadConfig:
         config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
         assert config.agent is not None
         assert config.agent.tools.external_enabled is True
+        assert config.agent.tools.self_management_enabled is True
 
     def test_agent_external_tools_can_be_disabled_explicitly(self, tmp_path: Path):
         data = {
@@ -82,6 +83,15 @@ class TestLoadConfig:
         config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
         assert config.agent is not None
         assert config.agent.tools.external_enabled is False
+
+    def test_agent_self_management_tools_can_be_disabled_explicitly(self, tmp_path: Path):
+        data = {
+            "domain": "test",
+            "agent": {"tools": {"self_management_enabled": False}},
+        }
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+        assert config.agent is not None
+        assert config.agent.tools.self_management_enabled is False
 
     def test_env_expansion(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TEST_WEBHOOK", "https://feishu.example.com/hook/abc")

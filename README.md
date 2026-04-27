@@ -214,9 +214,12 @@ the interactive `evidune serve` smoke flow, expected outputs, and known limits.
 
 Evidune is local-first. When `agent.tools.external_enabled` is true, the agent
 can use shell, file, Python, grep/glob, and HTTP tools within the configured
-runtime limits. Do not run untrusted prompts against a sensitive working tree.
-Keep API keys, Codex auth files, `.env`, SQLite databases, and runtime artifacts
-out of commits. See [SECURITY.md](SECURITY.md).
+runtime limits. When `agent.tools.self_management_enabled` is true, the agent
+can use structured tools to read, validate, and patch `evidune.yaml`, then write
+a restart request marker for a supervisor or operator. Do not run untrusted
+prompts against a sensitive working tree. Keep API keys, Codex auth files,
+`.env`, SQLite databases, and runtime artifacts out of commits. See
+[SECURITY.md](SECURITY.md).
 
 ## Roadmap Scope
 

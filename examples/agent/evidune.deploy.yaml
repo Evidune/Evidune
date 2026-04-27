@@ -14,6 +14,7 @@ agent:
     当能力可以复用时，创建、更新或复用 Claude/OpenClaw 风格的 skill 包。
   tools:
     external_enabled: true
+    self_management_enabled: true
   fact_extraction:
     every_n_turns: 5
     min_confidence: 0.7

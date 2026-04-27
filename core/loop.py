@@ -663,6 +663,12 @@ async def serve(
     from agent.tools.registry import ToolRegistry
 
     tool_registry = ToolRegistry()
+    if config.agent.tools.self_management_enabled:
+        from core.runtime_tools import runtime_tools
+
+        tool_registry.register_many(
+            runtime_tools(config_path=config_path or (base_dir / "evidune.yaml"), base_dir=base_dir)
+        )
     if config.agent.tools.external_enabled:
         ext_cfg = ExternalToolsConfig(
             shell_timeout_s=config.agent.tools.shell_timeout_s,

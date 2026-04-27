@@ -27,6 +27,7 @@ agent:
     and improve reusable skills when a repeatable capability emerges.
   tools:
     external_enabled: true
+    self_management_enabled: true
   harness:
     strategy: swarm
     default_squad: general
