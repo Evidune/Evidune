@@ -144,10 +144,10 @@ reloads the improved skill set.
 ## Skill Iteration
 
 Skills are first-class runtime objects, not just extra prompt text. A skill is a
-standard package with `SKILL.md` and optional `scripts/*.md` plus
-`references/*.md`. The registry loads project skills, active generated skills,
-their lifecycle status, match reasons, references, scripts, evaluation contract,
-and runtime metadata.
+standard package with `SKILL.md`, optional `references/*.md`, and optional
+`scripts/` helpers when explicit executable code is needed. The registry loads
+project skills, active generated skills, their lifecycle status, match reasons,
+references, scripts, evaluation contract, and runtime metadata.
 
 Each skill can carry an `evaluation_contract` in `SKILL.md` frontmatter. The
 contract defines success criteria, observable signals, failure modes, scoring

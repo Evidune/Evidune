@@ -3,7 +3,7 @@
 ## Success Criteria
 
 - Explicit skill requests resolve through a skill transaction instead of generic advice.
-- Created or updated skills use `SKILL.md`, Markdown `scripts/`, and Markdown `references/`.
+- Created or updated skills use `SKILL.md` and Markdown `references/`, with `scripts/` reserved for explicit helper code.
 - Lifecycle status is visible as created, updated, reused, queued, or failed with a concrete reason.
 
 ## Observable Signals

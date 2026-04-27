@@ -80,8 +80,9 @@ become active skills by default.
   avoid running the detector on every ordinary turn
 - A new skill package is synthesised, written under
   `agent.emergence.output_dir`, and added to the live registry immediately
-- Emerged packages use the standard directory layout: `SKILL.md`,
-  prompt-readable `scripts/*.md`, and `references/*.md`
+- Emerged packages use the standard directory layout: `SKILL.md` and
+  `references/*.md`; `scripts/` is reserved for explicit helper scripts or
+  source files rather than prompt-readable Markdown checklists
 - Emerged packages include an evaluation contract and a human-readable
   `references/evaluation-contract.md`
 - Active emerged skills must be loaded again on later process starts so the

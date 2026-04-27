@@ -94,7 +94,7 @@ def _skill_files(name: str, instructions: str = "Do it.") -> dict[str, str]:
         "SKILL.md": (
             f"---\nname: {name}\ndescription: x\n---\n\n" f"## Instructions\n{instructions}\n"
         ),
-        "scripts/checklist.md": "# Checklist\n\n- Follow the workflow.\n",
+        "references/checklist.md": "# Checklist\n\n- Follow the workflow.\n",
         "references/source-notes.md": "# Source Notes\n\nConversation-derived notes.\n",
     }
 

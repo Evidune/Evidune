@@ -37,7 +37,7 @@ Output: ...
 
 SAMPLE_SKILL_PACKAGE = f"""<<<FILE: SKILL.md>>>
 {SAMPLE_SKILL_MD}
-<<<FILE: scripts/checklist.md>>>
+<<<FILE: references/checklist.md>>>
 # Checklist
 
 - Confirm the user wants an explanation.
@@ -84,11 +84,11 @@ class TestSynthesizer:
         content = result.path.read_text(encoding="utf-8")
         assert "explain-topic" in content
         assert "## Instructions" in content
-        assert (tmp_path / "explain-topic" / "scripts" / "checklist.md").exists()
+        assert (tmp_path / "explain-topic" / "references" / "checklist.md").exists()
         assert (tmp_path / "explain-topic" / "references" / "source-notes.md").exists()
         assert (tmp_path / "explain-topic" / "references" / "evaluation-contract.md").exists()
         skill = parse_skill(result.path)
-        assert "checklist.md" in skill.scripts
+        assert "checklist.md" in skill.references
         assert "source-notes.md" in skill.references
         assert "evaluation-contract.md" in skill.references
         assert skill.execution_contract is not None
@@ -160,7 +160,7 @@ class TestSynthesizer:
         )
         result = await synth.synthesize(pattern, [{"role": "user", "content": "x"}])
         assert result is not None
-        assert (tmp_path / "explain-topic" / "scripts" / "checklist.md").exists()
+        assert (tmp_path / "explain-topic" / "references" / "checklist.md").exists()
         assert (tmp_path / "explain-topic" / "references" / "source-notes.md").exists()
         assert (tmp_path / "explain-topic" / "references" / "evaluation-contract.md").exists()
         assert parse_skill(result.path).execution_contract is not None

@@ -237,7 +237,7 @@ execution_contract:
       description: The request is resolved as created, updated, reused, queued, or failed with a concrete reason.
       weight: 0.4
     - name: package_quality
-      description: Created or updated skills use SKILL.md plus Markdown scripts and references.
+      description: Created or updated skills use SKILL.md plus Markdown references, with scripts reserved for explicit helper code.
       weight: 0.3
     - name: lifecycle_clarity
       description: The response and metadata explain lifecycle state and next availability.
@@ -258,8 +258,8 @@ execution_contract:
 Treat skills as first-class runtime objects:
 
 1. Decide whether the user wants to create, update, reuse, or debug a skill.
-2. Prefer standard packages with `SKILL.md`, optional `scripts/*.md`, and `references/*.md`.
-3. Keep generated scripts prompt-readable unless the user explicitly asks for executable code.
+2. Prefer standard packages with `SKILL.md` and `references/*.md`.
+3. Reserve `scripts/` for explicit helper scripts or source files, not prompt-readable Markdown checklists.
 4. Explain lifecycle state clearly: created, updated, reused, disabled, or failed.
 5. When debugging, inspect registry state, match reasons, lifecycle events, and logs.
 """,
@@ -268,7 +268,7 @@ Treat skills as first-class runtime objects:
 ## Success Criteria
 
 - Explicit skill requests resolve through a skill transaction instead of generic advice.
-- Created or updated skills use `SKILL.md`, Markdown `scripts/`, and Markdown `references/`.
+- Created or updated skills use `SKILL.md` and Markdown `references/`, with `scripts/` reserved for explicit helper code.
 - Lifecycle status is visible as created, updated, reused, queued, or failed with a concrete reason.
 
 ## Observable Signals

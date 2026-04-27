@@ -6,7 +6,6 @@ skill directory, then writes the safe markdown bundle to disk.
 
 Output layout:
     <output_dir>/<skill-name>/SKILL.md
-    <output_dir>/<skill-name>/scripts/*.md
     <output_dir>/<skill-name>/references/*.md
 
 The synthesised skill is activated by default. Manual review remains
@@ -70,17 +69,16 @@ file content here
 
 Required files:
 - SKILL.md
-- scripts/checklist.md
+- references/checklist.md
 - references/source-notes.md
 - references/evaluation-contract.md
 
 Allowed paths:
 - SKILL.md
-- scripts/*.md
 - references/*.md
 
 Do not emit absolute paths, parent-directory paths, executable scripts, .py files,
-.sh files, or files outside scripts/ and references/.
+.sh files, or files outside references/.
 
 SKILL.md must contain:
 
@@ -97,11 +95,8 @@ SKILL.md must contain:
 3. ## Examples section with at least 1 example (### Example 1: ...)
 4. ## Reference Data section (placeholder for future iteration)
 
-scripts/*.md should be prompt-readable workflows, checklists, or templates. They
-are not executable code.
-
 references/*.md should contain durable background notes, source categories,
-examples, or operating constraints extracted from the conversation.
+examples, checklists, workflows, or operating constraints extracted from the conversation.
 references/evaluation-contract.md must explain the execution contract in human-readable
 terms: success criteria, observable signals, failure modes, and thresholds.
 
@@ -119,7 +114,7 @@ def _strip_code_fence(raw: str) -> str:
     return strip_code_fence(raw).strip() + "\n"
 
 
-def _default_script(pattern: DetectedPattern) -> str:
+def _default_checklist_reference(pattern: DetectedPattern) -> str:
     return (
         f"# {pattern.suggested_name} Checklist\n\n"
         "- Confirm the user's concrete goal and reusable context.\n"
@@ -204,9 +199,9 @@ def _parse_file_bundle(raw: str, pattern: DetectedPattern) -> dict[str, str] | N
 
 def _ensure_standard_support_files(files: dict[str, str], pattern: DetectedPattern) -> None:
     _ensure_evaluation_contract(files, pattern)
-    if not any(path.startswith("scripts/") for path in files):
-        files["scripts/checklist.md"] = _default_script(pattern)
-    if not any(path.startswith("references/") for path in files):
+    if "references/checklist.md" not in files:
+        files["references/checklist.md"] = _default_checklist_reference(pattern)
+    if "references/source-notes.md" not in files:
         files["references/source-notes.md"] = _default_reference(pattern)
     if "references/evaluation-contract.md" not in files:
         files["references/evaluation-contract.md"] = _default_evaluation_reference(pattern)
@@ -244,7 +239,7 @@ def _safe_bundle_path(rel_path: str) -> bool:
         return False
     if len(path.parts) != 2:
         return False
-    return path.parts[0] in {"scripts", "references"}
+    return path.parts[0] == "references"
 
 
 def _validate_file_bundle(files: dict[str, str]) -> bool:
