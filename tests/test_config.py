@@ -102,6 +102,25 @@ class TestLoadConfig:
         config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
         assert config.channels[0].webhook == "https://feishu.example.com/hook/abc"
 
+    def test_gateway_env_expansion(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv("FEISHU_APP_ID", "cli_test")
+        monkeypatch.setenv("FEISHU_APP_SECRET", "secret_test")
+        data = {
+            "domain": "test",
+            "gateways": [
+                {
+                    "type": "feishu_bot",
+                    "app_id": "${FEISHU_APP_ID}",
+                    "app_secret": "${FEISHU_APP_SECRET}",
+                    "reply_mode": "card",
+                }
+            ],
+        }
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+        assert config.gateways[0].type == "feishu_bot"
+        assert config.gateways[0].config["app_id"] == "cli_test"
+        assert config.gateways[0].config["app_secret"] == "secret_test"
+
     def test_env_expansion_missing_raises(self, tmp_path: Path, monkeypatch):
         monkeypatch.delenv("NONEXISTENT_VAR", raising=False)
         data = {

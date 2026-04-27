@@ -91,6 +91,39 @@ The starter config uses OpenAI by default. If your first run fails before the
 model call, set `OPENAI_API_KEY`, switch the generated `llm_provider`/`llm_model`
 to another configured provider, or run `codex login` and use `codex`.
 
+## Feishu Bot Gateway
+
+`evidune serve` can run as a Feishu/Lark bot through the official long-connection
+SDK. Install the optional dependency, create a Feishu app, enable the bot, use
+long connection for events, subscribe to `im.message.receive_v1`, and grant the
+app permissions to receive messages and reply/send messages as the bot.
+
+```bash
+pip install -e ".[feishu]"
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=xxx
+evidune serve --config evidune.yaml
+```
+
+Gateway config:
+
+```yaml
+gateways:
+  - type: feishu_bot
+    app_id: ${FEISHU_APP_ID}
+    app_secret: ${FEISHU_APP_SECRET}
+    domain: https://open.feishu.cn
+    log_level: INFO
+    reply_mode: card
+    max_concurrency: 4
+    queue_size: 100
+    allowed_open_ids: []
+    allowed_chat_ids: []
+```
+
+The first production scope is text input with card/text replies. Images, files,
+reactions, and card action callbacks are intentionally out of scope.
+
 ## How The System Runs
 
 ```mermaid

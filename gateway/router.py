@@ -39,7 +39,7 @@ class Router:
         if not self.gateways:
             raise ValueError("No gateways configured")
 
-        tasks = [gw.start(self._handle) for gw in self.gateways]
+        tasks = [asyncio.create_task(gw.start(self._handle)) for gw in self.gateways]
 
         # If only CLI, run it directly (blocking)
         if len(tasks) == 1:
@@ -49,6 +49,9 @@ class Router:
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for t in pending:
                 t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for t in done:
+                t.result()
 
     async def stop(self) -> None:
         for gw in self.gateways:

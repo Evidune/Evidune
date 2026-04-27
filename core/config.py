@@ -234,7 +234,7 @@ class MemoryConfig:
 
 @dataclass
 class GatewayConfig:
-    type: str  # cli | feishu_bot
+    type: str  # cli | web | feishu_bot
     config: dict[str, Any] = field(default_factory=dict)
 
 

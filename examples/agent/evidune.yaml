@@ -42,6 +42,19 @@ memory:
 
 gateways:
   - type: cli
+# To use the Feishu long-connection bot instead of CLI, install `.[feishu]`
+# and replace the gateway block with:
+# gateways:
+#   - type: feishu_bot
+#     app_id: ${FEISHU_APP_ID}
+#     app_secret: ${FEISHU_APP_SECRET}
+#     domain: https://open.feishu.cn
+#     log_level: INFO
+#     reply_mode: card
+#     max_concurrency: 4
+#     queue_size: 100
+#     allowed_open_ids: []
+#     allowed_chat_ids: []
 
 metrics:
   adapter: generic_csv
