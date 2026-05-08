@@ -13,3 +13,5 @@ Published references:
 
 - [Developer Preview Smoke](developer-preview-smoke.md): reproducible LLM,
   external-tool, and skill-creation smoke checks for public preview readiness.
+- [Configuration CLI](configuration-cli.md): OpenClaw-style model,
+  bidirectional message gateway, and serve-readiness configuration flows.

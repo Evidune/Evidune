@@ -9,6 +9,20 @@ from pathlib import Path
 from channels.base import IterationReport, create_channel
 from core.analyzer import analyze
 from core.config import EviduneConfig, load_config
+from core.config_cli import (
+    configure_model,
+    configured_gateways,
+    ensure_config_file,
+    gateway_from_options,
+    load_raw_config,
+    missing_config_env_vars,
+    normalize_gateway_type,
+    remove_gateway,
+    test_gateway,
+    upsert_gateway,
+    validate_config_structure,
+    write_raw_config,
+)
 from core.docs_lint import lint_repo
 from core.git_ops import commit_changes
 from core.iteration_helpers import build_reference_content, update_outcome_skills
@@ -364,6 +378,227 @@ def _handle_init_command(target: str | None, subcommand: str | None) -> int:
     print(f"  cd {result.root}")
     print("  evidune run --config evidune.yaml")
     print("  evidune serve --config evidune.yaml")
+    return 0
+
+
+def _split_csv(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _print_missing_env_warning(config_path: Path, data: dict) -> None:
+    missing = missing_config_env_vars(data)
+    if missing:
+        print(
+            "Missing environment variables for configured secrets: "
+            + ", ".join(missing)
+            + f"\nSet them before running: evidune serve --config {config_path}"
+        )
+
+
+def _interactive_default(label: str, current: str | None, fallback: str = "") -> str:
+    prompt = f"{label}"
+    default = current or fallback
+    if default:
+        prompt += f" [{default}]"
+    value = input(prompt + ": ").strip()
+    return value or default
+
+
+def _cli_value(
+    value: str | None,
+    *,
+    interactive: bool,
+    label: str,
+    current: str | None,
+    fallback: str = "",
+) -> str:
+    if value:
+        return value
+    if interactive:
+        return _interactive_default(label, current, fallback)
+    return current or fallback
+
+
+def _handle_configure_command(config_path: Path, args: argparse.Namespace) -> int:
+    section = args.section or "model"
+    if section != "model":
+        raise ValueError("configure currently supports only --section model")
+    data = ensure_config_file(config_path)
+    agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
+    interactive = not args.non_interactive
+    provider = _cli_value(
+        args.provider,
+        interactive=interactive,
+        label="LLM provider",
+        current=agent.get("llm_provider"),
+        fallback="openai",
+    )
+    model = _cli_value(
+        args.model,
+        interactive=interactive,
+        label="LLM model",
+        current=agent.get("llm_model"),
+        fallback="gpt-4o",
+    )
+    base_url = args.base_url
+    if base_url is None and interactive:
+        base_url = _interactive_default("LLM base URL (optional)", agent.get("llm_base_url"), "")
+    api_key_env = _cli_value(
+        args.api_key_env,
+        interactive=interactive,
+        label="API key environment variable",
+        current=agent.get("api_key_env"),
+        fallback="OPENAI_API_KEY",
+    )
+    configure_model(
+        data,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        api_key_env=api_key_env,
+        evaluator_provider=args.evaluator_provider,
+        evaluator_model=args.evaluator_model,
+        evaluator_base_url=args.evaluator_base_url,
+        evaluator_api_key_env=args.evaluator_api_key_env,
+    )
+    write_raw_config(config_path, data)
+    validate_config_structure(config_path)
+    print(f"Configured model in {config_path}")
+    _print_missing_env_warning(config_path, data)
+    return 0
+
+
+def _handle_channels_command(config_path: Path, args: argparse.Namespace) -> int:
+    action = args.subcommand or "list"
+    if action == "list":
+        data = load_raw_config(config_path)
+        gateways = configured_gateways(data)
+        if not gateways:
+            print("No message gateways configured.")
+            return 0
+        for gateway in gateways:
+            gateway_type = normalize_gateway_type(gateway.get("type"))
+            details = {k: v for k, v in gateway.items() if k != "type"}
+            print(f"{gateway_type}: {details}" if details else gateway_type)
+        return 0
+    if action == "add":
+        data = ensure_config_file(config_path)
+        gateway = gateway_from_options(
+            args.target or args.channel or "cli",
+            host=args.host,
+            port=args.port,
+            app_id_env=args.app_id_env,
+            app_secret_env=args.app_secret_env,
+            domain=args.domain,
+            reply_mode=args.reply_mode,
+            allowed_open_ids=_split_csv(args.allowed_open_ids),
+            allowed_chat_ids=_split_csv(args.allowed_chat_ids),
+        )
+        upsert_gateway(data, gateway)
+        write_raw_config(config_path, data)
+        validate_config_structure(config_path)
+        print(f"Added message gateway: {gateway['type']}")
+        _print_missing_env_warning(config_path, data)
+        return 0
+    if action == "remove":
+        data = ensure_config_file(config_path)
+        removed = remove_gateway(data, args.target or "")
+        write_raw_config(config_path, data)
+        validate_config_structure(config_path)
+        print(f"Removed {removed} message gateway(s).")
+        return 0
+    if action == "test":
+        data = load_raw_config(config_path)
+        target_type = normalize_gateway_type(args.target) if args.target else None
+        gateways = [
+            gw
+            for gw in configured_gateways(data)
+            if target_type is None or normalize_gateway_type(gw.get("type")) == target_type
+        ]
+        if not gateways:
+            raise ValueError("No matching message gateway configured")
+        ok = True
+        for gateway in gateways:
+            passed, message = test_gateway(gateway)
+            ok = ok and passed
+            print(message)
+        return 0 if ok else 1
+    raise ValueError("channels supports add, list, remove, and test")
+
+
+def _handle_gateway_command(config_path: Path, args: argparse.Namespace) -> int:
+    if (args.subcommand or "status") != "status":
+        raise ValueError("gateway only supports the 'status' subcommand")
+    data = load_raw_config(config_path)
+    gateways = configured_gateways(data) or [{"type": "cli"}]
+    ok = True
+    for gateway in gateways:
+        passed, message = test_gateway(gateway)
+        ok = ok and passed
+        print(message)
+    return 0 if ok else 1
+
+
+def _handle_onboard_command(config_path: Path, args: argparse.Namespace) -> int:
+    data = ensure_config_file(config_path)
+    agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
+    interactive = not args.non_interactive
+    provider = _cli_value(
+        args.provider,
+        interactive=interactive,
+        label="LLM provider",
+        current=agent.get("llm_provider"),
+        fallback="openai",
+    )
+    model = _cli_value(
+        args.model,
+        interactive=interactive,
+        label="LLM model",
+        current=agent.get("llm_model"),
+        fallback="gpt-4o",
+    )
+    api_key_env = _cli_value(
+        args.api_key_env,
+        interactive=interactive,
+        label="API key environment variable",
+        current=agent.get("api_key_env"),
+        fallback="OPENAI_API_KEY",
+    )
+    configure_model(
+        data,
+        provider=provider,
+        model=model,
+        base_url=args.base_url,
+        api_key_env=api_key_env,
+        evaluator_provider=args.evaluator_provider,
+        evaluator_model=args.evaluator_model,
+        evaluator_base_url=args.evaluator_base_url,
+        evaluator_api_key_env=args.evaluator_api_key_env,
+    )
+    channel = args.channel
+    if not channel and interactive:
+        channel = _interactive_default("Message gateway (cli/web/feishu)", None, "cli")
+    if channel:
+        upsert_gateway(
+            data,
+            gateway_from_options(
+                channel,
+                host=args.host,
+                port=args.port,
+                app_id_env=args.app_id_env,
+                app_secret_env=args.app_secret_env,
+                domain=args.domain,
+                reply_mode=args.reply_mode,
+                allowed_open_ids=_split_csv(args.allowed_open_ids),
+                allowed_chat_ids=_split_csv(args.allowed_chat_ids),
+            ),
+        )
+    write_raw_config(config_path, data)
+    validate_config_structure(config_path)
+    print(f"Onboarded Evidune config at {config_path}")
+    _print_missing_env_warning(config_path, data)
     return 0
 
 
@@ -761,6 +996,10 @@ def main(argv: list[str] | None = None) -> int:
         choices=[
             "run",
             "serve",
+            "onboard",
+            "configure",
+            "channels",
+            "gateway",
             "docs",
             "iterations",
             "init",
@@ -791,6 +1030,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--message", default="", help="Commit message for delivery submit")
     parser.add_argument("--pr-title", default="", help="Pull request title for delivery submit")
     parser.add_argument("--pr-body", default="", help="Pull request body for delivery submit")
+    parser.add_argument("--section", default="", help="Section for configure")
+    parser.add_argument("--provider", default="", help="LLM provider for configure/onboard")
+    parser.add_argument("--model", default="", help="LLM model for configure/onboard")
+    parser.add_argument("--base-url", default=None, help="LLM base URL for configure/onboard")
+    parser.add_argument("--api-key-env", default="", help="API key environment variable name")
+    parser.add_argument("--evaluator-provider", default="", help="Evaluator LLM provider")
+    parser.add_argument("--evaluator-model", default="", help="Evaluator LLM model")
+    parser.add_argument("--evaluator-base-url", default=None, help="Evaluator LLM base URL")
+    parser.add_argument(
+        "--evaluator-api-key-env", default="", help="Evaluator API key environment variable name"
+    )
+    parser.add_argument("--channel", default="", help="Message gateway for onboard")
+    parser.add_argument("--host", default="", help="Gateway host")
+    parser.add_argument("--port", type=int, default=None, help="Gateway port")
+    parser.add_argument("--app-id-env", default="", help="Feishu app id environment variable name")
+    parser.add_argument(
+        "--app-secret-env", default="", help="Feishu app secret environment variable name"
+    )
+    parser.add_argument("--domain", default="", help="Gateway provider domain")
+    parser.add_argument("--reply-mode", default="", help="Feishu reply mode")
+    parser.add_argument("--allowed-open-ids", default="", help="Comma-separated Feishu open ids")
+    parser.add_argument("--allowed-chat-ids", default="", help="Comma-separated Feishu chat ids")
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Do not prompt; use provided flags and defaults",
+    )
 
     args = parser.parse_args(argv)
     base_dir = Path(args.base_dir) if args.base_dir else Path(args.config).parent
@@ -804,6 +1070,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "init":
             return _handle_init_command(args.path, args.subcommand)
+        if args.command == "configure":
+            return _handle_configure_command(config_path, args)
+        if args.command == "channels":
+            return _handle_channels_command(config_path, args)
+        if args.command == "gateway":
+            return _handle_gateway_command(config_path, args)
+        if args.command == "onboard":
+            return _handle_onboard_command(config_path, args)
 
         config = load_config(args.config)
 
