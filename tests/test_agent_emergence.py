@@ -9,6 +9,7 @@ import pytest
 from agent.core import AgentCore
 from agent.llm import LLMClient
 from agent.pattern_detector import DetectedPattern
+from agent.skill_intent_detector import SkillIntent, SkillIntentDetector
 from agent.skill_synthesizer import SkillSynthesizer, SynthesisResult
 from core.loop import _load_active_emerged_skills
 from gateway.base import InboundMessage
@@ -50,6 +51,20 @@ class MockSynthesizer:
         return self.result_factory(pattern, write)
 
 
+class MockSkillIntentDetector:
+    def __init__(self, intent: SkillIntent):
+        self.intent = intent
+        self.calls = 0
+        self.last_message = None
+        self.last_history = None
+
+    async def detect(self, message, history=None, **kw):
+        self.calls += 1
+        self.last_message = message
+        self.last_history = history
+        return self.intent
+
+
 @pytest.fixture
 def memory(tmp_path: Path):
     s = MemoryStore(tmp_path / "test.db")
@@ -60,6 +75,8 @@ def memory(tmp_path: Path):
 def _make_agent(
     memory: MemoryStore,
     *,
+    llm=None,
+    skill_intent_detector=None,
     detector=None,
     synthesizer=None,
     every_n: int = 3,
@@ -67,9 +84,10 @@ def _make_agent(
     inline_timeout_s: float = 5.0,
 ):
     return AgentCore(
-        llm=MockLLM(),
+        llm=llm or MockLLM(),
         skill_registry=SkillRegistry(),
         memory=memory,
+        skill_intent_detector=skill_intent_detector,
         pattern_detector=detector,
         skill_synthesizer=synthesizer,
         emergence_every_n_turns=every_n,
@@ -267,6 +285,187 @@ class TestEmergenceTrigger:
         assert "已创建并激活" in resp.text
         assert resp.metadata["skill_creation"]["status"] == "created"
         assert resp.metadata["skill_creation"]["skill_name"] == "collect-intel"
+
+    @pytest.mark.asyncio
+    async def test_prompt_intent_creates_skill_for_chinese_create_word(self, memory, tmp_path):
+        intent_detector = MockSkillIntentDetector(
+            SkillIntent(
+                is_skill_request=True,
+                intent="create",
+                confidence=0.92,
+                reason="The user asks to create a reusable skill.",
+            )
+        )
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="finance-data",
+                description="Fetch no-key public finance data",
+                confidence=0.9,
+                rationale="The user explicitly asked to create a related skill.",
+            )
+        )
+
+        def factory(pattern, write):
+            path = _make_skill_md(tmp_path, "finance-data")
+            return SynthesisResult(
+                name=pattern.suggested_name, skill_md=path.read_text(), path=path
+            )
+
+        normal_llm = MockLLM()
+        synth = MockSynthesizer(tmp_path, factory)
+        agent = _make_agent(
+            memory,
+            llm=normal_llm,
+            skill_intent_detector=intent_detector,
+            detector=detector,
+            synthesizer=synth,
+            every_n=6,
+        )
+        resp = await agent.handle(
+            InboundMessage(
+                text="创造相关 skill",
+                sender_id="u",
+                channel="web",
+                conversation_id="c",
+            )
+        )
+
+        assert normal_llm.calls == 0
+        assert intent_detector.calls == 1
+        assert detector.calls == 1
+        assert synth.calls == 1
+        assert resp.metadata["skill_creation"]["status"] == "created"
+        assert resp.metadata["skill_creation"]["skill_name"] == "finance-data"
+        assert resp.metadata["tool_trace"] == []
+
+    @pytest.mark.asyncio
+    async def test_execution_request_is_not_misclassified_as_skill_creation(self, memory, tmp_path):
+        intent_detector = MockSkillIntentDetector(
+            SkillIntent(
+                is_skill_request=True,
+                intent="create",
+                confidence=0.99,
+                reason="Should not be called for this message.",
+            )
+        )
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="finance-data",
+                description="Fetch no-key public finance data",
+                confidence=0.9,
+            )
+        )
+        normal_llm = MockLLM("normal response")
+        synth = MockSynthesizer(tmp_path, lambda p, w: None)
+        agent = _make_agent(
+            memory,
+            llm=normal_llm,
+            skill_intent_detector=intent_detector,
+            detector=detector,
+            synthesizer=synth,
+            every_n=6,
+        )
+
+        resp = await agent.handle(
+            InboundMessage(
+                text="接入你能接入的",
+                sender_id="u",
+                channel="web",
+                conversation_id="c",
+            )
+        )
+
+        assert resp.text == "normal response"
+        assert normal_llm.calls == 1
+        assert intent_detector.calls == 0
+        assert detector.calls == 0
+        assert synth.calls == 0
+        assert resp.metadata["skill_creation"] is None
+
+    @pytest.mark.asyncio
+    async def test_low_confidence_prompt_intent_falls_back_to_normal_chat(self, memory, tmp_path):
+        intent_detector = MockSkillIntentDetector(
+            SkillIntent(
+                is_skill_request=True,
+                intent="create",
+                confidence=0.4,
+                reason="Low confidence.",
+            )
+        )
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="finance-data",
+                description="Fetch no-key public finance data",
+                confidence=0.9,
+            )
+        )
+        normal_llm = MockLLM("normal response")
+        synth = MockSynthesizer(tmp_path, lambda p, w: None)
+        agent = _make_agent(
+            memory,
+            llm=normal_llm,
+            skill_intent_detector=intent_detector,
+            detector=detector,
+            synthesizer=synth,
+            every_n=6,
+        )
+
+        resp = await agent.handle(
+            InboundMessage(
+                text="创造相关 skill",
+                sender_id="u",
+                channel="web",
+                conversation_id="c",
+            )
+        )
+
+        assert resp.text == "normal response"
+        assert normal_llm.calls == 1
+        assert detector.calls == 0
+        assert synth.calls == 0
+        assert resp.metadata["skill_creation"] is None
+
+    @pytest.mark.asyncio
+    async def test_unparseable_prompt_intent_falls_back_to_normal_chat(self, memory, tmp_path):
+        intent_judge = MockLLM("not json")
+        normal_llm = MockLLM("normal response")
+        intent_detector = SkillIntentDetector(judge=intent_judge)
+        detector = MockDetector(
+            DetectedPattern(
+                is_skill=True,
+                suggested_name="finance-data",
+                description="Fetch no-key public finance data",
+                confidence=0.9,
+            )
+        )
+        synth = MockSynthesizer(tmp_path, lambda p, w: None)
+        agent = _make_agent(
+            memory,
+            llm=normal_llm,
+            skill_intent_detector=intent_detector,
+            detector=detector,
+            synthesizer=synth,
+            every_n=6,
+        )
+
+        resp = await agent.handle(
+            InboundMessage(
+                text="创造相关 skill",
+                sender_id="u",
+                channel="web",
+                conversation_id="c",
+            )
+        )
+
+        assert resp.text == "normal response"
+        assert intent_judge.calls == 1
+        assert normal_llm.calls == 1
+        assert detector.calls == 0
+        assert synth.calls == 0
+        assert resp.metadata["skill_creation"] is None
 
     @pytest.mark.asyncio
     async def test_existing_emerged_skill_is_updated_instead_of_duplicated(self, memory, tmp_path):

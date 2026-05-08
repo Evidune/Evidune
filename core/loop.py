@@ -632,9 +632,11 @@ async def serve(
 
     # Conversation emergence is a core serve capability.
     from agent.pattern_detector import PatternDetector
+    from agent.skill_intent_detector import SkillIntentDetector
     from agent.skill_synthesizer import SkillSynthesizer
 
     emerge_judge = _build_judge() if config.agent.emergence.use_evaluator else llm
+    skill_intent_detector = SkillIntentDetector(judge=emerge_judge)
     pattern_detector = PatternDetector(judge=emerge_judge)
     skill_synthesizer = SkillSynthesizer(
         judge=emerge_judge,
@@ -700,6 +702,7 @@ async def serve(
         fact_extraction_every_n_turns=config.agent.fact_extraction.every_n_turns,
         fact_extraction_min_confidence=config.agent.fact_extraction.min_confidence,
         self_evaluator=self_evaluator,
+        skill_intent_detector=skill_intent_detector,
         pattern_detector=pattern_detector,
         skill_synthesizer=skill_synthesizer,
         emergence_every_n_turns=config.agent.emergence.every_n_turns,

@@ -19,6 +19,7 @@ from agent.iteration_harness import IterationHarness, build_decision_packet
 from agent.llm import LLMClient
 from agent.pattern_detector import PatternDetector
 from agent.self_evaluator import SelfEvaluator
+from agent.skill_intent_detector import SkillIntentDetector
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
@@ -44,6 +45,7 @@ from skills.models import SkillMatch
 from skills.registry import SkillRegistry
 
 _CONVERSATION_MODES = {"plan", "execute"}
+_SKILL_INTENT_MIN_CONFIDENCE = 0.65
 _SKILL_TARGET_RE = re.compile(
     r"\b(skills?|capabilit(?:y|ies)|workflows?)\b|skill|能力|工作流|可复用",
     re.IGNORECASE,
@@ -60,6 +62,13 @@ def _is_explicit_skill_request(text: str) -> bool:
     if not text:
         return False
     return bool(_SKILL_TARGET_RE.search(text) and _SKILL_ACTION_RE.search(text))
+
+
+def _should_check_skill_intent(text: str) -> bool:
+    """Cheap prefilter before the LLM-backed skill intent detector."""
+    if not text:
+        return False
+    return bool(_SKILL_TARGET_RE.search(text) or _is_explicit_skill_request(text))
 
 
 @dataclass
@@ -107,6 +116,7 @@ class AgentCore:
         fact_extraction_every_n_turns: int = 5,
         fact_extraction_min_confidence: float = 0.7,
         self_evaluator: SelfEvaluator | None = None,
+        skill_intent_detector: SkillIntentDetector | None = None,
         pattern_detector: PatternDetector | None = None,
         skill_synthesizer: SkillSynthesizer | None = None,
         emergence_every_n_turns: int = 10,
@@ -136,6 +146,7 @@ class AgentCore:
         self.fact_extraction_every_n_turns = fact_extraction_every_n_turns
         self.fact_extraction_min_confidence = fact_extraction_min_confidence
         self.self_evaluator = self_evaluator
+        self.skill_intent_detector = skill_intent_detector
         self.pattern_detector = pattern_detector
         self.skill_synthesizer = skill_synthesizer
         self.emergence_every_n_turns = emergence_every_n_turns
@@ -156,6 +167,27 @@ class AgentCore:
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
         self._background_emergence_tasks: set[asyncio.Task] = set()
+
+    async def _is_skill_transaction_request(
+        self,
+        text: str,
+        history: list[dict[str, str]],
+    ) -> bool:
+        """Prompt-classify explicit skill transaction intent.
+
+        The legacy regex is only a compatibility fallback when no prompt
+        detector is configured. Invalid or low-confidence detector results
+        fall back to the normal chat path.
+        """
+        if not _should_check_skill_intent(text):
+            return False
+        if self.skill_intent_detector is None:
+            return _is_explicit_skill_request(text)
+        try:
+            intent = await self.skill_intent_detector.detect(text, history=history)
+        except Exception:
+            return False
+        return intent.is_skill_request and intent.confidence >= _SKILL_INTENT_MIN_CONFIDENCE
 
     def _tool_registry_for_turn(
         self,
@@ -693,11 +725,9 @@ class AgentCore:
         matched_skill_names = [skill.name for skill in matched_skills]
         execution_skill_names = [skill.name for skill in execution_skills]
 
-        if (
-            _is_explicit_skill_request(message.text)
-            and self.pattern_detector
-            and self.skill_synthesizer
-        ):
+        skill_transaction_request = await self._is_skill_transaction_request(message.text, history)
+
+        if skill_transaction_request and self.pattern_detector and self.skill_synthesizer:
             self.memory.add_message(message.conversation_id, "user", message.text)
             current_turn_count = self._sync_turn_counter(self._turn_counts, message.conversation_id)
             current_emergence_count = self._sync_turn_counter(
@@ -709,6 +739,7 @@ class AgentCore:
                 matched_skill_names=matched_skill_names,
                 execution_skill_names=[],
                 emergence_counter=current_emergence_count,
+                explicit_request=True,
             )
             self._attach_skill_snapshot(emergence_decision, skill_snapshot)
             response_text = self._skill_creation_response(emergence_decision)
@@ -853,6 +884,7 @@ class AgentCore:
             matched_skill_names=matched_skill_names,
             execution_skill_names=execution_skill_names,
             emergence_counter=current_emergence_count,
+            explicit_request=skill_transaction_request,
         )
         self._attach_skill_snapshot(emergence_decision, skill_snapshot)
         self._attach_evaluation_summary(emergence_decision, execution_evaluations)
@@ -1185,6 +1217,7 @@ class AgentCore:
         matched_skill_names: list[str],
         execution_skill_names: list[str],
         emergence_counter: int | None = None,
+        explicit_request: bool | None = None,
     ) -> EmergenceDecision:
         """Detect and synthesise a new skill from recent conversation."""
         conv_id = message.conversation_id
@@ -1201,7 +1234,11 @@ class AgentCore:
             emergence_counter=current_counter,
         )
 
-        explicit_request = _is_explicit_skill_request(message.text)
+        explicit_request = (
+            _is_explicit_skill_request(message.text)
+            if explicit_request is None
+            else explicit_request
+        )
 
         if not (self.pattern_detector and self.skill_synthesizer):
             decision.skip_reason = "disabled_by_config"
