@@ -5,15 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
-import queue
-import re
+import socket
 import uuid
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from threading import Thread
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from gateway.base import Gateway, InboundMessage, MessageHandler
 
@@ -35,8 +36,9 @@ class WebGateway(Gateway):
         self.port = port
         self.host = host
         self._handler: MessageHandler | None = None
-        self._server: HTTPServer | None = None
-        self._thread: Thread | None = None
+        self._server: uvicorn.Server | None = None
+        self._socket: socket.socket | None = None
+        self._ready = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._skills_json: str = "[]"
         self._skill_provider: Any = None
@@ -56,14 +58,14 @@ class WebGateway(Gateway):
     @property
     def bound_port(self) -> int:
         """Return the OS-assigned port once the HTTP server is started."""
-        if self._server is None:
+        if self._socket is None:
             return 0
-        return int(self._server.server_address[1])
+        return int(self._socket.getsockname()[1])
 
     @property
     def base_url(self) -> str:
         """Read-only base URL for tests and diagnostics after startup."""
-        if self._server is None:
+        if self._socket is None or not self._ready:
             return ""
         public_host = self.host
         if public_host in {"0.0.0.0", "::"}:
@@ -73,268 +75,215 @@ class WebGateway(Gateway):
     async def start(self, handler: MessageHandler) -> None:
         self._handler = handler
         self._loop = asyncio.get_event_loop()
-
-        gateway = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                parsed = urlparse(self.path)
-                path = parsed.path
-
-                # API routes
-                if path == "/api/skills":
-                    self._json_resp(200, gateway._skills_payload())
-                    return
-
-                if path == "/api/chat/stream":
-                    self._stream_chat(parsed.query)
-                    return
-
-                if path == "/api/conversations":
-                    self._json_resp(200, gateway._list_conversations())
-                    return
-
-                # /api/conversations/<id>/history
-                m = re.match(r"^/api/conversations/([^/]+)/history$", path)
-                if m:
-                    self._json_resp(200, gateway._conversation_history(m.group(1)))
-                    return
-
-                # /api/conversations/<id>  (metadata only)
-                m = re.match(r"^/api/conversations/([^/]+)$", path)
-                if m:
-                    result = gateway._get_conversation(m.group(1))
-                    code = 200 if "error" not in result else 404
-                    self._json_resp(code, result)
-                    return
-
-                # Static file serving from web/dist/
-                self._serve_static(path)
-
-            def do_POST(self):
-                path = urlparse(self.path).path
-
-                # /api/conversations/<id>/archive
-                m = re.match(r"^/api/conversations/([^/]+)/archive$", path)
-                if m:
-                    result = gateway._set_status(m.group(1), "archived")
-                    code = 200 if "error" not in result else 404
-                    self._json_resp(code, result)
-                    return
-
-                # /api/conversations/<id>/unarchive
-                m = re.match(r"^/api/conversations/([^/]+)/unarchive$", path)
-                if m:
-                    result = gateway._set_status(m.group(1), "active")
-                    code = 200 if "error" not in result else 404
-                    self._json_resp(code, result)
-                    return
-
-                if path == "/api/chat":
-                    body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                    try:
-                        data = json.loads(body)
-                    except json.JSONDecodeError:
-                        self._json_resp(400, {"error": "Invalid JSON"})
-                        return
-
-                    text = data.get("text", "").strip()
-                    if not text:
-                        self._json_resp(400, {"error": "Empty message"})
-                        return
-
-                    identity = data.get("identity")
-                    if identity is not None and not isinstance(identity, str):
-                        self._json_resp(400, {"error": "identity must be a string"})
-                        return
-                    identity = identity.strip() if isinstance(identity, str) else None
-
-                    mode = data.get("mode")
-                    if mode is not None and not isinstance(mode, str):
-                        self._json_resp(400, {"error": "mode must be a string"})
-                        return
-                    mode = mode.strip() if isinstance(mode, str) else None
-                    if mode not in (None, "plan", "execute"):
-                        self._json_resp(400, {"error": "mode must be 'plan' or 'execute'"})
-                        return
-
-                    conv_id = data.get("conversation_id", f"web-{uuid.uuid4().hex[:8]}")
-
-                    future = asyncio.run_coroutine_threadsafe(
-                        gateway._handle_chat(text, conv_id, identity=identity, mode=mode),
-                        gateway._loop,
-                    )
-                    try:
-                        result = future.result(timeout=120)
-                        self._json_resp(200, result)
-                    except Exception as e:
-                        self._json_resp(500, {"error": str(e)})
-
-                elif path == "/api/feedback":
-                    body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                    try:
-                        data = json.loads(body)
-                    except json.JSONDecodeError:
-                        self._json_resp(400, {"error": "Invalid JSON"})
-                        return
-                    result = gateway._handle_feedback(data)
-                    code = 200 if "error" not in result else 400
-                    self._json_resp(code, result)
-
-                else:
-                    self.send_response(404)
-                    self.end_headers()
-
-            def do_DELETE(self):
-                path = urlparse(self.path).path
-                m = re.match(r"^/api/conversations/([^/]+)$", path)
-                if m:
-                    result = gateway._delete_conversation(m.group(1))
-                    code = 200 if "error" not in result else 404
-                    self._json_resp(code, result)
-                    return
-                self.send_response(404)
-                self.end_headers()
-
-            def _json_resp(self, code: int, data: Any):
-                body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(body)
-
-            def _stream_chat(self, raw_query: str):
-                params = parse_qs(raw_query, keep_blank_values=True)
-                text = (params.get("text", [""])[0] or "").strip()
-                if not text:
-                    self._json_resp(400, {"error": "Empty message"})
-                    return
-                identity = (params.get("identity", [""])[0] or "").strip() or None
-                mode = (params.get("mode", [""])[0] or "").strip() or None
-                if mode not in (None, "plan", "execute"):
-                    self._json_resp(400, {"error": "mode must be 'plan' or 'execute'"})
-                    return
-                conv_id = (params.get("conversation_id", [""])[0] or "").strip()
-                if not conv_id:
-                    conv_id = f"web-{uuid.uuid4().hex[:8]}"
-
-                events: queue.Queue[dict[str, Any]] = queue.Queue()
-
-                def sink(event) -> None:
-                    events.put(event.to_dict())
-
-                future = asyncio.run_coroutine_threadsafe(
-                    gateway._handle_chat(
-                        text,
-                        conv_id,
-                        identity=identity,
-                        mode=mode,
-                        event_sink=sink,
-                    ),
-                    gateway._loop,
-                )
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-
-                while True:
-                    if future.done() and events.empty():
-                        break
-                    try:
-                        payload = events.get(timeout=0.2)
-                    except queue.Empty:
-                        payload = None
-                    if payload is not None:
-                        self._sse("task", payload)
-                try:
-                    result = future.result(timeout=5)
-                    self._sse("done", result)
-                except Exception as exc:
-                    self._sse("error", {"error": str(exc)})
-
-            def _sse(self, event: str, data: Any):
-                payload = json.dumps(data, ensure_ascii=False)
-                body = f"event: {event}\ndata: {payload}\n\n".encode()
-                self.wfile.write(body)
-                self.wfile.flush()
-
-            def _serve_static(self, path: str):
-                if path == "/" or path == "":
-                    path = "/index.html"
-
-                file_path = _WEB_DIST / path.lstrip("/")
-
-                # Security: prevent path traversal
-                try:
-                    file_path = file_path.resolve()
-                    if not str(file_path).startswith(str(_WEB_DIST.resolve())):
-                        self.send_response(403)
-                        self.end_headers()
-                        return
-                except (ValueError, OSError):
-                    self.send_response(400)
-                    self.end_headers()
-                    return
-
-                if file_path.is_file():
-                    mime, _ = mimetypes.guess_type(str(file_path))
-                    content = file_path.read_bytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", mime or "application/octet-stream")
-                    self.send_header("Content-Length", str(len(content)))
-                    if "/assets/" in path:
-                        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
-                    self.end_headers()
-                    self.wfile.write(content)
-                else:
-                    # SPA fallback: serve index.html for client-side routing
-                    index = _WEB_DIST / "index.html"
-                    if index.is_file():
-                        content = index.read_bytes()
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.send_header("Content-Length", str(len(content)))
-                        self.end_headers()
-                        self.wfile.write(content)
-                    else:
-                        self.send_response(404)
-                        self.end_headers()
-                        self.wfile.write(b"Web UI not built. Run: cd web && npm run build")
-
-            def log_message(self, format, *args):
-                pass
-
-        self._server = HTTPServer((self.host, self.port), Handler)
-        self._thread = Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-
-        built = (
-            "ready"
-            if (_WEB_DIST / "index.html").exists()
-            else "not built (run: cd web && npm run build)"
+        app = self._build_app()
+        config = uvicorn.Config(
+            app,
+            host=self.host,
+            port=self.port,
+            log_level="warning",
+            lifespan="off",
         )
-        print(f"Evidune Web UI: {self.base_url or f'http://localhost:{self.port}'}  [{built}]")
+        self._server = uvicorn.Server(config)
 
         try:
-            while self._server:
-                await asyncio.sleep(1)
+            serve_task = asyncio.create_task(self._server.serve())
+            while not self._server.started:
+                if serve_task.done():
+                    await serve_task
+                await asyncio.sleep(0.01)
+            if self._server.servers and self._server.servers[0].sockets:
+                self._socket = self._server.servers[0].sockets[0]
+            self._ready = True
+            built = (
+                "ready"
+                if (_WEB_DIST / "index.html").exists()
+                else "not built (run: cd web && npm run build)"
+            )
+            print(f"Evidune Web UI: {self.base_url or f'http://localhost:{self.port}'}  [{built}]")
+            await serve_task
         except asyncio.CancelledError:
-            pass
+            if self._server:
+                self._server.should_exit = True
+            raise
+        finally:
+            self._ready = False
+            self._socket = None
+            self._server = None
 
     async def stop(self) -> None:
         if self._server:
-            server = self._server
-            self._server = None
-            server.shutdown()
-            server.server_close()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
-        self._thread = None
+            self._server.should_exit = True
+        await asyncio.sleep(0)
+
+    def _build_app(self) -> FastAPI:
+        app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        @app.get("/api/skills")
+        async def skills():
+            return JSONResponse(self._skills_payload())
+
+        @app.get("/api/chat/stream")
+        async def chat_stream(
+            text: str = "",
+            identity: str = "",
+            mode: str = "",
+            conversation_id: str = "",
+        ):
+            text = text.strip()
+            if not text:
+                return JSONResponse({"error": "Empty message"}, status_code=400)
+            normalized_mode = mode.strip() or None
+            if normalized_mode not in (None, "plan", "execute"):
+                return JSONResponse({"error": "mode must be 'plan' or 'execute'"}, status_code=400)
+            conv_id = conversation_id.strip() or f"web-{uuid.uuid4().hex[:8]}"
+
+            async def event_stream():
+                events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+                def sink(event) -> None:
+                    payload = event.to_dict() if hasattr(event, "to_dict") else dict(event)
+                    events.put_nowait(payload)
+
+                task = asyncio.create_task(
+                    self._handle_chat(
+                        text,
+                        conv_id,
+                        identity=identity.strip() or None,
+                        mode=normalized_mode,
+                        event_sink=sink,
+                    )
+                )
+                while True:
+                    if task.done() and events.empty():
+                        break
+                    try:
+                        payload = await asyncio.wait_for(events.get(), timeout=0.2)
+                    except TimeoutError:
+                        continue
+                    yield self._sse("task", payload)
+                try:
+                    yield self._sse("done", await task)
+                except Exception as exc:
+                    yield self._sse("error", {"error": str(exc)})
+
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache"},
+            )
+
+        @app.get("/api/conversations")
+        async def conversations():
+            return JSONResponse(self._list_conversations())
+
+        @app.get("/api/conversations/{conversation_id}/history")
+        async def conversation_history(conversation_id: str):
+            return JSONResponse(self._conversation_history(conversation_id))
+
+        @app.get("/api/conversations/{conversation_id}")
+        async def get_conversation(conversation_id: str):
+            result = self._get_conversation(conversation_id)
+            return JSONResponse(result, status_code=200 if "error" not in result else 404)
+
+        @app.post("/api/conversations/{conversation_id}/archive")
+        async def archive_conversation(conversation_id: str):
+            result = self._set_status(conversation_id, "archived")
+            return JSONResponse(result, status_code=200 if "error" not in result else 404)
+
+        @app.post("/api/conversations/{conversation_id}/unarchive")
+        async def unarchive_conversation(conversation_id: str):
+            result = self._set_status(conversation_id, "active")
+            return JSONResponse(result, status_code=200 if "error" not in result else 404)
+
+        @app.delete("/api/conversations/{conversation_id}")
+        async def delete_conversation(conversation_id: str):
+            result = self._delete_conversation(conversation_id)
+            return JSONResponse(result, status_code=200 if "error" not in result else 404)
+
+        @app.post("/api/chat")
+        async def chat(request: Request):
+            try:
+                data = await request.json()
+            except json.JSONDecodeError:
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            if not isinstance(data, dict):
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            text = str(data.get("text", "")).strip()
+            if not text:
+                return JSONResponse({"error": "Empty message"}, status_code=400)
+            identity = data.get("identity")
+            if identity is not None and not isinstance(identity, str):
+                return JSONResponse({"error": "identity must be a string"}, status_code=400)
+            mode = data.get("mode")
+            if mode is not None and not isinstance(mode, str):
+                return JSONResponse({"error": "mode must be a string"}, status_code=400)
+            normalized_mode = mode.strip() if isinstance(mode, str) else None
+            if normalized_mode not in (None, "plan", "execute"):
+                return JSONResponse({"error": "mode must be 'plan' or 'execute'"}, status_code=400)
+            conv_id = data.get("conversation_id") or f"web-{uuid.uuid4().hex[:8]}"
+            try:
+                result = await self._handle_chat(
+                    text,
+                    str(conv_id),
+                    identity=identity.strip() if isinstance(identity, str) else None,
+                    mode=normalized_mode,
+                )
+            except Exception as exc:
+                return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse(result)
+
+        @app.post("/api/feedback")
+        async def feedback(request: Request):
+            try:
+                data = await request.json()
+            except json.JSONDecodeError:
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            if not isinstance(data, dict):
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+            result = self._handle_feedback(data)
+            return JSONResponse(result, status_code=200 if "error" not in result else 400)
+
+        @app.get("/{path:path}")
+        async def static_or_spa(path: str):
+            return self._static_response("/" + path)
+
+        return app
+
+    def _sse(self, event: str, data: Any) -> str:
+        payload = json.dumps(data, ensure_ascii=False)
+        return f"event: {event}\ndata: {payload}\n\n"
+
+    def _static_response(self, path: str) -> FileResponse | PlainTextResponse:
+        if path == "/" or path == "":
+            path = "/index.html"
+
+        file_path = _WEB_DIST / path.lstrip("/")
+        try:
+            file_path = file_path.resolve()
+            if not str(file_path).startswith(str(_WEB_DIST.resolve())):
+                return PlainTextResponse("Forbidden", status_code=403)
+        except (ValueError, OSError):
+            return PlainTextResponse("Bad request", status_code=400)
+
+        if file_path.is_file():
+            mime, _ = mimetypes.guess_type(str(file_path))
+            headers = {}
+            if "/assets/" in path:
+                headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return FileResponse(
+                file_path, media_type=mime or "application/octet-stream", headers=headers
+            )
+
+        index = _WEB_DIST / "index.html"
+        if index.is_file():
+            return FileResponse(index, media_type="text/html; charset=utf-8")
+        return PlainTextResponse("Web UI not built. Run: cd web && npm run build", status_code=404)
 
     async def _handle_chat(
         self,

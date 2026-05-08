@@ -4,8 +4,10 @@ import asyncio
 import json
 import sys
 import threading
+import time
 import types
 
+import httpx
 import pytest
 
 from gateway.base import InboundMessage, OutboundMessage
@@ -144,6 +146,63 @@ class TestWebGatewayChat:
         gw.set_skill_provider(lambda: [{"name": "new", "description": "New", "status": "active"}])
 
         assert gw._skills_payload()[0]["name"] == "new"
+
+    def test_fastapi_server_serves_core_http_endpoints(self):
+        loop = asyncio.new_event_loop()
+        gw = WebGateway(host="127.0.0.1", port=0)
+        gw.set_skills([{"name": "probe", "description": "Probe"}])
+
+        async def handler(message: InboundMessage) -> OutboundMessage:
+            sink = message.metadata.get("event_sink")
+            if sink:
+
+                class Event:
+                    def to_dict(self):
+                        return {"kind": "probe"}
+
+                sink(Event())
+            return OutboundMessage(
+                text="ok",
+                conversation_id=message.conversation_id,
+                metadata={"mode": message.metadata.get("mode")},
+            )
+
+        def runner() -> None:
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(gw.start(handler))
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=runner, daemon=True)
+        thread.start()
+        try:
+            deadline = time.time() + 5
+            while not gw.base_url:
+                if time.time() >= deadline:
+                    raise AssertionError("Timed out waiting for WebGateway")
+                time.sleep(0.05)
+
+            with httpx.Client(timeout=5, trust_env=False) as client:
+                skills = client.get(f"{gw.base_url}/api/skills")
+                assert skills.status_code == 200
+                assert skills.json()[0]["name"] == "probe"
+
+                chat = client.post(
+                    f"{gw.base_url}/api/chat",
+                    json={"text": "hello", "mode": "plan"},
+                )
+                assert chat.status_code == 200
+                assert chat.json()["mode"] == "plan"
+
+                stream = client.get(f"{gw.base_url}/api/chat/stream", params={"text": "hello"})
+                assert stream.status_code == 200
+                assert "event: task" in stream.text
+                assert "event: done" in stream.text
+        finally:
+            if loop.is_running():
+                asyncio.run_coroutine_threadsafe(gw.stop(), loop).result(timeout=5)
+            thread.join(timeout=5)
 
 
 class FakeResponse:
