@@ -895,6 +895,12 @@ async def serve(
 
     title_generator = TitleGenerator(llm=llm)
 
+    graph_memory = None
+    if config.memory.graph.enabled:
+        from agent.graph_memory import GraphMemoryService
+
+        graph_memory = GraphMemoryService.from_config(memory, config.memory.graph)
+
     # Tool registry: internal tools always; external tools when enabled
     from agent.tools.external import ExternalToolsConfig, external_tools
     from agent.tools.registry import ToolRegistry
@@ -952,6 +958,7 @@ async def serve(
         validation_harness=validation_harness,
         delivery_manager=delivery_manager,
         maintenance_runner=maintenance_runner,
+        graph_memory=graph_memory,
     )
 
     # Create gateways

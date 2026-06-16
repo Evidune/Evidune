@@ -17,3 +17,5 @@ Tracked specs:
   and restart-safe runtime behavior across `run` and `serve`
 - [Self-Management Tools](self-management-tools.md): structured config
   inspection, validated config patching, and restart request behavior
+- [Graph Memory](graph-memory.md): SQLite-backed Cue-Tag-Content memory
+  reconstruction for `serve` context selection

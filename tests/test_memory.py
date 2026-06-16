@@ -91,6 +91,95 @@ class TestFacts:
         assert store.delete_fact("key") is False
 
 
+class TestGraphMemory:
+    def test_upsert_nodes_edges_search_expand_and_trace(self, store: MemoryStore):
+        cue_id = store.upsert_graph_memory_node(
+            node_type="cue",
+            key="sqlite",
+            text="sqlite",
+            source_type="fact",
+            source_id="project.storage",
+        )
+        tag_id = store.upsert_graph_memory_node(
+            node_type="tag",
+            key="storage",
+            text="storage",
+            source_type="fact",
+            source_id="project.storage",
+        )
+        content_id = store.upsert_graph_memory_node(
+            node_type="content",
+            key="project.storage",
+            text="project.storage: Use SQLite for graph memory",
+            source_type="fact",
+            source_id="project.storage",
+            metadata={"fact_key": "project.storage"},
+        )
+
+        assert (
+            store.upsert_graph_memory_node(
+                node_type="cue",
+                key="sqlite",
+                text="sqlite",
+                source_type="fact",
+                source_id="project.storage",
+            )
+            == cue_id
+        )
+
+        edge_id = store.upsert_graph_memory_edge(
+            from_node_id=cue_id,
+            to_node_id=tag_id,
+            edge_type="cue_tag",
+            weight=0.8,
+        )
+        assert (
+            store.upsert_graph_memory_edge(
+                from_node_id=cue_id,
+                to_node_id=tag_id,
+                edge_type="cue_tag",
+                weight=0.8,
+            )
+            == edge_id
+        )
+        store.upsert_graph_memory_edge(
+            from_node_id=tag_id,
+            to_node_id=content_id,
+            edge_type="tag_content",
+            weight=0.9,
+        )
+
+        seeds = store.search_graph_memory_seeds("sqlite graph", limit=5)
+        assert seeds[0]["node_id"] == cue_id
+        assert seeds[0]["node_type"] == "cue"
+
+        expanded = store.expand_graph_memory([cue_id], limit=10)
+        expanded_ids = {item["node"]["node_id"] for item in expanded}
+        assert tag_id in expanded_ids
+
+        content = store.read_graph_memory_content(content_id)
+        assert content is not None
+        assert content["metadata"] == {"fact_key": "project.storage"}
+        assert "SQLite" in content["text"]
+
+        trace_id = store.record_graph_memory_trace(
+            query="sqlite graph",
+            seed_nodes=[cue_id],
+            selected_nodes=[content_id],
+            selected_skills=[],
+            actions=[{"action": "cue_tag", "from": cue_id, "to": tag_id}],
+        )
+        trace = store.get_graph_memory_trace(trace_id)
+        assert trace is not None
+        assert trace["trace_id"] == trace_id
+        assert trace["query"] == "sqlite graph"
+        assert trace["selected_nodes"] == [content_id]
+
+    def test_graph_memory_rejects_invalid_node_type(self, store: MemoryStore):
+        with pytest.raises(ValueError, match="node_type"):
+            store.upsert_graph_memory_node(node_type="unknown", key="x")
+
+
 class TestSkillExecutions:
     def test_record_and_retrieve(self, store: MemoryStore):
         eid = store.record_execution(

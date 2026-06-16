@@ -8,8 +8,10 @@ so this file stays focused on the public API surface.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -36,6 +38,8 @@ _PLAN_STATUSES = {"pending", "in_progress", "completed"}
 _CONVERSATION_MODES = {"plan", "execute"}
 _EMERGED_SKILL_STATUSES = {"active", "pending_review", "disabled", "rolled_back"}
 _SKILL_STATE_ORIGINS = {"base", "emerged"}
+_GRAPH_NODE_TYPES = {"cue", "tag", "content"}
+_GRAPH_SOURCE_TYPES = {"", "fact", "message", "skill", "skill_reference", "harness_artifact"}
 
 
 class MemoryStore:
@@ -135,6 +139,45 @@ class MemoryStore:
             valid = ", ".join(sorted(_SKILL_STATE_ORIGINS))
             raise ValueError(f"Invalid skill state origin {origin!r}; expected one of {valid}")
         return origin
+
+    def _normalise_graph_node_type(self, node_type: str) -> str:
+        if node_type not in _GRAPH_NODE_TYPES:
+            valid = ", ".join(sorted(_GRAPH_NODE_TYPES))
+            raise ValueError(
+                f"Invalid graph memory node_type {node_type!r}; expected one of {valid}"
+            )
+        return node_type
+
+    def _normalise_graph_source_type(self, source_type: str) -> str:
+        source_type = source_type or ""
+        if source_type not in _GRAPH_SOURCE_TYPES:
+            valid = ", ".join(sorted(_GRAPH_SOURCE_TYPES))
+            raise ValueError(
+                f"Invalid graph memory source_type {source_type!r}; expected one of {valid}"
+            )
+        return source_type
+
+    def _graph_node_id(
+        self,
+        *,
+        node_type: str,
+        key: str,
+        source_type: str = "",
+        source_id: str = "",
+    ) -> str:
+        raw = f"{node_type}\0{key.strip().lower()}\0{source_type}\0{source_id}"
+        digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
+        return f"gmn_{digest}"
+
+    def _row_to_graph_node(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        payload["metadata"] = self._json_load_dict(payload.pop("metadata_json", ""))
+        return payload
+
+    def _row_to_graph_edge(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        payload["metadata"] = self._json_load_dict(payload.pop("metadata_json", ""))
+        return payload
 
     def _normalise_iteration_updates(
         self, updates: list[dict[str, Any]] | None
@@ -567,6 +610,304 @@ class MemoryStore:
             )
             self._conn.commit()
             return cursor.rowcount > 0
+
+    # --- Graph Memory API ---
+
+    def upsert_graph_memory_node(
+        self,
+        *,
+        node_type: str,
+        key: str,
+        text: str = "",
+        source_type: str = "",
+        source_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Create or update one Cue-Tag-Content graph node and return its stable id."""
+        node_type = self._normalise_graph_node_type(node_type)
+        source_type = self._normalise_graph_source_type(source_type)
+        key = (key or "").strip()
+        if not key:
+            raise ValueError("Graph memory node key must be non-empty")
+        source_id = source_id or ""
+        node_id = self._graph_node_id(
+            node_type=node_type,
+            key=key,
+            source_type=source_type,
+            source_id=source_id,
+        )
+        with self._lock:
+            now = self._now()
+            self._conn.execute(
+                """INSERT INTO graph_memory_nodes
+                   (node_id, node_type, key, text, source_type, source_id,
+                    metadata_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(node_type, key, source_type, source_id) DO UPDATE SET
+                     text = excluded.text,
+                     metadata_json = excluded.metadata_json,
+                     updated_at = excluded.updated_at""",
+                (
+                    node_id,
+                    node_type,
+                    key,
+                    text or "",
+                    source_type,
+                    source_id,
+                    self._json_dump(metadata or {}),
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return node_id
+
+    def upsert_graph_memory_edge(
+        self,
+        from_node_id: str,
+        to_node_id: str,
+        edge_type: str,
+        *,
+        weight: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        """Create or update a graph edge and return its row id."""
+        edge_type = (edge_type or "").strip()
+        if not edge_type:
+            raise ValueError("Graph memory edge_type must be non-empty")
+        with self._lock:
+            missing = [
+                node_id
+                for node_id in (from_node_id, to_node_id)
+                if self._conn.execute(
+                    "SELECT 1 FROM graph_memory_nodes WHERE node_id = ?",
+                    (node_id,),
+                ).fetchone()
+                is None
+            ]
+            if missing:
+                raise ValueError(f"Unknown graph memory node(s): {', '.join(missing)}")
+            now = self._now()
+            self._conn.execute(
+                """INSERT INTO graph_memory_edges
+                   (from_node_id, to_node_id, edge_type, weight, metadata_json,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(from_node_id, to_node_id, edge_type) DO UPDATE SET
+                     weight = excluded.weight,
+                     metadata_json = excluded.metadata_json,
+                     updated_at = excluded.updated_at""",
+                (
+                    from_node_id,
+                    to_node_id,
+                    edge_type,
+                    float(weight),
+                    self._json_dump(metadata or {}),
+                    now,
+                    now,
+                ),
+            )
+            row = self._conn.execute(
+                """SELECT id FROM graph_memory_edges
+                   WHERE from_node_id = ? AND to_node_id = ? AND edge_type = ?""",
+                (from_node_id, to_node_id, edge_type),
+            ).fetchone()
+            self._conn.commit()
+        return int(row["id"]) if row else 0
+
+    def search_graph_memory_seeds(
+        self,
+        query: str,
+        *,
+        node_types: list[str] | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Search graph nodes by deterministic key/text overlap."""
+        tokens = [token.lower() for token in str(query or "").split() if token.strip()]
+        if not tokens:
+            return []
+        allowed_types = set(node_types or _GRAPH_NODE_TYPES)
+        for node_type in allowed_types:
+            self._normalise_graph_node_type(node_type)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM graph_memory_nodes ORDER BY updated_at DESC"
+            ).fetchall()
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for row in rows:
+            node = self._row_to_graph_node(row)
+            if node["node_type"] not in allowed_types:
+                continue
+            haystack = f"{node['key']} {node['text']}".lower()
+            score = 0.0
+            for token in tokens:
+                if token == node["key"].lower():
+                    score += 3.0
+                elif token in node["key"].lower():
+                    score += 2.0
+                elif token in haystack:
+                    score += 1.0
+            if score > 0:
+                node["score"] = score
+                scored.append((score, node))
+        scored.sort(key=lambda item: (item[0], item[1]["updated_at"]), reverse=True)
+        return [node for _, node in scored[: max(0, int(limit))]]
+
+    def expand_graph_memory(
+        self,
+        node_ids: list[str],
+        *,
+        direction: str = "both",
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Expand from graph nodes and return neighboring nodes with edge context."""
+        if direction not in {"out", "in", "both"}:
+            raise ValueError("direction must be one of out, in, both")
+        if not node_ids:
+            return []
+        placeholders = ",".join("?" for _ in node_ids)
+        queries: list[tuple[str, list[str]]] = []
+        if direction in {"out", "both"}:
+            queries.append(
+                (
+                    f"""SELECT
+                            e.id AS edge_id,
+                            e.from_node_id AS edge_from_node_id,
+                            e.to_node_id AS edge_to_node_id,
+                            e.edge_type AS edge_type,
+                            e.weight AS edge_weight,
+                            e.metadata_json AS edge_metadata_json,
+                            e.created_at AS edge_created_at,
+                            e.updated_at AS edge_updated_at,
+                            n.node_id AS node_id,
+                            n.node_type AS node_type,
+                            n.key AS node_key,
+                            n.text AS node_text,
+                            n.source_type AS node_source_type,
+                            n.source_id AS node_source_id,
+                            n.metadata_json AS node_metadata_json,
+                            n.created_at AS node_created_at,
+                            n.updated_at AS node_updated_at
+                        FROM graph_memory_edges e
+                        JOIN graph_memory_nodes n ON n.node_id = e.to_node_id
+                        WHERE e.from_node_id IN ({placeholders})""",
+                    list(node_ids),
+                )
+            )
+        if direction in {"in", "both"}:
+            queries.append(
+                (
+                    f"""SELECT
+                            e.id AS edge_id,
+                            e.from_node_id AS edge_from_node_id,
+                            e.to_node_id AS edge_to_node_id,
+                            e.edge_type AS edge_type,
+                            e.weight AS edge_weight,
+                            e.metadata_json AS edge_metadata_json,
+                            e.created_at AS edge_created_at,
+                            e.updated_at AS edge_updated_at,
+                            n.node_id AS node_id,
+                            n.node_type AS node_type,
+                            n.key AS node_key,
+                            n.text AS node_text,
+                            n.source_type AS node_source_type,
+                            n.source_id AS node_source_id,
+                            n.metadata_json AS node_metadata_json,
+                            n.created_at AS node_created_at,
+                            n.updated_at AS node_updated_at
+                        FROM graph_memory_edges e
+                        JOIN graph_memory_nodes n ON n.node_id = e.from_node_id
+                        WHERE e.to_node_id IN ({placeholders})""",
+                    list(node_ids),
+                )
+            )
+        results: list[dict[str, Any]] = []
+        seen: set[tuple[int, str]] = set()
+        with self._lock:
+            for sql, params in queries:
+                for row in self._conn.execute(sql, params).fetchall():
+                    edge = {
+                        "id": row["edge_id"],
+                        "from_node_id": row["edge_from_node_id"],
+                        "to_node_id": row["edge_to_node_id"],
+                        "edge_type": row["edge_type"],
+                        "weight": row["edge_weight"],
+                        "metadata": self._json_load_dict(row["edge_metadata_json"]),
+                        "created_at": row["edge_created_at"],
+                        "updated_at": row["edge_updated_at"],
+                    }
+                    node = {
+                        "node_id": row["node_id"],
+                        "node_type": row["node_type"],
+                        "key": row["node_key"],
+                        "text": row["node_text"],
+                        "source_type": row["node_source_type"],
+                        "source_id": row["node_source_id"],
+                        "metadata": self._json_load_dict(row["node_metadata_json"]),
+                        "created_at": row["node_created_at"],
+                        "updated_at": row["node_updated_at"],
+                    }
+                    key = (edge["id"], node["node_id"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    results.append({"edge": edge, "node": node})
+        results.sort(key=lambda item: item["edge"]["weight"], reverse=True)
+        return results[: max(0, int(limit))]
+
+    def read_graph_memory_content(self, node_id: str) -> dict[str, Any] | None:
+        """Read one graph node by id."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM graph_memory_nodes WHERE node_id = ?",
+                (node_id,),
+            ).fetchone()
+        return self._row_to_graph_node(row) if row else None
+
+    def record_graph_memory_trace(
+        self,
+        *,
+        query: str,
+        seed_nodes: list[str],
+        selected_nodes: list[str],
+        selected_skills: list[str],
+        actions: list[dict[str, Any]],
+    ) -> str:
+        """Persist one reconstruction trace for audit and tool inspection."""
+        trace_id = f"gmt_{uuid.uuid4().hex[:16]}"
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO graph_memory_traces
+                   (trace_id, query, seed_nodes_json, selected_nodes_json,
+                    selected_skills_json, actions_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    trace_id,
+                    query,
+                    self._json_dump(seed_nodes),
+                    self._json_dump(selected_nodes),
+                    self._json_dump(selected_skills),
+                    self._json_dump(actions),
+                    self._now(),
+                ),
+            )
+            self._conn.commit()
+        return trace_id
+
+    def get_graph_memory_trace(self, trace_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM graph_memory_traces WHERE trace_id = ?",
+                (trace_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = dict(row)
+        payload["seed_nodes"] = self._json_load_list(payload.pop("seed_nodes_json", ""))
+        payload["selected_nodes"] = self._json_load_list(payload.pop("selected_nodes_json", ""))
+        payload["selected_skills"] = self._json_load_list(payload.pop("selected_skills_json", ""))
+        payload["actions"] = self._json_load_list(payload.pop("actions_json", ""))
+        return payload
 
     # --- Skill Execution API ---
 

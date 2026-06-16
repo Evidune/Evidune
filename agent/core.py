@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.fact_extractor import FactExtractor
+from agent.graph_memory import GraphMemoryService, ReconstructedContext
 from agent.harness import TaskBrief
 from agent.harness.profiles import get_squad_profile
 from agent.harness.swarm import SwarmHarness
@@ -23,6 +24,7 @@ from agent.skill_intent_detector import SkillIntentDetector
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
+from agent.tools.graph_memory import graph_memory_tools
 from agent.tools.internal import (
     conversation_tools,
     identity_tools,
@@ -134,6 +136,7 @@ class AgentCore:
         validation_harness=None,
         delivery_manager=None,
         maintenance_runner=None,
+        graph_memory: GraphMemoryService | None = None,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -164,6 +167,7 @@ class AgentCore:
         self.validation_harness = validation_harness
         self.delivery_manager = delivery_manager
         self.maintenance_runner = maintenance_runner
+        self.graph_memory = graph_memory
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
         self._background_emergence_tasks: set[asyncio.Task] = set()
@@ -201,6 +205,8 @@ class AgentCore:
         registry = ToolRegistry()
         namespace = identity.namespace if identity is not None else ""
         registry.register_many(skill_tools(self.skills))
+        if self.graph_memory is not None:
+            registry.register_many(graph_memory_tools(self.memory))
         registry.register_many(identity_tools(self.identities))
         registry.register_many(
             memory_tools(
@@ -429,6 +435,8 @@ class AgentCore:
         def base_registry(*, allow_write: bool, include_external: bool, include_tools: bool = True):
             registry = ToolRegistry()
             if include_tools:
+                if self.graph_memory is not None:
+                    registry.register_many(graph_memory_tools(self.memory))
                 registry.register_many(identity_tools(self.identities))
                 registry.register_many(
                     memory_tools(
@@ -718,10 +726,31 @@ class AgentCore:
             facts = self.memory.get_facts()
 
         # 4. Relevant skills
+        graph_context = (
+            self.graph_memory.reconstruct(
+                message.text,
+                conversation_id=message.conversation_id,
+                facts=facts,
+                history=history,
+                skills=self.skills.all(),
+            )
+            if self.graph_memory is not None
+            else ReconstructedContext()
+        )
         skill_snapshot = self.skills.snapshot(message.text)
         matched_skills = [match.skill for match in skill_snapshot.matches]
-        relevant_skills = matched_skills if matched_skills else self.skills.all()
-        execution_skills = matched_skills if matched_skills else []
+        graph_skills = [
+            skill
+            for name in graph_context.selected_skills
+            for skill in [self.skills.get(name)]
+            if skill is not None
+        ]
+        selected_skills: list[Skill] = []
+        for skill in [*matched_skills, *graph_skills]:
+            if skill.name not in {item.name for item in selected_skills}:
+                selected_skills.append(skill)
+        relevant_skills = selected_skills if selected_skills else self.skills.all()
+        execution_skills = selected_skills if selected_skills else []
         matched_skill_names = [skill.name for skill in matched_skills]
         execution_skill_names = [skill.name for skill in execution_skills]
 
@@ -769,6 +798,7 @@ class AgentCore:
                     "skill_lifecycle_updates": [],
                     "new_title": new_title,
                     "tool_trace": [],
+                    "graph_reconstruction": graph_context.to_metadata(),
                     "task_id": None,
                     "squad": None,
                     "task_status": None,
@@ -794,8 +824,8 @@ class AgentCore:
         validation_summary: dict | None = None
         delivery_summary: dict | None = None
         artifact_manifest: dict | None = None
-        if self._use_swarm_harness(message, mode, matched_skills):
-            squad = self._resolve_squad(message, conversation_meta, identity, matched_skills)
+        if self._use_swarm_harness(message, mode, relevant_skills):
+            squad = self._resolve_squad(message, conversation_meta, identity, relevant_skills)
             self.memory.save_squad_profile(
                 squad.name,
                 roles=squad.role_roster(),
@@ -829,7 +859,7 @@ class AgentCore:
         else:
             # 5. Build messages
             messages = self._build_messages(
-                identity, mode, relevant_skills, facts, history, message
+                identity, mode, relevant_skills, facts, history, message, graph_context
             )
 
             # 6. Call LLM — with optional tool-use loop
@@ -916,6 +946,7 @@ class AgentCore:
                 "skill_lifecycle_updates": lifecycle_updates,
                 "new_title": new_title,
                 "tool_trace": tool_trace,
+                "graph_reconstruction": graph_context.to_metadata(),
                 "task_id": task_id,
                 "squad": squad_name,
                 "task_status": task_status,
@@ -1499,6 +1530,7 @@ class AgentCore:
         facts: list,
         history: list[dict[str, str]],
         message: InboundMessage,
+        graph_context: ReconstructedContext | None = None,
     ) -> list[dict[str, str]]:
         """Build the message list for the LLM call."""
         system_parts = []
@@ -1541,8 +1573,17 @@ class AgentCore:
         if skill_prompt:
             system_parts.append(skill_prompt)
 
-        # Inject facts
-        if facts:
+        # Inject reconstructed evidence first; fall back to legacy fact injection
+        if graph_context is not None and graph_context.evidence_items:
+            memory_lines = ["# Reconstructed Memory", ""]
+            for item in graph_context.evidence_items:
+                label = f"{item.get('source_type', '')}:{item.get('key', '')}".strip(":")
+                text = str(item.get("text", ""))
+                if len(text) > 1000:
+                    text = text[:997] + "..."
+                memory_lines.append(f"- **{label}**: {text}")
+            system_parts.append("\n".join(memory_lines))
+        elif facts:
             fact_lines = ["# Memory", ""]
             for f in facts:
                 fact_lines.append(f"- **{f.key}**: {f.value}")

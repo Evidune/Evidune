@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agent.core import AgentCore
+from agent.graph_memory import GraphMemoryService
 from agent.llm import LLMClient
 from agent.self_evaluator import SelfEvaluator
 from agent.tools.base import CompletionResult, Tool, ToolCall
@@ -210,6 +211,99 @@ class TestAgentCore:
         await agent.handle(msg)
         system_content = llm.last_messages[0]["content"]
         assert "formal tone" in system_content
+
+    @pytest.mark.asyncio
+    async def test_graph_memory_selected_skill_records_execution(
+        self, tmp_path: Path, memory: MemoryStore, llm: MockLLM
+    ):
+        skill_path = _write_skill(
+            tmp_path / "memory-helper" / "SKILL.md",
+            "---\nname: memory-helper\ndescription: Long term context support\ntags: [context]\n---\n"
+            "Use SQLite graph traversal when reconstructing context.",
+        )
+        registry = SkillRegistry()
+        registry.register(
+            Skill(
+                name="memory-helper",
+                description="Long term context support",
+                path=skill_path,
+                instructions="Use SQLite graph traversal when reconstructing context.",
+                tags=["context"],
+            )
+        )
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=registry,
+            memory=memory,
+            graph_memory=GraphMemoryService(memory),
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="Need help with sqlite traversal",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-graph-skill",
+            )
+        )
+
+        assert "memory-helper" in response.metadata["skills"]
+        assert memory.get_skill_executions("memory-helper")
+        graph = response.metadata["graph_reconstruction"]
+        assert graph["trace_id"]
+        assert graph["selected_skills"] == ["memory-helper"]
+
+    @pytest.mark.asyncio
+    async def test_graph_memory_selected_facts_replace_full_fact_injection(
+        self, memory: MemoryStore, llm: MockLLM, skill_registry: SkillRegistry
+    ):
+        memory.set_fact("project.graph_memory", "Use SQLite graph reconstruction")
+        memory.set_fact("user.preference", "unrelated preference")
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            graph_memory=GraphMemoryService(memory),
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="How should sqlite graph reconstruction work?",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-graph-fact",
+            )
+        )
+
+        system_content = llm.last_messages[0]["content"]
+        assert "Use SQLite graph reconstruction" in system_content
+        assert "unrelated preference" not in system_content
+        assert response.metadata["graph_reconstruction"]["evidence_count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_graph_memory_no_hit_falls_back_to_existing_fact_prompt(
+        self, memory: MemoryStore, llm: MockLLM, skill_registry: SkillRegistry
+    ):
+        memory.set_fact("user.preference", "likes formal tone")
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            graph_memory=GraphMemoryService(memory),
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="zzzz unmatched query",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-graph-fallback",
+            )
+        )
+
+        system_content = llm.last_messages[0]["content"]
+        assert "formal tone" in system_content
+        assert response.metadata["graph_reconstruction"]["evidence_count"] == 0
 
     @pytest.mark.asyncio
     async def test_turn_scoped_plan_tools_are_available(

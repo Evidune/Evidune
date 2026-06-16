@@ -236,6 +236,43 @@ CREATE TABLE IF NOT EXISTS facts (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (namespace, key)
 );
+
+CREATE TABLE IF NOT EXISTS graph_memory_nodes (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL,
+    key TEXT NOT NULL,
+    text TEXT DEFAULT '',
+    source_type TEXT DEFAULT '',
+    source_id TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(node_type, key, source_type, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS graph_memory_edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_node_id TEXT NOT NULL,
+    to_node_id TEXT NOT NULL,
+    edge_type TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(from_node_id, to_node_id, edge_type),
+    FOREIGN KEY (from_node_id) REFERENCES graph_memory_nodes(node_id),
+    FOREIGN KEY (to_node_id) REFERENCES graph_memory_nodes(node_id)
+);
+
+CREATE TABLE IF NOT EXISTS graph_memory_traces (
+    trace_id TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    seed_nodes_json TEXT DEFAULT '[]',
+    selected_nodes_json TEXT DEFAULT '[]',
+    selected_skills_json TEXT DEFAULT '[]',
+    actions_json TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -425,3 +462,12 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_harness_artifacts_task ON harness_artifacts(task_id)"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_memory_nodes(node_type)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_graph_nodes_source ON graph_memory_nodes(source_type, source_id)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_key ON graph_memory_nodes(key)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_graph_edges_from ON graph_memory_edges(from_node_id)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_to ON graph_memory_edges(to_node_id)")

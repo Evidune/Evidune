@@ -6,6 +6,7 @@ import pytest
 
 from agent.tools.base import CompletionResult, Tool, ToolCall, ToolResult
 from agent.tools.external import ExternalToolsConfig, external_tools
+from agent.tools.graph_memory import graph_memory_tools
 from agent.tools.internal import (
     conversation_tools,
     identity_tools,
@@ -162,6 +163,56 @@ class TestSkillTools:
         assert listing == [{"name": "writer", "description": "Write text"}]
         full = await tools["get_skill"].handler(name="writer")
         assert "writer" in full and "Body here" in full
+
+
+class TestGraphMemoryTools:
+    @pytest.mark.asyncio
+    async def test_graph_memory_tools_are_read_only(self, memory: MemoryStore):
+        cue_id = memory.upsert_graph_memory_node(
+            node_type="cue",
+            key="sqlite",
+            text="sqlite",
+            source_type="fact",
+            source_id="project.storage",
+        )
+        content_id = memory.upsert_graph_memory_node(
+            node_type="content",
+            key="project.storage",
+            text="project.storage: Use SQLite graph memory",
+            source_type="fact",
+            source_id="project.storage",
+        )
+        memory.upsert_graph_memory_edge(cue_id, content_id, "cue_content", weight=0.7)
+        trace_id = memory.record_graph_memory_trace(
+            query="sqlite",
+            seed_nodes=[cue_id],
+            selected_nodes=[content_id],
+            selected_skills=[],
+            actions=[],
+        )
+
+        tools = {t.name: t for t in graph_memory_tools(memory)}
+
+        assert set(tools) == {
+            "search_graph_memory",
+            "expand_graph_memory",
+            "read_graph_memory_content",
+            "explain_graph_memory_trace",
+        }
+        search = await tools["search_graph_memory"].handler(query="sqlite", limit=5)
+        assert search[0]["node_id"] == cue_id
+        expanded = await tools["expand_graph_memory"].handler(node_ids=[cue_id], limit=5)
+        assert expanded[0]["node"]["node_id"] == content_id
+        content = await tools["read_graph_memory_content"].handler(node_id=content_id)
+        assert content["text"].endswith("SQLite graph memory")
+        trace = await tools["explain_graph_memory_trace"].handler(trace_id=trace_id)
+        assert trace["trace_id"] == trace_id
+
+    @pytest.mark.asyncio
+    async def test_read_graph_memory_content_reports_missing_node(self, memory: MemoryStore):
+        tools = {t.name: t for t in graph_memory_tools(memory)}
+        result = await tools["read_graph_memory_content"].handler(node_id="missing")
+        assert result["error"] == "graph_memory_node_not_found"
 
 
 class TestIdentityTools:

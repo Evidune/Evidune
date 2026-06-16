@@ -227,9 +227,37 @@ class IdentitiesConfig:
 
 
 @dataclass
+class GraphMemoryConfig:
+    """SQLite-backed Cue-Tag-Content graph memory retrieval."""
+
+    enabled: bool = True
+    index_sources: list[str] = field(
+        default_factory=lambda: ["facts", "skills", "messages", "harness_artifacts"]
+    )
+    max_seed_nodes: int = 8
+    max_traversal_steps: int = 4
+    max_context_items: int = 12
+
+    def __post_init__(self) -> None:
+        valid = {"facts", "skills", "messages", "harness_artifacts"}
+        invalid = sorted(set(self.index_sources) - valid)
+        if invalid:
+            raise ValueError(
+                f"Invalid graph memory index_sources {invalid!r}; expected only {sorted(valid)}"
+            )
+        if self.max_seed_nodes < 1:
+            raise ValueError("memory.graph.max_seed_nodes must be >= 1")
+        if self.max_traversal_steps < 1:
+            raise ValueError("memory.graph.max_traversal_steps must be >= 1")
+        if self.max_context_items < 1:
+            raise ValueError("memory.graph.max_context_items must be >= 1")
+
+
+@dataclass
 class MemoryConfig:
     path: str = "~/.evidune/memory.db"
     max_messages_per_conversation: int = 100
+    graph: GraphMemoryConfig = field(default_factory=GraphMemoryConfig)
 
 
 @dataclass
@@ -453,9 +481,20 @@ def load_config(path: str | Path) -> EviduneConfig:
 
     # Memory config
     memory_raw = raw.get("memory", {})
+    graph_raw = memory_raw.get("graph", {}) or {}
     memory_config = MemoryConfig(
         path=memory_raw.get("path", "~/.evidune/memory.db"),
         max_messages_per_conversation=memory_raw.get("max_messages_per_conversation", 100),
+        graph=GraphMemoryConfig(
+            enabled=graph_raw.get("enabled", True),
+            index_sources=graph_raw.get(
+                "index_sources",
+                ["facts", "skills", "messages", "harness_artifacts"],
+            ),
+            max_seed_nodes=graph_raw.get("max_seed_nodes", 8),
+            max_traversal_steps=graph_raw.get("max_traversal_steps", 4),
+            max_context_items=graph_raw.get("max_context_items", 12),
+        ),
     )
 
     # Gateway configs

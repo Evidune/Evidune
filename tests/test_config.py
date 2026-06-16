@@ -21,6 +21,16 @@ class TestLoadConfig:
         assert config.domain == "test"
         assert config.metrics.adapter == "generic_csv"
         assert config.analysis.compare_window_days == 7
+        assert config.memory.graph.enabled is True
+        assert config.memory.graph.index_sources == [
+            "facts",
+            "skills",
+            "messages",
+            "harness_artifacts",
+        ]
+        assert config.memory.graph.max_seed_nodes == 8
+        assert config.memory.graph.max_traversal_steps == 4
+        assert config.memory.graph.max_context_items == 12
 
     def test_full_config(self, tmp_path: Path):
         data = {
@@ -74,6 +84,26 @@ class TestLoadConfig:
         assert config.agent is not None
         assert config.agent.tools.external_enabled is True
         assert config.agent.tools.self_management_enabled is True
+
+    def test_graph_memory_config_can_be_overridden(self, tmp_path: Path):
+        data = {
+            "domain": "test",
+            "memory": {
+                "graph": {
+                    "enabled": False,
+                    "index_sources": ["facts", "skills"],
+                    "max_seed_nodes": 3,
+                    "max_traversal_steps": 2,
+                    "max_context_items": 5,
+                }
+            },
+        }
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+        assert config.memory.graph.enabled is False
+        assert config.memory.graph.index_sources == ["facts", "skills"]
+        assert config.memory.graph.max_seed_nodes == 3
+        assert config.memory.graph.max_traversal_steps == 2
+        assert config.memory.graph.max_context_items == 5
 
     def test_agent_external_tools_can_be_disabled_explicitly(self, tmp_path: Path):
         data = {

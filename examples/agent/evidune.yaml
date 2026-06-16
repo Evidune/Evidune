@@ -39,6 +39,12 @@ identities:
 memory:
   path: .evidune/agent-memory.db
   max_messages_per_conversation: 50
+  graph:
+    enabled: true
+    index_sources: [facts, skills, messages, harness_artifacts]
+    max_seed_nodes: 8
+    max_traversal_steps: 4
+    max_context_items: 12
 
 gateways:
   - type: cli

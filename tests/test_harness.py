@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.core import AgentCore
+from agent.graph_memory import GraphMemoryService
 from agent.llm import LLMClient
 from agent.skill_feedback import SkillFeedbackSummary
 from agent.tools.base import CompletionResult, Tool
@@ -180,16 +181,21 @@ def test_swarm_tool_permissions_respect_role_and_mode(tmp_path: Path, memory: Me
         memory=memory,
         tool_registry=external,
         harness_config=SimpleNamespace(strategy="swarm"),
+        graph_memory=GraphMemoryService(memory),
     )
 
     execute_tools = agent._swarm_tool_registries("task-1", "c1", None, "execute")
     assert "run_shell" in execute_tools["worker"].names()
     assert "set_fact" in execute_tools["worker"].names()
     assert "get_identity" in execute_tools["worker"].names()
+    assert "search_graph_memory" in execute_tools["worker"].names()
     assert "run_shell" not in execute_tools["planner"].names()
     assert "get_identity" in execute_tools["planner"].names()
+    assert "search_graph_memory" in execute_tools["planner"].names()
     assert "set_fact" not in execute_tools["critic"].names()
     assert "get_identity" in execute_tools["critic"].names()
+    assert "search_graph_memory" in execute_tools["critic"].names()
+    assert execute_tools["synthesizer"] is None
 
     plan_tools = agent._swarm_tool_registries("task-1", "c1", None, "plan")
     assert "run_shell" not in plan_tools["worker"].names()
