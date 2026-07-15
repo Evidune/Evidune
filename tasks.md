@@ -17,6 +17,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [ ] `docs/architecture.md` deep dive
 - [ ] Optional platform workflow skills as separate installable packages
 - [ ] Remote CI remediation loop on top of GitHub PR checks
+- [ ] External outcome commitments: ledger, declarative probes, sandboxed scorers (see docs/exec-plans/active/external-outcome-commitments.md)
 
 ## Completed
 
