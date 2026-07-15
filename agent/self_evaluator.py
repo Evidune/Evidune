@@ -37,6 +37,9 @@ class Evaluation:
     observed_metrics: dict[str, Any] | None = None
     missing_observations: list[str] | None = None
     contract_version: int = 1
+    # False when the judge output could not be parsed; invalid evaluations
+    # carry a diagnostic reasoning but must never be persisted as scores.
+    valid: bool = True
 
 
 _EVAL_PROMPT_TEMPLATE = """You are an impartial judge evaluating the quality of an AI assistant's response against a defined skill.
@@ -189,15 +192,21 @@ _SCORE_BLOB_RE = re.compile(r"\{[^{}]*\"score\"[^{}]*\}", re.DOTALL)
 _CONTRACT_SCORE_BLOB_RE = re.compile(r"\{[\s\S]*\"aggregate_score\"[\s\S]*\}", re.DOTALL)
 
 
-def _parse_response(raw: str) -> tuple[float, str]:
+def _parse_response(raw: str) -> tuple[float | None, str]:
     """Parse JSON {score, reasoning} from the LLM response.
 
-    Tolerant of surrounding text or markdown code fences.
+    Tolerant of surrounding text or markdown code fences. Returns a None
+    score when the response cannot be parsed at all.
     """
     data = parse_json_response(raw, hint_pattern=_SCORE_BLOB_RE)
     if data is None:
-        return 0.0, f"Unparseable evaluator response: {raw[:200]}"
-    score = float(data.get("score", 0.0))
+        return None, f"Unparseable evaluator response: {raw[:200]}"
+    if "score" not in data:
+        return None, f"Evaluator response has no score: {raw[:200]}"
+    try:
+        score = float(data["score"])
+    except (TypeError, ValueError):
+        return None, f"Non-numeric evaluator score: {raw[:200]}"
     score = max(0.0, min(1.0, score))
     reasoning = str(data.get("reasoning", "")).strip()
     return score, reasoning
@@ -267,7 +276,7 @@ def _weighted_score(contract: EvaluationContract, criteria_scores: dict[str, flo
 def _parse_contract_response(
     raw: str,
     contract: EvaluationContract,
-) -> tuple[float, dict[str, float], dict[str, Any], list[str], str]:
+) -> tuple[float | None, dict[str, float], dict[str, Any], list[str], str]:
     data = parse_json_response(raw, hint_pattern=_CONTRACT_SCORE_BLOB_RE)
     if data is None:
         score, reasoning = _parse_response(raw)
@@ -282,14 +291,17 @@ def _parse_contract_response(
                 continue
             criteria_scores[str(name)] = score
 
-    if "aggregate_score" not in data and not criteria_scores and "score" in data:
-        score, reasoning = _parse_response(raw)
-        missing = ["contract_criteria_not_scored"]
-        return score, {}, {}, missing, reasoning
+    if "aggregate_score" not in data and not criteria_scores:
+        if "score" in data:
+            score, reasoning = _parse_response(raw)
+            return score, {}, {}, ["contract_criteria_not_scored"], reasoning
+        # Valid JSON, but the judge scored nothing usable: not evidence.
+        reasoning = str(data.get("reasoning", "")).strip()
+        return None, {}, {}, ["contract_scores_missing"], reasoning
 
     try:
-        aggregate = float(data.get("aggregate_score"))
-    except (TypeError, ValueError):
+        aggregate = float(data["aggregate_score"])
+    except (KeyError, TypeError, ValueError):
         aggregate = _weighted_score(contract, criteria_scores)
     aggregate = max(0.0, min(1.0, aggregate))
 
@@ -353,18 +365,24 @@ class SelfEvaluator:
         )
         if contract is None:
             score, reasoning = _parse_response(raw)
-            return Evaluation(score=score, reasoning=reasoning, raw_response=raw)
+            return Evaluation(
+                score=score if score is not None else 0.0,
+                reasoning=reasoning,
+                raw_response=raw,
+                valid=score is not None,
+            )
         score, criteria_scores, observed, missing, reasoning = _parse_contract_response(
             raw, contract
         )
         return Evaluation(
-            score=score,
+            score=score if score is not None else 0.0,
             reasoning=reasoning,
             raw_response=raw,
             criteria_scores=criteria_scores,
             observed_metrics=observed,
             missing_observations=missing,
             contract_version=contract.version,
+            valid=score is not None,
         )
 
     async def discover_contract(

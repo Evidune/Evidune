@@ -1,5 +1,7 @@
 """Tests for agent/signal_collector.py."""
 
+import pytest
+
 from agent.signal_collector import Signal, aggregate, signals_from_dict
 
 
@@ -20,25 +22,56 @@ class TestAggregateBasics:
         assert result.confidence == -1.0
         assert result.has_strong_signal is True
 
-    def test_thumbs_up_plus_copy_saturates(self):
-        # 1.0 (thumbs) + 0.5 (copy) clamps at 1.0
-        result = aggregate([Signal("thumbs_up", True), Signal("copied", True)])
-        assert result.confidence == 1.0
-
     def test_copy_alone_is_partial(self):
         result = aggregate([Signal("copied", True)])
         assert result.confidence == 0.5
         assert result.has_strong_signal is False
 
-    def test_negative_signals_combine(self):
+    def test_repeated_weak_signals_do_not_saturate(self):
+        # Weak signals are averaged, so volume alone cannot reach ±1.0.
+        result = aggregate([Signal("copied", True)] * 3)
+        assert result.confidence == 0.5
+        assert result.sample_count == 3
+
+    def test_negative_weak_signals_average(self):
         result = aggregate([Signal("regenerated", True), Signal("edited_request", True)])
-        # -0.7 + -0.5 = -1.2 → clamped to -1.0
-        assert result.confidence == -1.0
+        # mean(-0.7, -0.5) = -0.6
+        assert result.confidence == pytest.approx(-0.6)
 
     def test_neutral_signals_dont_count(self):
         result = aggregate([Signal("topic_switch", True), Signal("silent", True)])
         assert result.confidence == 0.0
         assert result.sample_count == 0
+
+
+class TestPrecedence:
+    def test_thumbs_override_weak_signals(self):
+        # Two "copied" events must not dilute a thumbs_down.
+        result = aggregate(
+            [Signal("thumbs_down", True), Signal("copied", True), Signal("copied", True)]
+        )
+        assert result.confidence == -1.0
+        assert result.sample_count == 3
+
+    def test_thumbs_up_ignores_weak_negatives(self):
+        result = aggregate([Signal("thumbs_up", True), Signal("regenerated", True)])
+        assert result.confidence == 1.0
+
+    def test_mixed_thumbs_average(self):
+        result = aggregate([Signal("thumbs_up", True), Signal("thumbs_down", True)])
+        assert result.confidence == 0.0
+        assert result.has_strong_signal is True
+
+    def test_rating_overrides_thumbs_and_weak(self):
+        # Neutral rating decides confidence even next to a thumbs_up + copy.
+        result = aggregate([Signal("rating", 3), Signal("thumbs_up", True), Signal("copied", True)])
+        assert result.confidence == 0.0
+        assert result.sample_count == 3
+        assert result.has_strong_signal is True
+
+    def test_multiple_ratings_average(self):
+        result = aggregate([Signal("rating", 5), Signal("rating", 1)])
+        assert result.confidence == 0.0
 
 
 class TestRating:

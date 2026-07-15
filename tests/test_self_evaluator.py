@@ -62,10 +62,20 @@ class TestParseResponse:
         score, _ = _parse_response('{"score": -0.3, "reasoning": "x"}')
         assert score == 0.0
 
-    def test_unparseable_returns_zero(self):
+    def test_unparseable_returns_none(self):
         score, reasoning = _parse_response("garbage non-json output")
-        assert score == 0.0
+        assert score is None
         assert "Unparseable" in reasoning
+
+    def test_json_without_score_key_returns_none(self):
+        score, reasoning = _parse_response('{"reasoning": "I cannot evaluate this response"}')
+        assert score is None
+        assert "no score" in reasoning
+
+    def test_null_score_returns_none(self):
+        score, reasoning = _parse_response('{"score": null, "reasoning": "x"}')
+        assert score is None
+        assert "Non-numeric" in reasoning
 
 
 class TestSelfEvaluator:
@@ -126,6 +136,67 @@ class TestSelfEvaluator:
         prompt = judge.last_messages[0]["content"]
         # Should be truncated to ≤3000 occurrences (template has none)
         assert prompt.count("🚀") <= 3000
+
+    @pytest.mark.asyncio
+    async def test_unparseable_judge_output_marks_evaluation_invalid(self):
+        judge = MockJudge("garbage non-json output")
+        evaluator = SelfEvaluator(judge)
+        skill = _make_skill()
+
+        result = await evaluator.evaluate(skill, "x", "y")
+
+        assert result.valid is False
+        assert result.score == 0.0
+        assert "Unparseable" in result.reasoning
+
+    @pytest.mark.asyncio
+    async def test_unparseable_contract_judge_output_marks_evaluation_invalid(self):
+        judge = MockJudge("garbage non-json output")
+        evaluator = SelfEvaluator(judge)
+        skill = _make_contract_skill()
+
+        result = await evaluator.evaluate(skill, "x", "y", tool_trace=[])
+
+        assert result.valid is False
+        assert result.score == 0.0
+        assert result.missing_observations == ["contract_evaluation_unparseable"]
+
+    @pytest.mark.asyncio
+    async def test_judge_json_without_score_marks_evaluation_invalid(self):
+        judge = MockJudge('{"reasoning": "I cannot evaluate this response"}')
+        evaluator = SelfEvaluator(judge)
+        skill = _make_skill()
+
+        result = await evaluator.evaluate(skill, "x", "y")
+
+        assert result.valid is False
+        assert result.score == 0.0
+
+    @pytest.mark.asyncio
+    async def test_contract_judge_json_without_scores_marks_evaluation_invalid(self):
+        judge = MockJudge('{"reasoning": "I cannot evaluate this response"}')
+        evaluator = SelfEvaluator(judge)
+        skill = _make_contract_skill()
+
+        result = await evaluator.evaluate(skill, "x", "y", tool_trace=[])
+
+        assert result.valid is False
+        assert result.score == 0.0
+        assert result.missing_observations == ["contract_scores_missing"]
+
+    @pytest.mark.asyncio
+    async def test_contract_missing_aggregate_uses_weighted_criteria(self):
+        judge = MockJudge(
+            '{"criteria_scores": {"goal_completion": 0.8, "evidence_quality": 0.5},'
+            ' "reasoning": "ok"}'
+        )
+        evaluator = SelfEvaluator(judge)
+        skill = _make_contract_skill()
+
+        result = await evaluator.evaluate(skill, "x", "y", tool_trace=[])
+
+        assert result.valid is True
+        assert result.score == pytest.approx(0.8 * 0.6 + 0.5 * 0.4)
 
     @pytest.mark.asyncio
     async def test_contract_aware_evaluation_returns_details(self):

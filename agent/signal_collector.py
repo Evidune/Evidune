@@ -1,7 +1,7 @@
 """Signal aggregation for skill executions.
 
-Combines multiple weak signals (explicit ratings, copy events, implicit
-behaviour) into a single confidence score for an execution.
+Turns the signals observed for a single execution (explicit ratings, thumbs,
+implicit behaviour) into one confidence score for that execution.
 
 Signal types and weights:
   thumbs_up     +1.0   (strong positive)
@@ -13,9 +13,16 @@ Signal types and weights:
   silent         0.0   (neutral — no follow-up within timeout)
   rating_int     -1..+1 (numeric explicit rating, normalised)
 
-The aggregator does NOT just average — strong signals (thumbs / rating)
-override weak ones, and we report a confidence that grows with sample
-size.
+Aggregation is precedence-based, not additive. The strongest tier of
+evidence present decides the confidence:
+
+  1. rating signals  -> confidence = mean of normalised ratings
+  2. thumbs signals  -> confidence = mean of thumbs weights
+  3. weak signals    -> confidence = mean of non-neutral weights, clamped
+
+Lower-tier signals never dilute a stronger tier (a pile of "copied" events
+cannot outweigh a thumbs_down), but every observed signal still appears in
+the breakdown and every non-neutral one counts toward sample_count.
 """
 
 from __future__ import annotations
@@ -74,47 +81,53 @@ def _normalise_rating(value: Any) -> float:
 
 
 def aggregate(signals: list[Signal]) -> AggregatedSignal:
-    """Combine multiple signals into a single confidence score in [-1, 1].
+    """Aggregate one execution's signals into a confidence score in [-1, 1].
 
-    Behaviour:
-    - If a 'rating' signal is present, it takes precedence.
-    - Otherwise, sum weighted signals; saturate to [-1, 1].
-    - Returns sample_count = number of non-neutral signals observed.
+    The strongest evidence tier present wins outright:
+    - any 'rating' signals: confidence = mean of their normalised values;
+    - else any thumbs signals: confidence = mean of their weights;
+    - else: confidence = mean of non-neutral weak-signal weights.
+
+    sample_count counts all non-neutral signals (including those in tiers
+    that did not decide the confidence); the breakdown records every
+    observed signal.
     """
     if not signals:
         return AggregatedSignal(confidence=0.0, sample_count=0, has_strong_signal=False)
 
     breakdown: dict[str, Any] = {}
-    has_strong = False
-    total = 0.0
+    ratings: list[float] = []
+    thumbs: list[float] = []
+    weak: list[float] = []
     non_neutral = 0
 
     for sig in signals:
         if sig.type == "rating":
-            normalised = _normalise_rating(sig.value)
             breakdown["rating"] = sig.value
-            total += normalised
+            ratings.append(_normalise_rating(sig.value))
             non_neutral += 1
-            has_strong = True
             continue
 
-        weight = _SIGNAL_WEIGHTS.get(sig.type, 0.0)
         if sig.value is False:
             # An explicit False (e.g. "did not copy") — skip
             continue
 
+        weight = _SIGNAL_WEIGHTS.get(sig.type, 0.0)
         breakdown[sig.type] = sig.value
         if sig.type in _STRONG_SIGNALS:
-            has_strong = True
-        if weight != 0.0:
+            thumbs.append(weight)
             non_neutral += 1
-            total += weight
+        elif weight != 0.0:
+            weak.append(weight)
+            non_neutral += 1
 
-    confidence = max(-1.0, min(1.0, total))
+    decisive = ratings or thumbs or weak
+    confidence = (sum(decisive) / len(decisive)) if decisive else 0.0
+    confidence = max(-1.0, min(1.0, confidence))
     return AggregatedSignal(
         confidence=confidence,
         sample_count=non_neutral,
-        has_strong_signal=has_strong,
+        has_strong_signal=bool(ratings or thumbs),
         breakdown=breakdown,
     )
 
