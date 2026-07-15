@@ -21,6 +21,7 @@ from agent.llm import LLMClient
 from agent.pattern_detector import PatternDetector
 from agent.self_evaluator import SelfEvaluator
 from agent.skill_intent_detector import SkillIntentDetector
+from agent.skill_rewriter import propose_skill_rewrite
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
@@ -900,7 +901,7 @@ class AgentCore:
             execution_ids,
             tool_trace=tool_trace,
         )
-        lifecycle_updates = self._maybe_reconcile_skill_feedback(execution_skills)
+        lifecycle_updates = await self._maybe_reconcile_skill_feedback(execution_skills)
 
         # 9. Auto fact extraction (every N turns)
         extracted_count = await self._maybe_extract_facts(
@@ -1028,6 +1029,10 @@ class AgentCore:
                     tool_trace=tool_trace,
                 )
             except Exception:
+                continue
+            # Unparseable judge output is not evidence; keep it out of the
+            # score averages that drive rewrite/disable decisions.
+            if not evaluation.valid:
                 continue
             if self.memory.update_execution_score(
                 execution_id,
@@ -1208,7 +1213,7 @@ class AgentCore:
             "trigger_reason": decision.trigger_reason,
         }
 
-    def _maybe_reconcile_skill_feedback(self, skills: list) -> list[str]:
+    async def _maybe_reconcile_skill_feedback(self, skills: list) -> list[str]:
         """Use stored signals and evaluator scores through the shared governance harness."""
         updated: list[str] = []
         seen: set[str] = set()
@@ -1217,7 +1222,7 @@ class AgentCore:
             if skill.name in seen:
                 continue
             seen.add(skill.name)
-            if self.memory.resolve_skill_status(skill.name) != "active":
+            if self.memory.resolve_skill_status(skill.name) not in {"active", "observing"}:
                 continue
 
             current = skill.path.read_text(encoding="utf-8")
@@ -1233,9 +1238,22 @@ class AgentCore:
             if summary is None or (summary.signal_samples == 0 and summary.score_samples == 0):
                 continue
             workflow = IterationHarness(self.memory)
+            if workflow.rewrite_is_due(packet):
+                # LLM-proposed rewrite; the harness falls back to its template
+                # whenever the proposal is empty or fails the review gate.
+                packet.llm_rewrite_proposal = await propose_skill_rewrite(self.llm, packet)
             decision = workflow.run(packet=packet)
             if decision.decision in {"rollback", "disable"}:
                 self.skills.unregister(skill.name)
+                updated.append(skill.name)
+            elif decision.update.has_changes:
+                # A rewrite/refresh changed SKILL.md on disk; re-register so the
+                # observation window's evaluations measure the new instructions.
+                self.skills.register(
+                    parse_skill(skill.path),
+                    source=self._skill_origin(skill.name),
+                    status=decision.skill_status,
+                )
                 updated.append(skill.name)
 
         return updated

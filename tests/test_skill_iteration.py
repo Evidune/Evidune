@@ -240,15 +240,17 @@ class TestSkillSelfIteration:
 
         run_iteration(config, base_dir=tmp_path)
 
+        # Two negative executions clear the minimum-evidence gate for disable.
         store = MemoryStore(tmp_path / "memory.db")
         try:
-            store.record_execution(
-                skill_name="write-article",
-                user_input="write me an article",
-                assistant_output="bad output",
-                signals={"thumbs_down": True},
-                cross_model_score=0.1,
-            )
+            for _ in range(2):
+                store.record_execution(
+                    skill_name="write-article",
+                    user_input="write me an article",
+                    assistant_output="bad output",
+                    signals={"thumbs_down": True},
+                    cross_model_score=0.1,
+                )
         finally:
             store.close()
 

@@ -478,6 +478,33 @@ class TestAgentCore:
         assert response.metadata["evaluations_recorded"] == 1
 
     @pytest.mark.asyncio
+    async def test_unparseable_judge_output_is_not_persisted(
+        self, skill_registry: SkillRegistry, memory: MemoryStore
+    ):
+        llm = MockLLM("Hello! How can I help you?")
+        evaluator = SelfEvaluator(MockJudge("garbage non-json output"))
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            self_evaluator=evaluator,
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="greeting",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-eval-invalid",
+            )
+        )
+
+        # Invalid evaluations never become 0.0 scores in the store.
+        execution = memory.get_skill_executions("greet")[0]
+        assert execution["score"] is None
+        assert response.metadata["evaluations_recorded"] == 0
+
+    @pytest.mark.asyncio
     async def test_legacy_skill_discovers_contract_and_returns_evaluation_metadata(
         self, tmp_path: Path, memory: MemoryStore
     ):
@@ -642,17 +669,20 @@ class TestAgentCore:
         reg.load_directory(tmp_path / "skills")
         agent = AgentCore(llm=llm, skill_registry=reg, memory=memory)
 
-        await agent.handle(
-            InboundMessage(
-                text="greet me",
-                sender_id="u",
-                channel="cli",
-                conversation_id="c-disable-base",
+        # Two negative executions clear the minimum-evidence gate; a single
+        # thumbs_down must never disable a skill (covered below).
+        for _turn in range(2):
+            await agent.handle(
+                InboundMessage(
+                    text="greet me",
+                    sender_id="u",
+                    channel="cli",
+                    conversation_id="c-disable-base",
+                )
             )
-        )
-        execution = memory.get_skill_executions("greet")[0]
-        memory.update_execution_signals(execution["id"], {"thumbs_down": True})
-        memory.update_execution_score(execution["id"], 0.1, "Poor result")
+            execution = memory.get_skill_executions("greet")[0]
+            memory.update_execution_signals(execution["id"], {"thumbs_down": True})
+            memory.update_execution_score(execution["id"], 0.1, "Poor result")
 
         await agent.handle(
             InboundMessage(
@@ -666,6 +696,45 @@ class TestAgentCore:
         assert reg.get("greet") is None
         assert memory.get_skill_state("greet")["status"] == "disabled"
         assert skill_path.read_text(encoding="utf-8").startswith("---\nname: greet")
+
+    @pytest.mark.asyncio
+    async def test_harness_rewrite_reregisters_skill_from_disk(
+        self, llm: MockLLM, tmp_path: Path, memory: MemoryStore
+    ):
+        # After a rewrite, the live registry must serve the new instructions so
+        # the observation window's evaluations measure the rewritten content.
+        reg = SkillRegistry()
+        skill_path = _write_skill(
+            tmp_path / "skills" / "writer" / "SKILL.md",
+            "---\nname: writer\ndescription: Write articles\n---\n"
+            "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
+        )
+        reg.load_directory(tmp_path / "skills")
+        agent = AgentCore(llm=llm, skill_registry=reg, memory=memory)
+
+        # Contract evidence below rewrite_below_score drives a harness rewrite.
+        for score in (0.4, 0.5, 0.5):
+            execution_id = memory.record_execution(
+                skill_name="writer",
+                user_input="write",
+                assistant_output="draft",
+                cross_model_score=score,
+            )
+            memory.record_skill_evaluation(
+                execution_id=execution_id,
+                skill_name="writer",
+                aggregate_score=score,
+                criteria_scores={"goal_completion": score},
+            )
+
+        updated = await agent._maybe_reconcile_skill_feedback([reg.get("writer")])
+
+        assert updated == ["writer"]
+        on_disk = skill_path.read_text(encoding="utf-8")
+        assert "### Outcome-Backed Adjustments" in on_disk
+        assert memory.get_skill_state("writer")["status"] == "observing"
+        # The in-memory registry entry was re-parsed from disk, not left stale.
+        assert "Outcome-Backed Adjustments" in reg.get("writer").instructions
 
 
 class TestAgentWithIdentity:

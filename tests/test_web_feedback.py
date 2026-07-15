@@ -79,6 +79,15 @@ class TestHandleFeedback:
             "---\nname: s\ndescription: Test\n---\n\n## Instructions\nDo it.\n",
             encoding="utf-8",
         )
+        # Prior negative executions so the new thumbs_down clears the
+        # minimum-evidence gate for disabling.
+        for _ in range(2):
+            store.record_execution(
+                skill_name="s",
+                user_input="i",
+                assistant_output="o",
+                signals={"thumbs_down": True},
+            )
         eid = store.record_execution(
             skill_name="s", user_input="i", assistant_output="o", signals={}
         )
@@ -95,6 +104,28 @@ class TestHandleFeedback:
         assert store.get_emerged_skill("s")["status"] == "disabled"
         event = store.get_latest_skill_lifecycle_event("s", action="disable")
         assert event is not None
+
+    def test_single_thumbs_down_does_not_disable_skill(
+        self, gateway: WebGateway, store: MemoryStore, tmp_path: Path
+    ):
+        skill_path = tmp_path / "s" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        skill_path.write_text(
+            "---\nname: s\ndescription: Test\n---\n\n## Instructions\nDo it.\n",
+            encoding="utf-8",
+        )
+        eid = store.record_execution(
+            skill_name="s", user_input="i", assistant_output="o", signals={}
+        )
+        store.register_emerged_skill(name="s", status="active", path=str(skill_path))
+
+        result = gateway._handle_feedback(
+            {"execution_id": eid, "signal": "thumbs_down", "value": True}
+        )
+
+        assert result["lifecycle_decision"] != "disable"
+        assert result["skill_status"] == "active"
+        assert store.get_emerged_skill("s")["status"] == "active"
 
 
 class TestConversationEndpoints:

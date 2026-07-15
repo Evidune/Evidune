@@ -246,7 +246,7 @@ def test_iteration_harness_rewrites_skill(tmp_path: Path, memory: MemoryStore):
     )
 
     assert decision.decision == "rewrite"
-    assert decision.skill_status == "active"
+    assert decision.skill_status == "observing"
     updated = skill_path.read_text(encoding="utf-8")
     assert "Outcome-Backed Adjustments" in updated
     assert "Auto-updated by evidune" in updated

@@ -55,7 +55,9 @@ def update_outcome_skills(
                     )
                 )
             continue
-        if memory.resolve_skill_status(skill.name) != "active":
+        # Observing skills stay governed so their post-rewrite window can
+        # resolve to confirm or auto-rollback on the next run.
+        if memory.resolve_skill_status(skill.name) not in {"active", "observing"}:
             skill_updates.append(
                 UpdateResult(
                     path=str(skill.path),

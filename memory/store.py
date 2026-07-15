@@ -36,7 +36,7 @@ __all__ = ["MemoryStore", "Fact", "Message"]
 
 _PLAN_STATUSES = {"pending", "in_progress", "completed"}
 _CONVERSATION_MODES = {"plan", "execute"}
-_EMERGED_SKILL_STATUSES = {"active", "pending_review", "disabled", "rolled_back"}
+_EMERGED_SKILL_STATUSES = {"active", "observing", "pending_review", "disabled", "rolled_back"}
 _SKILL_STATE_ORIGINS = {"base", "emerged"}
 _GRAPH_NODE_TYPES = {"cue", "tag", "content"}
 _GRAPH_SOURCE_TYPES = {"", "fact", "message", "skill", "skill_reference", "harness_artifact"}
