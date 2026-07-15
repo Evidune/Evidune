@@ -47,6 +47,10 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Local-first delivery pipeline with branch / commit / optional GitHub PR flow
 - [x] Structured maintenance sweep with targeted follow-up tasks
 - [x] Richer web timeline UI for environment / validation / delivery summaries
+- [x] Harden self-iteration decision inputs (invalid judge scores, min-sample gates, no zero-evidence rewrites)
+- [x] LLM-backed skill rewrite proposals with template fallback and post-rewrite observation window
+- [x] Real safety-review checks for iteration harness proposals (honest audit trail)
+- [x] Precedence-based signal aggregation with per-execution normalization and recency decay
 
 ## Notes
 
