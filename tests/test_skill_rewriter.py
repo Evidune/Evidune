@@ -159,10 +159,10 @@ def _rewrite_inputs():
     return result, feedback
 
 
-def _candidate(memory: MemoryStore):
-    event = memory.get_latest_skill_lifecycle_event("writer", "candidate")
+def _rewrite_event(memory: MemoryStore):
+    event = memory.get_latest_skill_lifecycle_event("writer", "rewrite")
     assert event is not None
-    return memory.get_skill_experiment(event["evidence"]["experiment_id"]), event
+    return event
 
 
 class TestHarnessLLMProposalPreference:
@@ -184,11 +184,12 @@ class TestHarnessLLMProposalPreference:
         decision = IterationHarness(memory).run(packet=packet)
 
         assert decision.decision == "rewrite"
-        assert decision.skill_status == "candidate"
-        assert skill_path.read_text(encoding="utf-8") == CURRENT
-        candidate, event = _candidate(memory)
-        assert "Lead with a concrete hook drawn from exemplar A." in candidate["candidate_content"]
-        assert "Auto-updated by evidune" in candidate["candidate_content"]
+        assert decision.skill_status == "observing"
+        rewritten = skill_path.read_text(encoding="utf-8")
+        assert "Lead with a concrete hook drawn from exemplar A." in rewritten
+        assert "Auto-updated by evidune" in rewritten
+        assert "version: 1.0.1" in rewritten
+        event = _rewrite_event(memory)
         assert event["evidence"]["rewrite_source"] == "llm"
 
     def test_rejected_llm_proposal_falls_back_to_template(
@@ -211,10 +212,10 @@ class TestHarnessLLMProposalPreference:
         decision = IterationHarness(memory).run(packet=packet)
 
         assert decision.decision == "rewrite"
-        assert skill_path.read_text(encoding="utf-8") == CURRENT
-        candidate, event = _candidate(memory)
-        assert "description: Changed" not in candidate["candidate_content"]
-        assert "### Outcome-Backed Adjustments" in candidate["candidate_content"]
+        rewritten = skill_path.read_text(encoding="utf-8")
+        assert "description: Changed" not in rewritten
+        assert "### Outcome-Backed Adjustments" in rewritten
+        event = _rewrite_event(memory)
         assert event["evidence"]["rewrite_source"] == "template"
 
     def test_no_proposal_uses_template(self, tmp_path: Path, memory: MemoryStore):
@@ -232,9 +233,8 @@ class TestHarnessLLMProposalPreference:
         decision = IterationHarness(memory).run(packet=packet)
 
         assert decision.decision == "rewrite"
-        assert skill_path.read_text(encoding="utf-8") == CURRENT
-        candidate, event = _candidate(memory)
-        assert "### Outcome-Backed Adjustments" in candidate["candidate_content"]
+        assert "### Outcome-Backed Adjustments" in skill_path.read_text(encoding="utf-8")
+        event = _rewrite_event(memory)
         assert event["evidence"]["rewrite_source"] == "template"
 
     def test_holdout_executions_are_excluded_from_iteration_evidence(

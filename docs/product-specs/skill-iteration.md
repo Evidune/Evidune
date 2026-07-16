@@ -3,12 +3,13 @@
 This spec defines the behavior of Evidune's shared skill governance system after
 the swarm harness v1 and lifecycle-closure v2 passes.
 
-Skill iteration has two loops:
+Skill iteration has two runtime loops and one explicit evaluation loop:
 
 - `evidune run`: outcome-driven updates to existing skills
 - `evidune serve`: conversation-driven emergence of new skills
+- `evidune eval`: immutable candidate, replay, holdout, and promotion experiments
 
-Both loops share skill-specific execution contracts. An execution contract can
+All three surfaces share skill-specific execution contracts. An execution contract can
 be authored in `SKILL.md`, generated with a new skill, or discovered at runtime
 for legacy skills. It defines the success criteria, observable signals,
 failure modes, and thresholds for execution-quality governance. Outcome-driven
@@ -36,6 +37,16 @@ evidence layer and the skill definition itself.
   signals, evaluator scores, and the recent performance history of the skill
 - The loop may decide to keep the current skill unchanged, rewrite it, or roll
   it back to a previous version when newer edits underperform
+- `run`, `serve`, and web feedback apply an approved update by atomically
+  replacing the active `SKILL.md`; no manual update or promotion step is
+  required
+- Every changed runtime Skill receives a new version. A rewrite enters
+  `observing`, is reloaded into the live registry immediately, and is used by
+  the next matching execution
+- Post-rewrite evidence automatically confirms the new version or restores the
+  prior file. Runtime rollback leaves the restored Skill `active`
+- `evidune eval` remains intentionally separate: it stages immutable candidates
+  and requires its configured replay, holdout, or promotion gates
 - The decision workflow is recorded as a harness task with the roles
   `evidence_collector`, `rewrite_proposer`, `safety_reviewer`, and
   `lifecycle_arbiter`
@@ -106,7 +117,9 @@ Skill self-iteration needs a durable lifecycle model instead of one-off writes.
 - `pending_review` is reserved for explicit manual hold or operator override,
   not the default path
 - `disabled` marks skills removed from matching but preserved for audit
-- `rolled_back` records skills or rewrites reverted after negative evidence
+- `rolled_back` remains available for explicit evaluation-experiment history;
+  runtime auto-rollback restores the previous version and returns the Skill to
+  `active`
 - Every activation, rewrite, disable, and rollback must store the reason and
   evidence used to make that decision, plus the `harness_task_id` when the
   change came from the governance workflow
@@ -129,6 +142,8 @@ Feedback and evaluation signals must feed the same decision loop.
 - `evidune run`, automatic feedback reconciliation in `serve`, and the web
   feedback handler must all invoke the same governance workflow rather than
   mutating lifecycle state independently
+- An unresolved `evidune eval` candidate must not block runtime self-iteration;
+  later promotion still verifies that the active parent digest has not changed
 
 ## Acceptance Scenarios
 
@@ -142,11 +157,18 @@ Feedback and evaluation signals must feed the same decision loop.
   external metrics are configured
 - A skill with an explicit `outcome_contract` can rewrite its core instructions,
   not only replace a reference section
+- A runtime rewrite replaces the active file, increments its version, reloads
+  the live registry, and requires no user action before the next execution
+- A regressing runtime rewrite restores the previous file automatically and the
+  restored Skill remains matchable
+- Explicit `evidune eval` iteration still stages an immutable candidate without
+  modifying the active file
 - Every automatic change leaves an auditable record that explains why it
   happened
 - Each outcome iteration run persists a harness task, step, and artifact trail
 - After restart, `disabled`, `rolled_back`, and `pending_review` skills do not
-  re-enter the live registry
+  re-enter the live registry; runtime auto-rollback records the event but keeps
+  the restored Skill `active`
 
 ## Current Gaps
 

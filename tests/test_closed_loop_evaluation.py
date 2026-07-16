@@ -62,7 +62,7 @@ async def test_execution_failures_produce_validated_promotable_candidate(tmp_pat
             store,
             skill=skill,
             current=parent_content,
-            surface="run",
+            surface="eval",
             task_kind="closed_loop_test",
         )
     )

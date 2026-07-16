@@ -247,13 +247,14 @@ def test_iteration_harness_rewrites_skill(tmp_path: Path, memory: MemoryStore):
     )
 
     assert decision.decision == "rewrite"
-    assert decision.skill_status == "candidate"
-    assert "Outcome-Backed Adjustments" not in skill_path.read_text(encoding="utf-8")
-    event = memory.get_latest_skill_lifecycle_event("writer", "candidate")
-    candidate = memory.get_skill_experiment(event["evidence"]["experiment_id"])
-    assert "Outcome-Backed Adjustments" in candidate["candidate_content"]
-    assert "Auto-updated by evidune" in candidate["candidate_content"]
-    assert f"version: {candidate['candidate_version']}" in candidate["candidate_content"]
+    assert decision.skill_status == "observing"
+    rewritten = skill_path.read_text(encoding="utf-8")
+    assert "Outcome-Backed Adjustments" in rewritten
+    assert "Auto-updated by evidune" in rewritten
+    assert "version: 1.0.1" in rewritten
+    event = memory.get_latest_skill_lifecycle_event("writer", "rewrite")
+    assert event["content_before"] != event["content_after"]
+    assert memory.list_skill_experiments("writer", status="candidate") == []
 
 
 def test_iteration_harness_rewrites_from_contract_evidence_without_metrics(
@@ -311,11 +312,12 @@ def test_iteration_harness_rewrites_from_contract_evidence_without_metrics(
     )
 
     assert decision.decision == "rewrite"
-    event = memory.get_latest_skill_lifecycle_event("triage", "candidate")
-    candidate = memory.get_skill_experiment(event["evidence"]["experiment_id"])
-    assert "Execution Contract Evidence" in candidate["candidate_content"]
-    assert "Average score" in candidate["candidate_content"]
-    assert "Execution Contract Evidence" not in skill_path.read_text(encoding="utf-8")
+    assert decision.skill_status == "observing"
+    rewritten = skill_path.read_text(encoding="utf-8")
+    assert "Execution Contract Evidence" in rewritten
+    assert "Average score" in rewritten
+    event = memory.get_latest_skill_lifecycle_event("triage", "rewrite")
+    assert event["content_after"] == rewritten
 
 
 def test_typed_failures_create_candidate_without_numeric_scores(
@@ -381,12 +383,11 @@ def test_typed_failures_create_candidate_without_numeric_scores(
     decision = IterationHarness(memory).run(packet=packet)
 
     assert decision.decision == "rewrite"
-    assert decision.skill_status == "candidate"
-    event = memory.get_latest_skill_lifecycle_event("triage", "candidate")
-    experiment = memory.get_skill_experiment(event["evidence"]["experiment_id"])
-    assert experiment["source_execution_ids"] == execution_ids
-    assert "skipped_verification" in experiment["candidate_content"]
-    assert skill_path.read_text(encoding="utf-8").endswith("Diagnose with evidence.\n")
+    assert decision.skill_status == "observing"
+    event = memory.get_latest_skill_lifecycle_event("triage", "rewrite")
+    assert event["evidence"]["source_execution_ids"] == execution_ids
+    assert "skipped_verification" in skill_path.read_text(encoding="utf-8")
+    assert "version: 1.0.1" in skill_path.read_text(encoding="utf-8")
 
 
 def test_iteration_harness_disables_from_contract_threshold(tmp_path: Path, memory: MemoryStore):
@@ -540,7 +541,7 @@ def test_iteration_harness_disables_base_skill_without_rewrite_history(
     assert memory.get_skill_state("base-writer")["status"] == "disabled"
 
 
-def test_iteration_harness_rejects_candidate_after_negative_feedback(
+def test_eval_iteration_rejects_candidate_after_negative_feedback(
     tmp_path: Path, memory: MemoryStore
 ):
     skill_path = _write(
@@ -577,7 +578,7 @@ def test_iteration_harness_rejects_candidate_after_negative_feedback(
             current=skill_path.read_text(encoding="utf-8"),
             feedback=positive_feedback,
             result=positive,
-            surface="run",
+            surface="eval",
             task_kind="skill_iteration",
         )
     )
@@ -600,7 +601,7 @@ def test_iteration_harness_rejects_candidate_after_negative_feedback(
             current=skill_path.read_text(encoding="utf-8"),
             feedback=negative,
             result=positive,
-            surface="run",
+            surface="eval",
             task_kind="skill_iteration",
         )
     )
@@ -612,3 +613,55 @@ def test_iteration_harness_rejects_candidate_after_negative_feedback(
     experiment = memory.get_skill_experiment(event["evidence"]["experiment_id"])
     assert experiment["status"] == "rejected"
     assert memory.get_skill_state("writer")["status"] == "active"
+
+
+def test_runtime_iteration_is_not_blocked_by_eval_candidate(tmp_path: Path, memory: MemoryStore):
+    skill_path = _write(
+        tmp_path / "skills" / "writer" / "SKILL.md",
+        "---\nname: writer\ndescription: Write\nversion: 1.0.0\n"
+        "outcome_contract:\n  entity: article\n  primary_kpi: reads\n---\n"
+        "## Instructions\nWrite helpful content.\n\n## Reference Data\nplaceholder\n",
+    )
+    registry = SkillRegistry()
+    registry.load_directory(tmp_path / "skills")
+    skill = registry.get("writer")
+    result = SimpleNamespace(
+        top_performers=[SimpleNamespace(title="A", metrics={"reads": 100})],
+        patterns=["Use concrete examples"],
+    )
+    feedback = SkillFeedbackSummary(
+        signal_confidence=0.8,
+        signal_samples=3,
+        has_strong_signal=True,
+        average_score=0.9,
+        score_samples=2,
+        combined_confidence=0.8,
+        should_rewrite=True,
+        should_disable=False,
+        evidence={"average_score": 0.9},
+    )
+    workflow = IterationHarness(memory)
+    candidate = workflow.run(
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            feedback=feedback,
+            result=result,
+            surface="eval",
+        )
+    )
+    runtime = workflow.run(
+        packet=build_decision_packet(
+            memory,
+            skill=skill,
+            current=skill_path.read_text(encoding="utf-8"),
+            feedback=feedback,
+            result=result,
+            surface="run",
+        )
+    )
+
+    assert candidate.skill_status == "candidate"
+    assert runtime.skill_status == "observing"
+    assert "Outcome-Backed Adjustments" in skill_path.read_text(encoding="utf-8")

@@ -20,20 +20,21 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
   - [x] Persist immutable execution/contract lineage and typed evaluation verdicts
   - [x] Link immediate and delayed evidence to exact execution ids and Skill versions
   - [x] Add isolated read-only probes, attribution grades, and version-level aggregation
-  - [x] Stage immutable candidates and add replay, holdout-gated promotion, rejection, and rollback
+  - [x] Stage immutable candidates in explicit `evidune eval` runs and add replay, holdout-gated promotion, rejection, and rollback
   - [x] Add pinned `EvaluationCorpus` manifests and a generic `BenchmarkAdapter` contract
   - [x] Add three reviewed official Skills with source-matched faithful fixtures and real-LLM smoke evidence
   - [x] Pin and verify a separate 30-task AppWorld corpus plus a three-task repeated live slice with one development and two source-disjoint holdout tasks; pair sources only where capabilities genuinely match
   - [ ] Complete the full 20-to-30-task repeated AppWorld release run and publish its immutable report bundle
   - [ ] Complete real-corpus and production canary validation; deterministic, replay, and opt-in live-LLM layers are implemented
   - [x] Add known-bad Skill mutation tests and a hidden holdout promotion gate
-  - Acceptance: every automatic promotion or rollback is reproducible from its source executions, evidence, contracts, corpus/model/environment revisions, and validation artifacts; at least one known mutation is detected, repaired into a candidate, and validated with a real LLM on hidden tasks without a hard-gate regression
+  - Acceptance: every evaluation promotion or rollback is reproducible from its source executions, evidence, contracts, corpus/model/environment revisions, and validation artifacts; at least one known mutation is detected, repaired into a candidate, and validated with a real LLM on hidden tasks without a hard-gate regression
 
 ## Completed
 
 - [x] Initial framework: gateway / agent / skills / memory / core / channels / adapters
 - [x] Vite + Svelte web UI with chat interface
 - [x] Skill self-iteration wired into the iteration loop (Evidune differentiator)
+- [x] Runtime Skill iteration atomically replaces the active version, reloads it immediately, and automatically confirms or rolls it back
 - [x] Pre-commit hooks + commitlint + AGENTS.md collaboration baseline
 - [x] Docs knowledge base skeleton with architecture, quality, reliability, and tech debt records
 - [x] Repo docs lint, CI workflow, and structural guardrails

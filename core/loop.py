@@ -1016,6 +1016,8 @@ async def serve(
     for gw in gateways_list:
         if isinstance(gw, WebGateway):
             gw.set_skill_provider(lambda: _skill_records_payload(skill_registry, memory))
+            gw.set_skill_lookup(skill_registry.get)
+            gw.set_skill_change_handler(agent._reload_governed_skill)
             gw.set_memory_store(memory)
 
     router = Router(agent=agent, gateways=gateways_list)

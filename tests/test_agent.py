@@ -772,11 +772,9 @@ class TestAgentCore:
         assert skill_path.read_text(encoding="utf-8").startswith("---\nname: greet")
 
     @pytest.mark.asyncio
-    async def test_harness_rewrite_stages_candidate_without_changing_active_skill(
+    async def test_harness_rewrite_replaces_active_skill_and_reloads_registry(
         self, llm: MockLLM, tmp_path: Path, memory: MemoryStore
     ):
-        # Automatic rewrites stage candidates; the active registry and file do
-        # not change until execution-grounded promotion succeeds.
         reg = SkillRegistry()
         skill_path = _write_skill(
             tmp_path / "skills" / "writer" / "SKILL.md",
@@ -805,12 +803,13 @@ class TestAgentCore:
 
         assert updated == ["writer"]
         on_disk = skill_path.read_text(encoding="utf-8")
-        assert "### Outcome-Backed Adjustments" not in on_disk
-        assert memory.get_skill_state("writer")["status"] == "active"
-        event = memory.get_latest_skill_lifecycle_event("writer", "candidate")
-        experiment = memory.get_skill_experiment(event["evidence"]["experiment_id"])
-        assert "Outcome-Backed Adjustments" in experiment["candidate_content"]
-        assert "Outcome-Backed Adjustments" not in reg.get("writer").instructions
+        assert "### Outcome-Backed Adjustments" in on_disk
+        assert "version: 1.0.1" in on_disk
+        assert memory.get_skill_state("writer")["status"] == "observing"
+        event = memory.get_latest_skill_lifecycle_event("writer", "rewrite")
+        assert event["content_after"] == on_disk
+        assert "Outcome-Backed Adjustments" in reg.get("writer").instructions
+        assert reg.get("writer").version == "1.0.1"
 
 
 class TestAgentWithIdentity:

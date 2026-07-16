@@ -1412,24 +1412,36 @@ class AgentCore:
                 # whenever the proposal is empty or fails the review gate.
                 packet.llm_rewrite_proposal = await propose_skill_rewrite(self.llm, packet)
             decision = workflow.run(packet=packet)
-            if decision.decision in {"rollback", "disable"}:
-                self.skills.unregister(skill.name)
+            if decision.decision in {"disable", "confirm"} or decision.update.has_changes:
+                self._reload_governed_skill(
+                    skill.name,
+                    str(skill.path),
+                    decision.skill_status,
+                )
                 updated.append(skill.name)
             elif decision.skill_status == "candidate":
-                # The active registry intentionally stays on the parent until
-                # an execution-grounded experiment promotes the candidate.
-                updated.append(skill.name)
-            elif decision.update.has_changes:
-                # A rewrite/refresh changed SKILL.md on disk; re-register so the
-                # observation window's evaluations measure the new instructions.
-                self.skills.register(
-                    parse_skill(skill.path),
-                    source=self._skill_origin(skill.name),
-                    status=decision.skill_status,
-                )
+                # Only the explicit eval surface stages candidates.
                 updated.append(skill.name)
 
         return updated
+
+    def _reload_governed_skill(
+        self,
+        skill_name: str,
+        skill_path: str,
+        skill_status: str,
+    ) -> None:
+        """Synchronize the live registry after automatic lifecycle changes."""
+        if skill_status == "disabled":
+            self.skills.unregister(skill_name)
+            return
+        path = Path(skill_path)
+        if path.is_file():
+            self.skills.register(
+                parse_skill(path),
+                source=self._skill_origin(skill_name),
+                status=skill_status,
+            )
 
     async def _maybe_emerge_skill(
         self,

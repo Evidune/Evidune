@@ -41,15 +41,14 @@ class TestInitProject:
         try:
             runs = store.list_iteration_runs()
             assert len(runs) == 1
-            candidates = store.list_skill_experiments("task-execution", status="candidate")
-            assert len(candidates) == 1
-            assert "Auto-updated by evidune" in candidates[0]["candidate_content"]
+            assert store.list_skill_experiments("task-execution", status="candidate") == []
         finally:
             store.close()
         active = (project_dir / "skills" / "task-execution" / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        assert "Auto-updated by evidune" not in active
+        assert "Auto-updated by evidune" in active
+        assert "version: 1.0.1" in active
 
     def test_init_project_refuses_to_overwrite_existing_files(self, tmp_path: Path):
         project_dir = tmp_path / "demo"
@@ -70,8 +69,9 @@ def test_bundled_agent_example_runs_one_iteration(tmp_path: Path):
     assert (copied / ".evidune" / "agent-memory.db").exists()
     store = MemoryStore(copied / ".evidune" / "agent-memory.db")
     try:
-        candidates = store.list_skill_experiments("task-execution", status="candidate")
-        assert len(candidates) == 1
-        assert "Auto-updated by evidune" in candidates[0]["candidate_content"]
+        assert store.list_skill_experiments("task-execution", status="candidate") == []
     finally:
         store.close()
+    assert "Auto-updated by evidune" in (
+        copied / "skills" / "task-execution" / "SKILL.md"
+    ).read_text(encoding="utf-8")

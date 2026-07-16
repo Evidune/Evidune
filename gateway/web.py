@@ -42,6 +42,8 @@ class WebGateway(Gateway):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._skills_json: str = "[]"
         self._skill_provider: Any = None
+        self._skill_lookup: Any = None
+        self._skill_change_handler: Any = None
         self._memory_store: Any = None  # Optional MemoryStore for /api/feedback
 
     def set_skills(self, skills: list[dict[str, str]]) -> None:
@@ -50,6 +52,14 @@ class WebGateway(Gateway):
     def set_skill_provider(self, provider: Any) -> None:
         """Wire a dynamic skill metadata provider for /api/skills."""
         self._skill_provider = provider
+
+    def set_skill_lookup(self, lookup: Any) -> None:
+        """Wire runtime Skill lookup without coupling the gateway to the skills package."""
+        self._skill_lookup = lookup
+
+    def set_skill_change_handler(self, handler: Any) -> None:
+        """Wire live registry synchronization after feedback-driven changes."""
+        self._skill_change_handler = handler
 
     def set_memory_store(self, store: Any) -> None:
         """Wire a MemoryStore so /api/feedback can persist signals."""
@@ -385,24 +395,23 @@ class WebGateway(Gateway):
         rolled_back = False
         if skill_name:
             skill_state = self._memory_store.get_skill_state(skill_name)
-            skill_path = (skill_state or {}).get("path", "")
+            skill = self._skill_lookup(skill_name) if self._skill_lookup else None
+            skill_path = (skill_state or {}).get("path", "") or str(getattr(skill, "path", ""))
             if skill_path or skill_state is not None:
                 try:
                     from agent.iteration_harness import IterationHarness, build_decision_packet
 
-                    skill = SimpleNamespace(
-                        name=skill_name,
-                        version=str(execs.get("skill_version") or ""),
-                        path=skill_path,
-                        update_section="## Reference Data",
-                        execution_contract=None,
-                        outcome_contract=None,
-                    )
-                    current = (
-                        Path(skill_path).read_text(encoding="utf-8")
-                        if skill_path and Path(skill_path).is_file()
-                        else ""
-                    )
+                    path = Path(skill_path)
+                    if skill is None:
+                        skill = SimpleNamespace(
+                            name=skill_name,
+                            version=str(execs.get("skill_version") or ""),
+                            path=skill_path,
+                            update_section="## Reference Data",
+                            execution_contract=None,
+                            outcome_contract=None,
+                        )
+                    current = path.read_text(encoding="utf-8") if path.is_file() else ""
                     workflow = IterationHarness(self._memory_store)
                     decision = workflow.run(
                         packet=build_decision_packet(
@@ -419,6 +428,10 @@ class WebGateway(Gateway):
                     skill_status = decision.skill_status
                     harness_task_id = decision.task.id
                     rolled_back = decision.decision == "rollback"
+                    if self._skill_change_handler and (
+                        decision.decision in {"disable", "confirm"} or decision.update.has_changes
+                    ):
+                        self._skill_change_handler(skill_name, skill_path, skill_status)
                 except Exception:
                     pass
         return {

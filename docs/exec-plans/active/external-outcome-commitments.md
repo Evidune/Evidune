@@ -14,8 +14,12 @@ actually did and how that Skill changes over time:
 2. immediate execution evidence and delayed external evidence link to that execution
 3. typed evaluators produce structured verdicts without requiring one universal score
 4. evidence is attributed and aggregated at the Skill-version level
-5. regressions create a candidate Skill version rather than mutating the active version
-6. replay, shadow, or canary validation promotes or rolls back the candidate
+5. explicit `evidune eval` regressions create a candidate Skill version without
+   mutating the active version
+6. replay, shadow, or canary validation promotes or rejects that evaluation candidate
+7. normal `run`, `serve`, and web-feedback iteration atomically replaces the active
+   runtime Skill, then automatically confirms it or restores the prior version from
+   post-rewrite evidence
 
 Deploy stability, recommendation performance, and published-content engagement are
 illustrative cases only. They must use the same execution, evidence, evaluation, and
@@ -31,8 +35,11 @@ iteration protocol as any future domain; they do not define the schema.
   advisory judgments. A normalized numeric score is optional.
 - Hard safety, permission, and correctness failures cannot be offset by strong latency,
   cost, or business metrics.
-- An active Skill is never rewritten in place. Automatic iteration uses a candidate
-  version with explicit validation, promotion, and rollback evidence.
+- Explicit `evidune eval` iteration never rewrites the active Skill in place; it uses a
+  candidate version with validation, promotion, and rollback evidence.
+- Runtime self-iteration requires no manual promotion: approved updates atomically replace
+  `SKILL.md`, increment the version, reload the live registry, and enter an automatic
+  observation window.
 - Adding a new domain normally requires a declarative contract and an allowlisted probe
   or evaluator, not a new domain-specific orchestration path.
 - A pinned real-world corpus can pair third-party Skills with executable tasks while
@@ -62,8 +69,12 @@ iteration protocol as any future domain; they do not define the schema.
   deterministic evaluation.
 - Version-specific aggregation reports contributing and excluded execution ids instead of
   pooling by Skill name.
-- Automatic iteration stages immutable candidate content in a `SkillVersionExperiment`;
-  the active `SKILL.md` remains unchanged until explicit validation and promotion.
+- Explicit `evidune eval` iteration stages immutable candidate content in a
+  `SkillVersionExperiment`; the active `SKILL.md` remains unchanged until validation and
+  promotion.
+- Runtime `run`, `serve`, and web-feedback iteration applies reviewed changes directly,
+  preserves the previous full content in lifecycle history, and automatically confirms or
+  rolls back the new version.
 - `EvaluationCorpus`, fixture and AppWorld adapters, real-LLM executors, replay, JSON,
   Markdown, and JUnit artifacts, seven known-bad mutation operators, and lifecycle commands
   are implemented.
@@ -87,6 +98,7 @@ iteration protocol as any future domain; they do not define the schema.
 | Binding, probe, lease, and delayed observation    | implemented | allowlisted read-only registry, idempotent scheduler, retry tests                                                                                                                                     |
 | Version aggregation and attribution               | implemented | version/contract grouping with contributing and excluded execution ids                                                                                                                                |
 | Candidate, replay, promotion, rejection, rollback | implemented | immutable candidate plus digest, provenance, and holdout promotion gates                                                                                                                              |
+| Runtime automatic replacement and observation     | implemented | atomic active-file replacement, version bump, live registry reload, post-rewrite confirmation, and automatic restore                                                                                  |
 | Corpus, adapter, reports, and mutation tests      | implemented | fixture/AppWorld contracts, JSON/Markdown/JUnit bundles, seven mutation operators                                                                                                                     |
 | Real-LLM smoke                                    | validated   | Codex `gpt-5.4`, experiment `exp_bb0b251ffcac4a31b891fc38d7b2ba70`, 2/2 valid trials                                                                                                                  |
 | Official third-party Skill fixtures               | validated   | three source-matched pairings; real-LLM experiments `exp_201b12aea1cd48e5a82045c5ee08912d`, `exp_c32e364a8d634db99cf1c4adcf7beb6d`, `exp_a147935a24ff4435a33ec6bd478c4816`                            |
@@ -651,7 +663,8 @@ Acceptance:
 
 ### Phase 5: Candidate Skill experiments
 
-- Generate candidate versions instead of rewriting the active file in place.
+- For explicit `evidune eval` runs, generate candidate versions instead of rewriting the
+  active file in place.
 - Add replay, shadow, canary, promotion, rejection, and rollback lifecycle events.
 - Connect the lifecycle to the existing iteration harness and safety review.
 - Add Skill-free, parent, candidate, and mutation experiment configurations with paired
@@ -844,8 +857,8 @@ Probe health must never silently become a Skill-quality signal.
 - New execution, binding, observation, and evaluation records are additive and append-only.
 - Disabling the probe scheduler returns delayed evaluation to imported adapters without
   deleting evidence.
-- Disabling automatic iteration leaves evaluation and candidate proposals available for
-  review without changing the active Skill pointer.
+- Disabling runtime automatic iteration leaves explicit evaluation and candidate proposals
+  available for review without changing the active Skill.
 - A promoted Skill retains its predecessor and validation record so rollback is a pointer
   change plus lifecycle event, not reconstruction from chat history.
 - Evaluator implementations remain behind one interface so an engine can be replaced

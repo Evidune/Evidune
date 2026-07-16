@@ -4,7 +4,7 @@
 
 Evidune 是一个面向 AI agents 的结果驱动型技能自进化框架。
 
-它把真实运行结果转化为技能更新：记录实际执行的精确 Skill 版本，把即时和延迟证据绑定到该次执行，并在候选改进替换活动 Skill 前完成验证。
+它把真实运行结果转化为技能更新：记录实际执行的精确 Skill 版本，把即时和延迟证据绑定到该次执行，并在运行时审查通过后自动替换活动 Skill。新版本会被自动观察，发生退化时自动回滚；显式 `evidune eval` 仍保留不可变候选、replay、holdout 和晋级实验。
 
 ## 状态
 
@@ -182,6 +182,10 @@ Evidune 通过两条路径改进 skill：
 [docs/product-specs/skill-iteration.md](docs/product-specs/skill-iteration.md)。
 
 ## 基于真实执行的评价闭环
+
+普通的 `evidune run`、`evidune serve` 和 Web 反馈迭代不再等待用户手动晋级。
+审查通过后会原子替换 `SKILL.md`、递增版本、立即重载运行时 registry，并进入自动
+观察窗口。下面的候选流程仅用于显式 `evidune eval` 实验。
 
 Evidune 不要求所有领域都压缩成一个归一化数值分数。Evaluator 返回
 `pass`、`fail`、`inconclusive`、`censored` 或 `invalid` 等类型化结果，并携带

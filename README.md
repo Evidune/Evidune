@@ -6,7 +6,10 @@ Outcome-driven skill self-evolution framework for AI agents.
 
 Evidune turns real outcomes into skill updates. It records the exact Skill
 version that executed, binds immediate and delayed evidence to that execution,
-and validates candidate improvements before they can replace the active Skill.
+and automatically replaces the active runtime Skill after review. Runtime
+rewrites are observed and rolled back automatically when they regress; the
+explicit `evidune eval` workflow keeps immutable candidates for replay,
+holdout, and promotion experiments.
 
 ## Status
 
@@ -235,6 +238,12 @@ comes from configured runtime tools and their security boundary. See
 for the deeper product model.
 
 ## Execution-Grounded Evaluation
+
+Normal `evidune run`, `evidune serve`, and web-feedback iteration does not wait
+for a manual promotion command. An approved update atomically replaces
+`SKILL.md`, increments its version, reloads the live registry, and opens an
+automatic observation window. The candidate flow below is specific to explicit
+`evidune eval` experiments.
 
 Evidune does not require every domain to produce one normalized numeric score.
 Evaluators return typed results such as `pass`, `fail`, `inconclusive`,

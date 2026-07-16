@@ -116,8 +116,8 @@ class TestObservationWindow:
         decision = _second_run(memory, skill, skill_path)
 
         assert decision.decision == "rollback"
-        assert decision.skill_status == "rolled_back"
-        assert memory.get_skill_state("writer")["status"] == "rolled_back"
+        assert decision.skill_status == "active"
+        assert memory.get_skill_state("writer")["status"] == "active"
         restored = skill_path.read_text(encoding="utf-8")
         assert "Write helpful content." in restored
         assert "### Outcome-Backed Adjustments" not in restored
@@ -255,7 +255,7 @@ class TestRunOnlyObservationWindow:
         decision = _second_run(memory, skill, skill_path)
 
         assert decision.decision == "rollback"
-        assert memory.get_skill_state("writer")["status"] == "rolled_back"
+        assert memory.get_skill_state("writer")["status"] == "active"
         assert "### Outcome-Backed Adjustments" not in skill_path.read_text(encoding="utf-8")
 
     def test_holds_until_enough_outcome_windows(self, tmp_path: Path, memory: MemoryStore):

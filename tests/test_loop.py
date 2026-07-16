@@ -120,9 +120,9 @@ class TestIterationLedger:
         assert run["metrics_source"] == str(tmp_path / "data.csv")
         assert run["commit_sha"] is None
         assert any(
-            update["path"].startswith("candidate://")
-            and update["strategy"].endswith("_candidate")
-            and not update["has_changes"]
+            update["path"].endswith("skills/write-article/SKILL.md")
+            and update["strategy"] in {"skill_rewrite", "skill_refresh"}
+            and update["has_changes"]
             for update in run["updates"]
         )
         assert any(

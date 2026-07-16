@@ -105,7 +105,7 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
 
 
 class TestSkillSelfIteration:
-    def test_stages_outcome_skill_candidate_without_mutating_active(self, tmp_path: Path):
+    def test_replaces_outcome_skill_automatically(self, tmp_path: Path):
         cfg_path = _setup_project(tmp_path)
         config = load_config(cfg_path)
         skill_path = tmp_path / "skills" / "write-article" / "SKILL.md"
@@ -113,15 +113,16 @@ class TestSkillSelfIteration:
 
         run_iteration(config, base_dir=tmp_path)
 
-        assert skill_path.read_text() == original
+        skill_content = skill_path.read_text()
+        assert skill_content != original
         store = MemoryStore(tmp_path / "memory.db")
         try:
-            candidates = store.list_skill_experiments("write-article", status="candidate")
-            assert len(candidates) == 1
-            skill_content = candidates[0]["candidate_content"]
+            assert store.list_skill_experiments("write-article", status="candidate") == []
+            assert store.get_skill_state("write-article")["status"] == "observing"
         finally:
             store.close()
 
+        assert "version: 1.0.1" in skill_content
         assert "KPI Window: reads" in skill_content
         assert "Current value:" in skill_content
         assert "Baseline value:" in skill_content
@@ -164,10 +165,14 @@ class TestSkillSelfIteration:
 
         report = run_iteration(config, base_dir=tmp_path)
 
-        candidates = [u for u in report.updates if u.strategy.endswith("_candidate")]
-        assert len(candidates) == 1
-        assert candidates[0].path.startswith("candidate://")
-        assert candidates[0].has_changes is False
+        skill_updates = [
+            update
+            for update in report.updates
+            if update.strategy in {"skill_rewrite", "skill_refresh"}
+        ]
+        assert len(skill_updates) == 1
+        assert skill_updates[0].path.endswith("skills/write-article/SKILL.md")
+        assert skill_updates[0].has_changes is True
         assert not any("other-skill" in u.path for u in report.updates)
 
     def test_custom_update_section(self, tmp_path: Path):
@@ -231,16 +236,13 @@ class TestSkillSelfIteration:
         config = load_config(cfg_path)
         run_iteration(config, base_dir=tmp_path)
 
-        active = (tmp_path / "skills" / "custom" / "SKILL.md").read_text()
+        skill_content = (tmp_path / "skills" / "custom" / "SKILL.md").read_text()
         store = MemoryStore(tmp_path / "memory.db")
         try:
-            candidates = store.list_skill_experiments("custom", status="candidate")
-            assert len(candidates) == 1
-            skill_content = candidates[0]["candidate_content"]
+            assert store.list_skill_experiments("custom", status="candidate") == []
         finally:
             store.close()
 
-        assert "(old data here)" in active
         assert "Auto-updated by evidune" in skill_content
         assert "KPI Window: reads" in skill_content
         assert "(old data here)" not in skill_content
@@ -248,7 +250,7 @@ class TestSkillSelfIteration:
         # Default "## Reference Data" section was NOT touched
         assert "This one should NOT be updated." in skill_content
 
-    def test_rejects_pending_candidate_after_negative_feedback(self, tmp_path: Path):
+    def test_holds_runtime_rewrite_until_observation_window_resolves(self, tmp_path: Path):
         cfg_path = _setup_project(tmp_path)
         config = load_config(cfg_path)
 
@@ -272,11 +274,11 @@ class TestSkillSelfIteration:
         skill_content = (tmp_path / "skills" / "write-article" / "SKILL.md").read_text()
 
         assert "Write good stuff." in skill_content
-        assert "### Outcome-Backed Adjustments" not in skill_content
-        assert "Auto-updated by evidune" not in skill_content
+        assert "### Outcome-Backed Adjustments" in skill_content
+        assert "Auto-updated by evidune" in skill_content
         store = MemoryStore(tmp_path / "memory.db")
         try:
-            rejected = store.list_skill_experiments("write-article", status="rejected")
-            assert len(rejected) == 1
+            assert store.get_skill_state("write-article")["status"] == "observing"
+            assert store.list_skill_experiments("write-article", status="rejected") == []
         finally:
             store.close()

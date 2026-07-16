@@ -92,6 +92,8 @@ class TestHandleFeedback:
             skill_name="s", user_input="i", assistant_output="o", signals={}
         )
         store.register_emerged_skill(name="s", status="active", path=str(skill_path))
+        changes = []
+        gateway.set_skill_change_handler(lambda *args: changes.append(args))
 
         result = gateway._handle_feedback(
             {"execution_id": eid, "signal": "thumbs_down", "value": True}
@@ -104,6 +106,7 @@ class TestHandleFeedback:
         assert store.get_emerged_skill("s")["status"] == "disabled"
         event = store.get_latest_skill_lifecycle_event("s", action="disable")
         assert event is not None
+        assert changes == [("s", str(skill_path), "disabled")]
 
     def test_single_thumbs_down_does_not_disable_skill(
         self, gateway: WebGateway, store: MemoryStore, tmp_path: Path

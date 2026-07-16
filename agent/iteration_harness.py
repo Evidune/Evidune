@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,8 +23,10 @@ from agent.iteration_review import (
 from agent.skill_feedback import SkillFeedbackSummary, summarise_skill_feedback
 from skills.aggregation import aggregate_version_evidence
 from skills.governance import text_digest
+from skills.loader import parse_skill
 
 _VERSION_LINE_RE = re.compile(r"(?m)^version:\s*.*$")
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 
 
 @dataclass
@@ -111,6 +114,47 @@ def _set_frontmatter_version(content: str, version: str) -> str:
         lines.insert(len(lines) - 1, f"version: {version}")
         prefix = "\n".join(lines) + "\n"
     return prefix + body.lstrip("\n")
+
+
+def _next_runtime_version(version: str) -> str:
+    match = _SEMVER_RE.match(version or "")
+    if match:
+        major, minor, patch = (int(value) for value in match.groups())
+        return f"{major}.{minor}.{patch + 1}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    return f"{version or 'unversioned'}-iter-{timestamp}"
+
+
+def _atomic_write_skill(path: Path, content: str, *, expected_name: str) -> None:
+    """Validate and atomically replace one active SKILL.md."""
+    if not path.is_file():
+        raise ValueError("Automatic Skill updates require an existing skill file")
+    mode = path.stat().st_mode if path.exists() else None
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            delete=False,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            handle.write(content)
+            temporary = Path(handle.name)
+        if split_frontmatter(content)[0]:
+            parsed = parse_skill(temporary)
+            if parsed.name != expected_name:
+                raise ValueError(
+                    f"Automatic Skill update changed name: {parsed.name} != {expected_name}"
+                )
+        if mode is not None:
+            temporary.chmod(mode)
+        temporary.replace(path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _build_rewritten_instructions(
@@ -452,8 +496,10 @@ class IterationHarness:
         reference_content = self._build_reference_content(packet)
         execution_decision = self._execution_contract_decision(packet)
         outcome_policy = (packet.outcome_summary or {}).get("policy_state", {})
-        open_candidates = self.memory.list_skill_experiments(
-            packet.skill_name, status="candidate", limit=1
+        open_candidates = (
+            self.memory.list_skill_experiments(packet.skill_name, status="candidate", limit=1)
+            if packet.surface == "eval"
+            else []
         )
         if open_candidates:
             pending = open_candidates[0]
@@ -480,6 +526,28 @@ class IterationHarness:
                 {},
             )
 
+        if (
+            latest_rewrite
+            and self.memory.resolve_skill_status(packet.skill_name) == OBSERVING_STATUS
+        ):
+            # Runtime rewrites take effect immediately. Judge only evidence
+            # recorded after that rewrite before confirming or rolling back.
+            outcome = observation_outcome(packet, latest_rewrite)
+            meta = {"observation": outcome.window}
+            if outcome.verdict == "confirm":
+                return "confirm", "", meta
+            if outcome.verdict == "rollback" and latest_rewrite.get("content_before"):
+                return (
+                    "rollback",
+                    self._build_rollback_content(
+                        restored=latest_rewrite["content_before"],
+                        section=packet.update_section,
+                        reference_content=reference_content,
+                    ),
+                    meta,
+                )
+            return "keep", "", meta
+
         if execution_decision == "disable" or (
             feedback.should_disable
             and not (packet.execution_evaluations and feedback.signal_samples == 0)
@@ -498,28 +566,6 @@ class IterationHarness:
 
         if outcome_policy.get("severe_regression") and not latest_rewrite:
             return "disable", "", {}
-
-        if (
-            latest_rewrite
-            and self.memory.resolve_skill_status(packet.skill_name) == OBSERVING_STATUS
-        ):
-            # Observation window: confirm, auto-rollback, or hold. No new
-            # rewrites or refreshes until the window resolves.
-            outcome = observation_outcome(packet, latest_rewrite)
-            meta = {"observation": outcome.window}
-            if outcome.verdict == "confirm":
-                return "confirm", "", meta
-            if outcome.verdict == "rollback" and latest_rewrite.get("content_before"):
-                return (
-                    "rollback",
-                    self._build_rollback_content(
-                        restored=latest_rewrite["content_before"],
-                        section=packet.update_section,
-                        reference_content=reference_content,
-                    ),
-                    meta,
-                )
-            return "keep", "", meta
 
         if outcome_policy.get("rewrite_candidate"):
             proposed, source = self._build_rewrite_content(
@@ -563,7 +609,9 @@ class IterationHarness:
         """Cheap pre-check for call sites that generate LLM rewrite proposals."""
         if self.memory.resolve_skill_status(packet.skill_name) == OBSERVING_STATUS:
             return False
-        if self.memory.list_skill_experiments(packet.skill_name, status="candidate", limit=1):
+        if packet.surface == "eval" and self.memory.list_skill_experiments(
+            packet.skill_name, status="candidate", limit=1
+        ):
             return False
         feedback = packet.feedback or summarise_skill_feedback(packet.executions)
         outcome_policy = (packet.outcome_summary or {}).get("policy_state", {})
@@ -585,22 +633,21 @@ class IterationHarness:
         evidence = {**self._lifecycle_evidence(packet), **(proposal_meta or {})}
         current_status = self.memory.resolve_skill_status(packet.skill_name)
 
-        if decision == "rewrite" and proposed_content:
-            return self._stage_candidate(
+        if decision in {"rewrite", "refresh"} and proposed_content:
+            if packet.surface == "eval":
+                return self._stage_candidate(
+                    packet=packet,
+                    proposed_content=proposed_content,
+                    harness_task_id=harness_task_id,
+                    evidence=evidence,
+                    strategy=f"skill_{decision}_candidate",
+                )
+            return self._apply_runtime_update(
                 packet=packet,
+                decision=decision,
                 proposed_content=proposed_content,
                 harness_task_id=harness_task_id,
                 evidence=evidence,
-                strategy="skill_rewrite_candidate",
-            )
-
-        if decision == "refresh" and proposed_content:
-            return self._stage_candidate(
-                packet=packet,
-                proposed_content=proposed_content,
-                harness_task_id=harness_task_id,
-                evidence=evidence,
-                strategy="skill_refresh_candidate",
             )
 
         if decision == "confirm":
@@ -636,22 +683,26 @@ class IterationHarness:
             )
 
         if decision == "rollback" and proposed_content:
-            Path(packet.skill_path).write_text(proposed_content, encoding="utf-8")
-            self.memory.set_skill_state(
+            _atomic_write_skill(
+                Path(packet.skill_path),
+                proposed_content,
+                expected_name=packet.skill_name,
+            )
+            self.memory.upsert_skill_state(
                 packet.skill_name,
-                "rolled_back",
                 origin=packet.skill_origin,
                 path=packet.skill_path,
-                reason="Iteration harness rolled back the last automatic rewrite",
+                status="active",
+                reason="Automatic observation rolled back the last Skill rewrite",
                 evidence=evidence,
             )
             self.memory.record_skill_lifecycle_event(
                 packet.skill_name,
                 "rollback",
-                status="rolled_back",
+                status="active",
                 path=packet.skill_path,
                 harness_task_id=harness_task_id,
-                reason="Iteration harness rolled back the last automatic rewrite",
+                reason="Automatic observation restored the previous active Skill",
                 evidence=evidence,
                 content_before=packet.current_content,
                 content_after=proposed_content,
@@ -664,7 +715,7 @@ class IterationHarness:
                     old_content=packet.current_content,
                     new_content=proposed_content,
                 ),
-                "rolled_back",
+                "active",
             )
 
         if decision == "disable":
@@ -739,16 +790,71 @@ class IterationHarness:
             current_status,
         )
 
-    def _stage_candidate(
+    def _apply_runtime_update(
         self,
         *,
         packet: IterationDecisionPacket,
+        decision: str,
         proposed_content: str,
         harness_task_id: str,
         evidence: dict[str, Any],
-        strategy: str,
     ) -> tuple[UpdateResult, str]:
-        """Persist a candidate without modifying the active Skill file."""
+        """Replace the active runtime Skill immediately and keep rollback evidence."""
+        updated_content = proposed_content
+        status = OBSERVING_STATUS if decision == "rewrite" else "active"
+        if split_frontmatter(updated_content)[0]:
+            updated_content = _set_frontmatter_version(
+                updated_content,
+                _next_runtime_version(packet.skill_version),
+            )
+        source_execution_ids = self._source_execution_ids(packet)
+        update_evidence = {
+            **evidence,
+            "source_execution_ids": source_execution_ids,
+            "previous_digest": text_digest(packet.current_content),
+            "updated_digest": text_digest(updated_content),
+        }
+        _atomic_write_skill(
+            Path(packet.skill_path),
+            updated_content,
+            expected_name=packet.skill_name,
+        )
+        reason = (
+            "Automatic Skill rewrite applied; observing post-rewrite evidence"
+            if decision == "rewrite"
+            else "Automatic Skill reference refresh applied"
+        )
+        self.memory.upsert_skill_state(
+            packet.skill_name,
+            origin=packet.skill_origin,
+            path=packet.skill_path,
+            status=status,
+            reason=reason,
+            evidence=update_evidence,
+        )
+        self.memory.record_skill_lifecycle_event(
+            packet.skill_name,
+            decision,
+            status=status,
+            path=packet.skill_path,
+            harness_task_id=harness_task_id,
+            reason=reason,
+            evidence=update_evidence,
+            content_before=packet.current_content,
+            content_after=updated_content,
+        )
+        return (
+            UpdateResult(
+                path=packet.skill_path,
+                strategy=f"skill_{decision}",
+                has_changes=True,
+                old_content=packet.current_content,
+                new_content=updated_content,
+            ),
+            status,
+        )
+
+    def _source_execution_ids(self, packet: IterationDecisionPacket) -> list[int]:
         evidence_execution_ids = {
             int(item["execution_id"])
             for item in packet.execution_evaluations + packet.typed_evaluation_results
@@ -769,10 +875,22 @@ class IterationHarness:
             execution = self.memory.get_skill_executions_by_id(execution_id)
             if execution is None or execution["skill_name"] != packet.skill_name:
                 continue
-            execution_version = str(execution.get("skill_version") or "")
-            if execution_version not in relevant_versions:
+            if str(execution.get("skill_version") or "") not in relevant_versions:
                 continue
             source_execution_ids.append(execution_id)
+        return source_execution_ids
+
+    def _stage_candidate(
+        self,
+        *,
+        packet: IterationDecisionPacket,
+        proposed_content: str,
+        harness_task_id: str,
+        evidence: dict[str, Any],
+        strategy: str,
+    ) -> tuple[UpdateResult, str]:
+        """Persist a candidate without modifying the active Skill file."""
+        source_execution_ids = self._source_execution_ids(packet)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         parent_version = packet.skill_version or "unversioned"
         candidate_version = f"{parent_version}-candidate-{timestamp}"
@@ -828,6 +946,8 @@ class IterationHarness:
     @staticmethod
     def _latest_rewrite_event(history: list[dict[str, Any]]) -> dict[str, Any] | None:
         for event in history:
+            if event.get("action") == "rollback":
+                return None
             if event.get("action") == "rewrite":
                 return event
         return None
