@@ -12,7 +12,7 @@ from typing import Any
 
 INSTALL_HINT = (
     "Feishu bot gateway requires optional dependency 'lark-oapi'. "
-    'Install with `pip install -e ".[feishu]"` or `pip install "lark-oapi>=1.5.5,<2"`.'
+    'Install with `pip install -e ".[feishu]"` or `pip install "lark-oapi>=1.7.1,<2"`.'
 )
 
 

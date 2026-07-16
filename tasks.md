@@ -63,6 +63,7 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
 - [x] Real safety-review checks for iteration harness proposals (honest audit trail)
 - [x] Precedence-based signal aggregation with per-execution normalization and recency decay
 - [x] End-to-end smoke test with a real Codex LLM and deterministic state evaluator
+- [x] One-click Feishu/Lark bot registration with local credential persistence
 
 ## Notes
 

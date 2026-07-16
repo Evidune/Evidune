@@ -94,15 +94,36 @@ to another configured provider, or run `codex login` and use `codex`.
 ## Feishu Bot Gateway
 
 `evidune serve` can run as a Feishu/Lark bot through the official long-connection
-SDK. Install the optional dependency, create a Feishu app, enable the bot, use
-long connection for events, subscribe to `im.message.receive_v1`, and grant the
-app permissions to receive messages and reply/send messages as the bot.
+SDK. The recommended setup uses Feishu's official
+[one-click app registration](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview):
 
 ```bash
 pip install -e ".[feishu]"
+evidune channels add feishu --one-click --config evidune.yaml
+evidune serve --config evidune.yaml
+```
+
+The command opens a Feishu/Lark confirmation page, creates a bot with the
+official agent permission and event preset, and configures the WebSocket gateway.
+Credentials are stored in the ignored `.evidune/credentials.json` file with
+`0600` permissions; `evidune.yaml` contains only environment references. Use
+`--no-open-browser` to print the setup link without opening it.
+
+The same flow is available during first-run onboarding:
+
+```bash
+evidune onboard --channel feishu --one-click --config evidune.yaml
+```
+
+For an existing manually configured app, continue to use:
+
+```bash
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=xxx
-evidune serve --config evidune.yaml
+evidune channels add feishu \
+  --app-id-env FEISHU_APP_ID \
+  --app-secret-env FEISHU_APP_SECRET \
+  --config evidune.yaml
 ```
 
 Gateway config:

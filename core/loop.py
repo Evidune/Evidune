@@ -24,6 +24,13 @@ from core.config_cli import (
     write_raw_config,
 )
 from core.docs_lint import lint_repo
+from core.feishu_onboarding import (
+    APP_ID_ENV,
+    APP_SECRET_ENV,
+    load_local_credentials,
+    register_feishu_app,
+    save_local_credentials,
+)
 from core.git_ops import commit_changes
 from core.iteration_helpers import build_reference_content, update_outcome_skills
 from core.iteration_history import (
@@ -421,6 +428,48 @@ def _cli_value(
     return current or fallback
 
 
+def _gateway_from_cli_options(
+    data: dict,
+    config_path: Path,
+    args: argparse.Namespace,
+    kind: str,
+) -> dict:
+    gateway_type = normalize_gateway_type(kind)
+    app_id_env = args.app_id_env
+    app_secret_env = args.app_secret_env
+    domain = args.domain
+    if args.one_click:
+        if gateway_type != "feishu_bot":
+            raise ValueError("--one-click is only supported for the Feishu gateway")
+        app_id_env = app_id_env or APP_ID_ENV
+        app_secret_env = app_secret_env or APP_SECRET_ENV
+        registration = register_feishu_app(
+            domain_name=str(data.get("domain") or "Evidune"),
+            open_browser=not args.no_open_browser,
+        )
+        credentials_path = save_local_credentials(
+            config_path,
+            {
+                app_id_env: registration["app_id"],
+                app_secret_env: registration["app_secret"],
+            },
+        )
+        domain = domain or registration["api_domain"]
+        print(f"Saved Feishu credentials to {credentials_path}")
+
+    return gateway_from_options(
+        gateway_type,
+        host=args.host,
+        port=args.port,
+        app_id_env=app_id_env,
+        app_secret_env=app_secret_env,
+        domain=domain,
+        reply_mode=args.reply_mode,
+        allowed_open_ids=_split_csv(args.allowed_open_ids),
+        allowed_chat_ids=_split_csv(args.allowed_chat_ids),
+    )
+
+
 def _handle_configure_command(config_path: Path, args: argparse.Namespace) -> int:
     section = args.section or "model"
     if section != "model":
@@ -485,16 +534,11 @@ def _handle_channels_command(config_path: Path, args: argparse.Namespace) -> int
         return 0
     if action == "add":
         data = ensure_config_file(config_path)
-        gateway = gateway_from_options(
+        gateway = _gateway_from_cli_options(
+            data,
+            config_path,
+            args,
             args.target or args.channel or "cli",
-            host=args.host,
-            port=args.port,
-            app_id_env=args.app_id_env,
-            app_secret_env=args.app_secret_env,
-            domain=args.domain,
-            reply_mode=args.reply_mode,
-            allowed_open_ids=_split_csv(args.allowed_open_ids),
-            allowed_chat_ids=_split_csv(args.allowed_chat_ids),
         )
         upsert_gateway(data, gateway)
         write_raw_config(config_path, data)
@@ -583,16 +627,11 @@ def _handle_onboard_command(config_path: Path, args: argparse.Namespace) -> int:
     if channel:
         upsert_gateway(
             data,
-            gateway_from_options(
+            _gateway_from_cli_options(
+                data,
+                config_path,
+                args,
                 channel,
-                host=args.host,
-                port=args.port,
-                app_id_env=args.app_id_env,
-                app_secret_env=args.app_secret_env,
-                domain=args.domain,
-                reply_mode=args.reply_mode,
-                allowed_open_ids=_split_csv(args.allowed_open_ids),
-                allowed_chat_ids=_split_csv(args.allowed_chat_ids),
             ),
         )
     write_raw_config(config_path, data)
@@ -1088,6 +1127,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allowed-open-ids", default="", help="Comma-separated Feishu open ids")
     parser.add_argument("--allowed-chat-ids", default="", help="Comma-separated Feishu chat ids")
     parser.add_argument(
+        "--one-click",
+        action="store_true",
+        help="Create and configure a Feishu app through the official scan flow",
+    )
+    parser.add_argument(
+        "--no-open-browser",
+        action="store_true",
+        help="Print the Feishu setup link without opening a browser",
+    )
+    parser.add_argument(
         "--non-interactive",
         action="store_true",
         help="Do not prompt; use provided flags and defaults",
@@ -1098,6 +1147,8 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config).resolve()
 
     try:
+        if args.command not in {"docs", "init"}:
+            load_local_credentials(config_path)
         if args.command == "docs":
             return _handle_docs_command(
                 Path(args.base_dir) if args.base_dir else Path.cwd(),

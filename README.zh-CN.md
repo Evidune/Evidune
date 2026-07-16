@@ -86,6 +86,28 @@ starter config 默认使用 OpenAI。如果第一次运行在模型调用前失�
 `OPENAI_API_KEY`，把生成的 `llm_provider`/`llm_model` 改成另一个已配置
 provider，或先运行 `codex login` 再使用 `codex`。
 
+## 飞书机器人
+
+Evidune 支持飞书官方的
+[一键创建飞书智能体应用](https://open.feishu.cn/document/mcp_open_tools/integrating-agents-with-feishu/overview)：
+
+```bash
+pip install -e ".[feishu]"
+evidune channels add feishu --one-click --config evidune.yaml
+evidune serve --config evidune.yaml
+```
+
+命令会打开飞书或 Lark 确认页面，自动创建机器人、预置权限和事件订阅，并配置
+WebSocket 长连接。凭据保存在 Git 已忽略、权限为 `0600` 的
+`.evidune/credentials.json` 中；`evidune.yaml` 只保存环境变量引用。无浏览器环境
+可加 `--no-open-browser`，复制终端中的链接完成确认。
+
+首次配置模型时也可以直接运行：
+
+```bash
+evidune onboard --channel feishu --one-click --config evidune.yaml
+```
+
 ## 系统如何运行
 
 ```mermaid

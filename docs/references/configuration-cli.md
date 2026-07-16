@@ -40,6 +40,7 @@ existing `gateways` key. It does not modify the outbound iteration-report
 ```bash
 evidune channels add cli --config evidune.yaml
 evidune channels add web --host 127.0.0.1 --port 8081 --config evidune.yaml
+evidune channels add feishu --one-click --config evidune.yaml
 evidune channels add feishu \
   --app-id-env FEISHU_APP_ID \
   --app-secret-env FEISHU_APP_SECRET \
@@ -49,9 +50,17 @@ evidune channels remove web --config evidune.yaml
 evidune channels test feishu --config evidune.yaml
 ```
 
-Feishu secrets are written as `${ENV_VAR}` references. `channels test` and
-`gateway status` report missing environment variables clearly and do not perform
-live Feishu credential checks by default.
+`--one-click` opens Feishu's official app-registration confirmation page,
+creates a PersonalAgent bot with the official permission/event preset, and
+selects the Feishu or Lark API domain from the scanning tenant. The returned
+credentials are stored in `.evidune/credentials.json` with `0600` permissions
+and loaded automatically on later Evidune commands. This file is under the
+already ignored `.evidune/` directory; the YAML still contains only `${ENV_VAR}`
+references. Add `--no-open-browser` to print the confirmation link only.
+
+Manual Feishu secrets are also written as `${ENV_VAR}` references. `channels
+test` and `gateway status` report missing environment variables clearly and do
+not perform live Feishu credential checks by default.
 
 ## Gateway Readiness
 
