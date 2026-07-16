@@ -25,6 +25,10 @@ agent:
     You are a general self-iterating skill agent.
     Execute the user's task with available tools, persist useful context,
     and improve reusable skills when a repeatable capability emerges.
+  context:
+    recent_token_budget: 20000
+    summary_token_budget: 3000
+    tool_observation_token_budget: 2000
   tools:
     external_enabled: true
     self_management_enabled: true
@@ -55,7 +59,6 @@ identities:
 
 memory:
   path: .evidune/memory.db
-  max_messages_per_conversation: 50
 
 gateways:
   - type: cli

@@ -552,10 +552,16 @@ class SwarmHarness:
             user_lines.extend(["", "# Relevant Facts"])
             for fact in brief.facts:
                 user_lines.append(f"- {fact['key']}: {fact['value']}")
+        if brief.conversation_summary:
+            user_lines.extend(["", "# Conversation Summary", brief.conversation_summary])
         if brief.history:
             user_lines.extend(["", "# Recent History"])
-            for message in brief.history[-4:]:
-                user_lines.append(f"- {message['role']}: {message['content'][:200]}")
+            for message in brief.history:
+                user_lines.append(f"- {message['role']}: {message['content']}")
+        if brief.tool_observations:
+            user_lines.extend(["", "# Recent Tool Observations"])
+            for observation in brief.tool_observations:
+                user_lines.append(f"- {observation['tool_name']}: {observation['summary']}")
         if artifact_lines:
             user_lines.extend(["", *artifact_lines])
 

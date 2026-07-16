@@ -8,6 +8,9 @@ context before each `serve` turn.
 - Graph memory is enabled by default through `memory.graph.enabled`.
 - The first backend is the existing `memory.db`; no external graph database,
   embedding store, or new runtime service is required.
+- Seed lookup uses a derived SQLite FTS5 index. Latin tokens and overlapping
+  CJK bigrams provide deterministic English and Chinese recall without a vector
+  database.
 - Supported indexed sources are `facts`, `skills`, `messages`, and
   `harness_artifacts`.
 - Retrieval is deterministic in v1: cues and tags come from local token and
@@ -16,6 +19,9 @@ context before each `serve` turn.
   reconstruction trace, and uses selected evidence for prompt context.
 - Graph-selected skills are merged with heuristic skill matches and may be
   recorded as skill executions.
+- Message graph nodes use stable SQLite message ids. Compact persisted tool
+  observations are indexed as message-source evidence with stable observation
+  ids.
 
 ## Interfaces
 
@@ -31,3 +37,5 @@ context before each `serve` turn.
 - Graph tools are read-only in both plan and execute modes.
 - If reconstruction finds no evidence, the agent falls back to legacy fact
   injection and skill behavior.
+- `memory.graph.max_context_items` remains an evidence-selection cap and is
+  separate from the conversation token budgets.

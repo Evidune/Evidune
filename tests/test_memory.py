@@ -18,12 +18,17 @@ def store(tmp_path: Path):
 
 class TestMessages:
     def test_add_and_get_history(self, store: MemoryStore):
-        store.add_message("conv1", "user", "hello")
-        store.add_message("conv1", "assistant", "hi there")
+        first_id = store.add_message("conv1", "user", "hello")
+        second_id = store.add_message("conv1", "assistant", "hi there")
         history = store.get_history("conv1")
         assert len(history) == 2
         assert history[0]["role"] == "user"
         assert history[1]["role"] == "assistant"
+        assert first_id < second_id
+        assert [row["id"] for row in store.get_history_records("conv1")] == [
+            first_id,
+            second_id,
+        ]
 
     def test_history_limit(self, store: MemoryStore):
         for i in range(10):
@@ -175,9 +180,70 @@ class TestGraphMemory:
         assert trace["query"] == "sqlite graph"
         assert trace["selected_nodes"] == [content_id]
 
+    def test_chinese_fts_query_recalls_content(self, store: MemoryStore):
+        content_id = store.upsert_graph_memory_node(
+            node_type="content",
+            key="conversation.context",
+            text="持久化会话摘要和最近原文用于恢复记忆上下文",
+            source_type="fact",
+            source_id="conversation.context",
+        )
+
+        matches = store.search_graph_memory_seeds("记忆上下文", limit=5)
+
+        assert content_id in {item["node_id"] for item in matches}
+
+    def test_prunes_legacy_positional_message_nodes(self, store: MemoryStore):
+        legacy_id = store.upsert_graph_memory_node(
+            node_type="content",
+            key="conv:0:user",
+            text="legacy message",
+            source_type="message",
+            source_id="conv:0",
+        )
+        message_id = store.add_message("conv", "user", "stable message")
+
+        deleted = store.prune_graph_memory_message_sources(
+            "conv",
+            {f"conv:message:{message_id}"},
+        )
+
+        assert deleted == 1
+        assert store.read_graph_memory_content(legacy_id) is None
+
     def test_graph_memory_rejects_invalid_node_type(self, store: MemoryStore):
         with pytest.raises(ValueError, match="node_type"):
             store.upsert_graph_memory_node(node_type="unknown", key="x")
+
+
+class TestConversationContextPersistence:
+    def test_summary_tool_observation_and_report_round_trip(self, store: MemoryStore):
+        message_id = store.add_message("conv-context", "user", "remember this")
+        store.save_conversation_summary(
+            "conv-context",
+            "Durable summary",
+            covered_through_message_id=message_id,
+            source_message_count=1,
+            estimated_tokens=3,
+        )
+        observation_id = store.add_tool_observation(
+            "conv-context",
+            turn_message_id=message_id,
+            tool_name="shell",
+            summary="command succeeded",
+        )
+        store.save_context_report(
+            "conv-context",
+            {"budgets": {"recent_messages": 20_000}},
+        )
+
+        summary = store.get_conversation_summary("conv-context")
+        assert summary["covered_through_message_id"] == message_id
+        assert summary["summary"] == "Durable summary"
+        observations = store.list_tool_observations("conv-context", limit=None)
+        assert observations[0]["id"] == observation_id
+        assert observations[0]["summary"] == "command succeeded"
+        assert store.get_context_report("conv-context")["budgets"] == {"recent_messages": 20_000}
 
 
 class TestSkillExecutions:

@@ -196,6 +196,11 @@ class WebGateway(Gateway):
         async def conversation_history(conversation_id: str):
             return JSONResponse(self._conversation_history(conversation_id))
 
+        @app.get("/api/conversations/{conversation_id}/context")
+        async def conversation_context(conversation_id: str):
+            result = self._conversation_context(conversation_id)
+            return JSONResponse(result, status_code=200 if "error" not in result else 404)
+
         @app.get("/api/conversations/{conversation_id}")
         async def get_conversation(conversation_id: str):
             result = self._get_conversation(conversation_id)
@@ -338,6 +343,8 @@ class WebGateway(Gateway):
             "plan": response.metadata.get("plan"),
             "new_title": response.metadata.get("new_title"),
             "tool_trace": response.metadata.get("tool_trace", []),
+            "tool_observations_saved": response.metadata.get("tool_observations_saved", 0),
+            "context_detail": response.metadata.get("context_detail"),
             "task_id": response.metadata.get("task_id"),
             "squad": response.metadata.get("squad"),
             "task_status": response.metadata.get("task_status"),
@@ -457,8 +464,20 @@ class WebGateway(Gateway):
         meta = self._memory_store.get_conversation(conv_id)
         if not meta:
             return {"error": f"Conversation {conv_id} not found"}
-        history = self._memory_store.get_history(conv_id, limit=200)
+        history = self._memory_store.get_history(conv_id, limit=None)
         return {"conversation": dict(meta), "messages": history}
+
+    def _conversation_context(self, conv_id: str) -> dict[str, Any]:
+        if not self._memory_store:
+            return {"error": "Memory store not configured"}
+        if not self._memory_store.get_conversation(conv_id):
+            return {"error": f"Conversation {conv_id} not found"}
+        report = self._memory_store.get_context_report(conv_id)
+        return {
+            "conversation_id": conv_id,
+            "available": report is not None,
+            "context": report,
+        }
 
     def _get_conversation(self, conv_id: str) -> dict[str, Any]:
         if not self._memory_store:

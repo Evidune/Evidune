@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.graph_memory_indexer import sync_graph_sources
 from agent.graph_memory_models import SOURCE_PRIORITY, ReconstructedContext, extract_cues
 from memory.store import Fact, MemoryStore
 from skills.loader import Skill
@@ -120,127 +121,14 @@ class GraphMemoryService:
         history: list[dict[str, str]],
         skills: list[Skill],
     ) -> None:
-        if "facts" in self.index_sources:
-            for fact in facts:
-                self._index_content(
-                    key=fact.key,
-                    text=f"{fact.key}: {fact.value}",
-                    source_type="fact",
-                    source_id=fact.key,
-                    tags=["fact", fact.source or "memory"],
-                    metadata={"fact_key": fact.key},
-                )
-        if "skills" in self.index_sources:
-            for skill in skills:
-                self._index_skill(skill)
-        if "messages" in self.index_sources:
-            for idx, message in enumerate(history[-20:]):
-                content = message.get("content", "")
-                if not content:
-                    continue
-                self._index_content(
-                    key=f"{conversation_id}:{idx}:{message.get('role', '')}",
-                    text=content,
-                    source_type="message",
-                    source_id=f"{conversation_id}:{idx}",
-                    tags=["message", message.get("role", "")],
-                    metadata={"conversation_id": conversation_id, "role": message.get("role", "")},
-                )
-        if "harness_artifacts" in self.index_sources and conversation_id:
-            for task in self.memory.list_harness_tasks(conversation_id=conversation_id, limit=5):
-                for artifact in self.memory.list_harness_artifacts(task["id"]):
-                    text = f"{artifact.get('summary', '')}\n{artifact.get('content', '')}".strip()
-                    if not text:
-                        continue
-                    self._index_content(
-                        key=f"{task['id']}:{artifact['id']}",
-                        text=text,
-                        source_type="harness_artifact",
-                        source_id=f"{task['id']}:{artifact['id']}",
-                        tags=["harness_artifact", artifact.get("kind", "")],
-                        metadata={
-                            "task_id": task["id"],
-                            "artifact_id": artifact["id"],
-                            "kind": artifact.get("kind", ""),
-                        },
-                    )
-
-    def _index_skill(self, skill: Skill) -> None:
-        text = " ".join(
-            part
-            for part in [
-                skill.name,
-                skill.description,
-                " ".join(skill.triggers),
-                " ".join(skill.tags),
-                skill.instructions,
-            ]
-            if part
+        sync_graph_sources(
+            self.memory,
+            self.index_sources,
+            conversation_id=conversation_id,
+            facts=facts,
+            history=history,
+            skills=skills,
         )
-        self._index_content(
-            key=skill.name,
-            text=text,
-            source_type="skill",
-            source_id=skill.name,
-            tags=["skill", *skill.tags],
-            metadata={"skill_name": skill.name},
-        )
-        for ref_name, ref_text in skill.references.items():
-            self._index_content(
-                key=f"{skill.name}:{ref_name}",
-                text=f"{ref_name}\n{ref_text[:1200]}",
-                source_type="skill_reference",
-                source_id=f"{skill.name}:{ref_name}",
-                tags=["skill_reference", skill.name],
-                metadata={"skill_name": skill.name, "reference": ref_name},
-            )
-
-    def _index_content(
-        self,
-        *,
-        key: str,
-        text: str,
-        source_type: str,
-        source_id: str,
-        tags: list[str],
-        metadata: dict[str, Any],
-    ) -> str:
-        content_id = self.memory.upsert_graph_memory_node(
-            node_type="content",
-            key=key,
-            text=text,
-            source_type=source_type,
-            source_id=source_id,
-            metadata=metadata,
-        )
-        cue_ids = [
-            self.memory.upsert_graph_memory_node(
-                node_type="cue",
-                key=cue,
-                text=cue,
-                source_type=source_type,
-                source_id=source_id,
-            )
-            for cue in extract_cues(f"{key} {text}")
-        ]
-        tag_ids = [
-            self.memory.upsert_graph_memory_node(
-                node_type="tag",
-                key=tag,
-                text=tag,
-                source_type=source_type,
-                source_id=source_id,
-            )
-            for tag in self._normalise_tags(tags)
-        ]
-        for cue_id in cue_ids:
-            for tag_id in tag_ids:
-                self.memory.upsert_graph_memory_edge(cue_id, tag_id, "cue_tag", weight=0.8)
-            self.memory.upsert_graph_memory_edge(content_id, cue_id, "content_cue", weight=0.4)
-        for tag_id in tag_ids:
-            self.memory.upsert_graph_memory_edge(tag_id, content_id, "tag_content", weight=1.0)
-            self.memory.upsert_graph_memory_edge(content_id, tag_id, "content_tag", weight=0.4)
-        return content_id
 
     def _select_content(self, query: str, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         query_tokens = set(extract_cues(query))
@@ -277,11 +165,3 @@ class GraphMemoryService:
             "text": node.get("text", ""),
             "metadata": node.get("metadata", {}),
         }
-
-    def _normalise_tags(self, tags: list[str]) -> list[str]:
-        result: list[str] = []
-        for tag in tags:
-            for cue in extract_cues(tag, max_cues=4):
-                if cue not in result:
-                    result.append(cue)
-        return result or ["memory"]

@@ -998,6 +998,7 @@ async def serve(
         delivery_manager=delivery_manager,
         maintenance_runner=maintenance_runner,
         graph_memory=graph_memory,
+        context_config=config.agent.context,
     )
 
     # Create gateways

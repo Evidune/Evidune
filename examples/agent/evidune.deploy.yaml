@@ -12,6 +12,10 @@ agent:
     优先使用可用工具进行查询、读写文件、运行命令、调用 HTTP、验证结果和诊断问题。
     不要套用未请求的领域人格、内容包装或泛泛建议。
     当能力可以复用时，创建、更新或复用 Claude/OpenClaw 风格的 skill 包。
+  context:
+    recent_token_budget: 20000
+    summary_token_budget: 3000
+    tool_observation_token_budget: 2000
   tools:
     external_enabled: true
     self_management_enabled: true
@@ -45,7 +49,6 @@ identities:
 
 memory:
   path: ~/.evidune-deploy/state/agent/agent-memory.db
-  max_messages_per_conversation: 50
 
 gateways:
   - type: web

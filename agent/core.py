@@ -11,6 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent.conversation_context import (
+    ConversationContext,
+    ConversationContextManager,
+    estimate_tokens,
+)
 from agent.fact_extractor import FactExtractor
 from agent.graph_memory import GraphMemoryService, ReconstructedContext
 from agent.harness import TaskBrief
@@ -140,6 +145,7 @@ class AgentCore:
         delivery_manager=None,
         maintenance_runner=None,
         graph_memory: GraphMemoryService | None = None,
+        context_config: object | None = None,
     ) -> None:
         self.llm = llm
         self.skills = skill_registry
@@ -171,6 +177,15 @@ class AgentCore:
         self.delivery_manager = delivery_manager
         self.maintenance_runner = maintenance_runner
         self.graph_memory = graph_memory
+        self.context_manager = ConversationContextManager(
+            memory,
+            llm,
+            recent_token_budget=int(getattr(context_config, "recent_token_budget", 20_000)),
+            summary_token_budget=int(getattr(context_config, "summary_token_budget", 3_000)),
+            tool_observation_token_budget=int(
+                getattr(context_config, "tool_observation_token_budget", 2_000)
+            ),
+        )
         self._turn_counts: dict[str, int] = {}  # conversation_id → turn count
         self._emergence_counts: dict[str, int] = {}
         self._background_emergence_tasks: set[asyncio.Task] = set()
@@ -669,7 +684,7 @@ class AgentCore:
         identity: Identity | None,
         mode: str,
         facts: list,
-        history: list[dict[str, str]],
+        context: ConversationContext,
         relevant_skills: list,
         squad,
     ):
@@ -696,7 +711,9 @@ class AgentCore:
                 conversation_id=message.conversation_id,
                 mode=mode,
                 identity_name=identity.name if identity else "",
-                history=history,
+                history=context.messages,
+                conversation_summary=context.summary,
+                tool_observations=context.tool_observations,
                 facts=self._facts_payload(facts),
                 selected_skills=[skill.name for skill in relevant_skills],
             ),
@@ -711,6 +728,59 @@ class AgentCore:
             event_sink=event_sink,
             surface="serve",
         )
+
+    def _save_context_report(
+        self,
+        conversation_id: str,
+        context: ConversationContext,
+        *,
+        surface: str,
+        graph_context: ReconstructedContext,
+        skills: list[Skill],
+        messages: list[dict[str, Any]] | None = None,
+        tools: ToolRegistry | None = None,
+    ) -> dict[str, Any]:
+        report = json.loads(json.dumps(context.report))
+        tool_schema_tokens = 0
+        if tools is not None:
+            tool_schema_tokens = estimate_tokens(
+                json.dumps(
+                    [
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
+                        for tool in tools.all()
+                    ],
+                    ensure_ascii=False,
+                )
+            )
+        message_tokens = [
+            {
+                "role": item.get("role", ""),
+                "estimated_tokens": estimate_tokens(str(item.get("content") or "")),
+            }
+            for item in (messages or [])
+        ]
+        report["assembly"] = {
+            "surface": surface,
+            "model": str(getattr(self.llm, "model", self.llm.__class__.__name__)),
+            "selected_skills": [skill.name for skill in skills],
+            "graph_evidence_count": len(graph_context.evidence_items),
+            "graph_evidence_tokens": sum(
+                estimate_tokens(str(item.get("text") or ""))
+                for item in graph_context.evidence_items
+            ),
+            "tool_count": len(tools) if tools is not None else 0,
+            "tool_schema_estimated_tokens": tool_schema_tokens,
+            "messages": message_tokens,
+            "message_estimated_tokens": sum(item["estimated_tokens"] for item in message_tokens),
+            "total_estimated_tokens": sum(item["estimated_tokens"] for item in message_tokens)
+            + tool_schema_tokens,
+        }
+        self.memory.save_context_report(conversation_id, report)
+        return report
 
     async def handle(self, message: InboundMessage) -> OutboundMessage:
         """Process an inbound message and return a response.
@@ -738,8 +808,37 @@ class AgentCore:
             self.memory.set_conversation_identity(message.conversation_id, identity.name)
         self.memory.set_conversation_mode(message.conversation_id, mode)
 
-        # 2. History
-        history = self.memory.get_history(message.conversation_id, self.max_history)
+        # 2. Token-budgeted recent history + rolling summary
+        context = await self.context_manager.build(message.conversation_id)
+        history = context.messages
+
+        if message.text.strip().lower() in {
+            "/context",
+            "/context detail",
+            "/context_detail",
+        }:
+            context_detail = self._save_context_report(
+                message.conversation_id,
+                context,
+                surface="diagnostic",
+                graph_context=ReconstructedContext(),
+                skills=[],
+            )
+            return OutboundMessage(
+                text=json.dumps(context_detail, ensure_ascii=False, indent=2),
+                conversation_id=message.conversation_id,
+                metadata={
+                    "skills": [],
+                    "execution_ids": [],
+                    "identity": identity.name if identity else None,
+                    "mode": mode,
+                    "plan": self.memory.get_conversation_plan(message.conversation_id),
+                    "tool_trace": [],
+                    "tool_observations_saved": 0,
+                    "graph_reconstruction": ReconstructedContext().to_metadata(),
+                    "context_detail": context_detail,
+                },
+            )
 
         # 3. Facts (identity-scoped + global)
         if identity is not None:
@@ -803,7 +902,13 @@ class AgentCore:
             new_title = await self._maybe_generate_title(message.conversation_id)
             current_plan = self.memory.get_conversation_plan(message.conversation_id)
             self._log_emergence_turn(emergence_decision)
-            self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
+            context_detail = self._save_context_report(
+                message.conversation_id,
+                context,
+                surface="skill_transaction",
+                graph_context=graph_context,
+                skills=[],
+            )
             return OutboundMessage(
                 text=response_text,
                 conversation_id=message.conversation_id,
@@ -822,7 +927,9 @@ class AgentCore:
                     "skill_lifecycle_updates": [],
                     "new_title": new_title,
                     "tool_trace": [],
+                    "tool_observations_saved": 0,
                     "graph_reconstruction": graph_context.to_metadata(),
+                    "context_detail": context_detail,
                     "task_id": None,
                     "squad": None,
                     "task_status": None,
@@ -863,7 +970,7 @@ class AgentCore:
                 identity=identity,
                 mode=mode,
                 facts=facts,
-                history=history,
+                context=context,
                 relevant_skills=matched_skills,
                 squad=squad,
             )
@@ -883,17 +990,45 @@ class AgentCore:
         else:
             # 5. Build messages
             messages = self._build_messages(
-                identity, mode, relevant_skills, facts, history, message, graph_context
+                identity,
+                mode,
+                relevant_skills,
+                facts,
+                context,
+                message,
+                graph_context,
             )
 
             # 6. Call LLM — with optional tool-use loop
             turn_tools = self._tool_registry_for_turn(message.conversation_id, identity, mode)
+            context_detail = self._save_context_report(
+                message.conversation_id,
+                context,
+                surface="single",
+                graph_context=graph_context,
+                skills=relevant_skills,
+                messages=messages,
+                tools=turn_tools,
+            )
             response_text, tool_trace = await self._run_llm(messages, tool_registry=turn_tools)
 
         # 7. Store in memory (only user input + final assistant response;
         #    intermediate tool calls stay in the per-turn working messages)
-        self.memory.add_message(message.conversation_id, "user", message.text)
+        user_message_id = self.memory.add_message(message.conversation_id, "user", message.text)
         self.memory.add_message(message.conversation_id, "assistant", response_text)
+        tool_observations_saved = self.context_manager.persist_tool_trace(
+            message.conversation_id,
+            user_message_id,
+            tool_trace,
+        )
+        if task_id is not None:
+            context_detail = self._save_context_report(
+                message.conversation_id,
+                context,
+                surface="swarm",
+                graph_context=graph_context,
+                skills=relevant_skills,
+            )
         current_turn_count = self._sync_turn_counter(self._turn_counts, message.conversation_id)
         current_emergence_count = self._sync_turn_counter(
             self._emergence_counts, message.conversation_id
@@ -1039,9 +1174,6 @@ class AgentCore:
         current_plan = self.memory.get_conversation_plan(message.conversation_id)
         self._log_emergence_turn(emergence_decision)
 
-        # Trim old history
-        self.memory.trim_history(message.conversation_id, keep=self.max_history * 5)
-
         return OutboundMessage(
             text=response_text,
             conversation_id=message.conversation_id,
@@ -1062,7 +1194,9 @@ class AgentCore:
                 "skill_lifecycle_updates": lifecycle_updates,
                 "new_title": new_title,
                 "tool_trace": tool_trace,
+                "tool_observations_saved": tool_observations_saved,
                 "graph_reconstruction": graph_context.to_metadata(),
+                "context_detail": context_detail,
                 "task_id": task_id,
                 "squad": squad_name,
                 "task_status": task_status,
@@ -1098,7 +1232,7 @@ class AgentCore:
             return 0
 
         namespace = identity.namespace if identity else ""
-        history = self.memory.get_history(conv_id, self.max_history)
+        history = self.context_manager.recent_messages(conv_id)
         existing = self.memory.get_facts(namespace=namespace) + (
             self.memory.get_facts(namespace="") if namespace else []
         )
@@ -1530,7 +1664,7 @@ class AgentCore:
         conv_id: str,
     ) -> EmergenceDecision:
         decision.emergence_attempted = True
-        history = self.memory.get_history(conv_id, self.max_history)
+        history = self.context_manager.recent_messages(conv_id)
         existing_names = [s.name for s in self.skills.all()]
 
         try:
@@ -1731,7 +1865,7 @@ class AgentCore:
         mode: str,
         skills: list,
         facts: list,
-        history: list[dict[str, str]],
+        context: ConversationContext,
         message: InboundMessage,
         graph_context: ReconstructedContext | None = None,
     ) -> list[dict[str, str]]:
@@ -1776,6 +1910,17 @@ class AgentCore:
         if skill_prompt:
             system_parts.append(skill_prompt)
 
+        if context.summary:
+            system_parts.append(
+                "\n".join(
+                    [
+                        "# Conversation Summary",
+                        "",
+                        context.summary,
+                    ]
+                )
+            )
+
         # Inject reconstructed evidence first; fall back to legacy fact injection
         if graph_context is not None and graph_context.evidence_items:
             memory_lines = ["# Reconstructed Memory", ""]
@@ -1792,12 +1937,22 @@ class AgentCore:
                 fact_lines.append(f"- **{f.key}**: {f.value}")
             system_parts.append("\n".join(fact_lines))
 
+        if context.tool_observations:
+            observation_lines = ["# Recent Tool Observations", ""]
+            for item in context.tool_observations:
+                status = "error" if item.get("is_error") else "ok"
+                observation_lines.append(
+                    f"- [{status}] {item.get('tool_name', 'unknown')}: "
+                    f"{item.get('summary', '')}"
+                )
+            system_parts.append("\n".join(observation_lines))
+
         messages: list[dict[str, str]] = []
         if system_parts:
             messages.append({"role": "system", "content": "\n\n".join(system_parts)})
 
         # Conversation history
-        messages.extend(history)
+        messages.extend(context.messages)
 
         # Current message
         messages.append({"role": "user", "content": message.text})

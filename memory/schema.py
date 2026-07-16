@@ -382,6 +382,35 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
+CREATE TABLE IF NOT EXISTS conversation_summaries (
+    conversation_id TEXT PRIMARY KEY,
+    summary TEXT NOT NULL,
+    covered_through_message_id INTEGER NOT NULL DEFAULT 0,
+    source_message_count INTEGER NOT NULL DEFAULT 0,
+    estimated_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+
+CREATE TABLE IF NOT EXISTS tool_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    turn_message_id INTEGER NOT NULL DEFAULT 0,
+    tool_name TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    is_error INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+
+CREATE TABLE IF NOT EXISTS conversation_context_reports (
+    conversation_id TEXT PRIMARY KEY,
+    report_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+
 CREATE TABLE IF NOT EXISTS facts (
     namespace TEXT NOT NULL DEFAULT '',
     key TEXT NOT NULL,
@@ -403,6 +432,12 @@ CREATE TABLE IF NOT EXISTS graph_memory_nodes (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(node_type, key, source_type, source_id)
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS graph_memory_fts USING fts5(
+    node_id UNINDEXED,
+    search_text,
+    tokenize='unicode61'
 );
 
 CREATE TABLE IF NOT EXISTS graph_memory_edges (
@@ -592,6 +627,14 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_conversations_squad ON conversations(squad_profile)"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_observations_conv "
+        "ON tool_observations(conversation_id, id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_observations_turn "
+        "ON tool_observations(turn_message_id)"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_executions_task ON skill_executions(harness_task_id)"
     )

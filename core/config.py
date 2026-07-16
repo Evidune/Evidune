@@ -191,14 +191,32 @@ class HarnessDeliveryConfig:
 
 
 @dataclass
+class ContextConfig:
+    """Prompt budgets for recent transcript, rolling summary, and tool observations."""
+
+    recent_token_budget: int = 20_000
+    summary_token_budget: int = 3_000
+    tool_observation_token_budget: int = 2_000
+
+    def __post_init__(self) -> None:
+        if self.recent_token_budget < 1_000:
+            raise ValueError("agent.context.recent_token_budget must be >= 1000")
+        if self.summary_token_budget < 256:
+            raise ValueError("agent.context.summary_token_budget must be >= 256")
+        if self.tool_observation_token_budget < 0:
+            raise ValueError("agent.context.tool_observation_token_budget must be >= 0")
+
+
+@dataclass
 class AgentConfig:
     llm_provider: str = "openai"  # openai | anthropic | local
     llm_model: str = "gpt-4o"
     llm_base_url: str | None = None
     api_key_env: str = "OPENAI_API_KEY"
-    max_history: int = 20
+    max_history: int = 20  # Legacy compatibility; prompt assembly uses context budgets.
     temperature: float = 0.7
     system_prompt: str = ""
+    context: ContextConfig = field(default_factory=ContextConfig)
     evaluator: EvaluatorConfig | None = None
     fact_extraction: FactExtractionConfig = field(default_factory=FactExtractionConfig)
     emergence: EmergenceConfig = field(default_factory=EmergenceConfig)
@@ -256,7 +274,6 @@ class GraphMemoryConfig:
 @dataclass
 class MemoryConfig:
     path: str = "~/.evidune/memory.db"
-    max_messages_per_conversation: int = 100
     graph: GraphMemoryConfig = field(default_factory=GraphMemoryConfig)
 
 
@@ -449,6 +466,12 @@ def load_config(path: str | Path) -> EviduneConfig:
             validation=validation_cfg,
             delivery=delivery_cfg,
         )
+        context_raw = agent_raw.get("context", {}) or {}
+        context_cfg = ContextConfig(
+            recent_token_budget=context_raw.get("recent_token_budget", 20_000),
+            summary_token_budget=context_raw.get("summary_token_budget", 3_000),
+            tool_observation_token_budget=context_raw.get("tool_observation_token_budget", 2_000),
+        )
         agent = AgentConfig(
             llm_provider=agent_raw.get("llm_provider", "openai"),
             llm_model=agent_raw.get("llm_model", "gpt-4o"),
@@ -457,6 +480,7 @@ def load_config(path: str | Path) -> EviduneConfig:
             max_history=agent_raw.get("max_history", 20),
             temperature=agent_raw.get("temperature", 0.7),
             system_prompt=agent_raw.get("system_prompt", ""),
+            context=context_cfg,
             evaluator=evaluator,
             fact_extraction=fact_extraction,
             emergence=emergence,
@@ -484,7 +508,6 @@ def load_config(path: str | Path) -> EviduneConfig:
     graph_raw = memory_raw.get("graph", {}) or {}
     memory_config = MemoryConfig(
         path=memory_raw.get("path", "~/.evidune/memory.db"),
-        max_messages_per_conversation=memory_raw.get("max_messages_per_conversation", 100),
         graph=GraphMemoryConfig(
             enabled=graph_raw.get("enabled", True),
             index_sources=graph_raw.get(

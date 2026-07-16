@@ -20,6 +20,8 @@ class TaskBrief:
     mode: str = "execute"
     identity_name: str = ""
     history: list[dict[str, str]] = field(default_factory=list)
+    conversation_summary: str = ""
+    tool_observations: list[dict[str, Any]] = field(default_factory=list)
     facts: list[dict[str, str]] = field(default_factory=list)
     selected_skills: list[str] = field(default_factory=list)
 

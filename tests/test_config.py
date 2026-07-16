@@ -70,6 +70,9 @@ class TestLoadConfig:
         assert len(config.channels) == 1
         assert config.skills.prompt_mode == "index"
         assert config.agent is not None
+        assert config.agent.context.recent_token_budget == 20_000
+        assert config.agent.context.summary_token_budget == 3_000
+        assert config.agent.context.tool_observation_token_budget == 2_000
         assert config.agent.harness.environment.runtime_dir == ".evidune/runtime"
         assert config.agent.harness.environment.startup_timeout_s == 12
         assert config.agent.harness.validation.headless is False
@@ -77,6 +80,24 @@ class TestLoadConfig:
         assert config.agent.harness.delivery.branch_prefix == "feature/"
         assert config.agent.harness.delivery.github_enabled is False
         assert config.agent.tools.external_enabled is True
+
+    def test_context_token_budgets_can_be_overridden(self, tmp_path: Path):
+        data = {
+            "domain": "test",
+            "agent": {
+                "context": {
+                    "recent_token_budget": 16_000,
+                    "summary_token_budget": 2_000,
+                    "tool_observation_token_budget": 1_000,
+                }
+            },
+        }
+
+        config = load_config(_write_yaml(data, tmp_path / "evidune.yaml"))
+
+        assert config.agent.context.recent_token_budget == 16_000
+        assert config.agent.context.summary_token_budget == 2_000
+        assert config.agent.context.tool_observation_token_budget == 1_000
 
     def test_agent_external_tools_default_on(self, tmp_path: Path):
         data = {"domain": "test", "agent": {}}

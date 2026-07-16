@@ -240,6 +240,86 @@ class TestAgentCore:
         assert user_msgs[0]["content"] == "previous question"
 
     @pytest.mark.asyncio
+    async def test_context_detail_command_does_not_pollute_transcript(
+        self,
+        agent: AgentCore,
+        llm: MockLLM,
+        memory: MemoryStore,
+    ):
+        response = await agent.handle(
+            InboundMessage(
+                text="/context detail",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-context-detail",
+            )
+        )
+
+        assert response.metadata["context_detail"]["transcript"]["preserved_in_full"] is True
+        assert response.metadata["context_detail"]["assembly"]["surface"] == "diagnostic"
+        assert memory.get_history("c-context-detail", limit=None) == []
+        assert llm.last_messages == []
+
+    @pytest.mark.asyncio
+    async def test_includes_summary_and_tool_observations_in_prompt(
+        self,
+        agent: AgentCore,
+        llm: MockLLM,
+        memory: MemoryStore,
+    ):
+        message_id = memory.add_message("c-context-prompt", "user", "recent message")
+        memory.save_conversation_summary(
+            "c-context-prompt",
+            "用户要求保留完整会话并使用滚动摘要。",
+            covered_through_message_id=message_id,
+            source_message_count=1,
+            estimated_tokens=18,
+        )
+        memory.add_tool_observation(
+            "c-context-prompt",
+            turn_message_id=message_id,
+            tool_name="run_shell",
+            summary="pytest completed successfully",
+        )
+
+        await agent.handle(
+            InboundMessage(
+                text="continue",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-context-prompt",
+            )
+        )
+
+        system_content = llm.last_messages[0]["content"]
+        assert "# Conversation Summary" in system_content
+        assert "用户要求保留完整会话" in system_content
+        assert "# Recent Tool Observations" in system_content
+        assert "pytest completed successfully" in system_content
+
+    def test_graph_memory_uses_stable_message_id_for_chinese_recall(
+        self,
+        memory: MemoryStore,
+    ):
+        message_id = memory.add_message(
+            "c-stable-graph",
+            "user",
+            "请保留持久化会话摘要和最近原文，恢复记忆上下文。",
+        )
+        service = GraphMemoryService(memory)
+
+        result = service.reconstruct(
+            "记忆上下文",
+            conversation_id="c-stable-graph",
+        )
+
+        assert any(
+            item["source_id"] == f"c-stable-graph:message:{message_id}"
+            and item["metadata"]["message_id"] == message_id
+            for item in result.evidence_items
+        )
+
+    @pytest.mark.asyncio
     async def test_includes_facts(self, agent: AgentCore, llm: MockLLM, memory: MemoryStore):
         memory.set_fact("user.preference", "likes formal tone")
         msg = InboundMessage(text="test", sender_id="u", channel="cli", conversation_id="c-fact")
@@ -383,6 +463,11 @@ class TestAgentCore:
             ],
         }
         assert response.metadata["tool_trace"][0]["name"] == "update_plan"
+        assert response.metadata["tool_observations_saved"] == 1
+        observations = memory.list_tool_observations("c-plan", limit=None)
+        assert observations[0]["tool_name"] == "update_plan"
+        assert "Implement plan support safely" in observations[0]["summary"]
+        assert response.metadata["context_detail"]["transcript"]["preserved_in_full"] is True
 
     @pytest.mark.asyncio
     async def test_plan_mode_exposes_planning_tools_only(

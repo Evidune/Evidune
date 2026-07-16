@@ -18,6 +18,7 @@ from threading import RLock
 from typing import Any
 
 from memory.governance_store import GovernanceStoreMixin
+from memory.lexical import fts_text, lexical_terms
 from memory.rows import (
     row_to_execution,
     row_to_fact,
@@ -63,6 +64,7 @@ class MemoryStore(GovernanceStoreMixin):
         self._conn.row_factory = sqlite3.Row
         self._lock = RLock()
         init_schema(self._conn)
+        self._refresh_graph_memory_fts()
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -172,6 +174,7 @@ class MemoryStore(GovernanceStoreMixin):
 
     def _row_to_graph_node(self, row: sqlite3.Row) -> dict[str, Any]:
         payload = dict(row)
+        payload.pop("fts_rank", None)
         payload["metadata"] = self._json_load_dict(payload.pop("metadata_json", ""))
         return payload
 
@@ -179,6 +182,26 @@ class MemoryStore(GovernanceStoreMixin):
         payload = dict(row)
         payload["metadata"] = self._json_load_dict(payload.pop("metadata_json", ""))
         return payload
+
+    def _upsert_graph_memory_fts(self, node_id: str, key: str, text: str) -> None:
+        self._conn.execute("DELETE FROM graph_memory_fts WHERE node_id = ?", (node_id,))
+        self._conn.execute(
+            "INSERT INTO graph_memory_fts (node_id, search_text) VALUES (?, ?)",
+            (node_id, fts_text(key, text)),
+        )
+
+    def _refresh_graph_memory_fts(self) -> None:
+        """Rebuild the small derived FTS index from durable graph nodes."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT node_id, key, text FROM graph_memory_nodes"
+            ).fetchall()
+            self._conn.execute("DELETE FROM graph_memory_fts")
+            self._conn.executemany(
+                "INSERT INTO graph_memory_fts (node_id, search_text) VALUES (?, ?)",
+                [(row["node_id"], fts_text(row["key"], row["text"])) for row in rows],
+            )
+            self._conn.commit()
 
     def _normalise_iteration_updates(
         self, updates: list[dict[str, Any]] | None
@@ -230,12 +253,12 @@ class MemoryStore(GovernanceStoreMixin):
                 )
             self._conn.commit()
 
-    def add_message(self, conversation_id: str, role: str, content: str) -> None:
-        """Store a message in conversation history."""
+    def add_message(self, conversation_id: str, role: str, content: str) -> int:
+        """Store a message in the durable transcript and return its stable id."""
         with self._lock:
             now = self._now()
             self.ensure_conversation(conversation_id)
-            self._conn.execute(
+            cursor = self._conn.execute(
                 "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
                 (conversation_id, role, content, now),
             )
@@ -250,15 +273,171 @@ class MemoryStore(GovernanceStoreMixin):
                     (now, conversation_id),
                 )
             self._conn.commit()
+            return int(cursor.lastrowid)
 
-    def get_history(self, conversation_id: str, limit: int = 20) -> list[dict[str, str]]:
+    def get_history(
+        self,
+        conversation_id: str,
+        limit: int | None = 20,
+    ) -> list[dict[str, str]]:
         """Get recent messages for a conversation (chronological order)."""
+        records = self.get_history_records(conversation_id, limit=limit)
+        return [{"role": item["role"], "content": item["content"]} for item in records]
+
+    def get_history_records(
+        self,
+        conversation_id: str,
+        limit: int | None = 20,
+        *,
+        after_id: int = 0,
+        before_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read transcript rows with stable ids in chronological order."""
+        where = ["conversation_id = ?", "id > ?"]
+        params: list[Any] = [conversation_id, max(0, int(after_id))]
+        if before_id is not None:
+            where.append("id < ?")
+            params.append(int(before_id))
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = "LIMIT ?"
+            params.append(max(0, int(limit)))
         with self._lock:
             rows = self._conn.execute(
-                "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?",
-                (conversation_id, limit),
+                f"""SELECT id, conversation_id, role, content, created_at
+                    FROM messages
+                    WHERE {' AND '.join(where)}
+                    ORDER BY id DESC
+                    {limit_clause}""",
+                params,
             ).fetchall()
-        return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+        return [dict(row) for row in reversed(rows)]
+
+    def save_conversation_summary(
+        self,
+        conversation_id: str,
+        summary: str,
+        *,
+        covered_through_message_id: int,
+        source_message_count: int,
+        estimated_tokens: int,
+    ) -> None:
+        """Persist the rolling semantic summary for one full transcript."""
+        with self._lock:
+            self.ensure_conversation(conversation_id)
+            now = self._now()
+            self._conn.execute(
+                """INSERT INTO conversation_summaries
+                   (conversation_id, summary, covered_through_message_id,
+                    source_message_count, estimated_tokens, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(conversation_id) DO UPDATE SET
+                     summary = excluded.summary,
+                     covered_through_message_id = excluded.covered_through_message_id,
+                     source_message_count = excluded.source_message_count,
+                     estimated_tokens = excluded.estimated_tokens,
+                     updated_at = excluded.updated_at""",
+                (
+                    conversation_id,
+                    summary,
+                    int(covered_through_message_id),
+                    int(source_message_count),
+                    int(estimated_tokens),
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
+
+    def get_conversation_summary(self, conversation_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM conversation_summaries WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def add_tool_observation(
+        self,
+        conversation_id: str,
+        *,
+        turn_message_id: int,
+        tool_name: str,
+        summary: str,
+        is_error: bool = False,
+    ) -> int:
+        """Persist one compact tool result without retaining the raw payload."""
+        with self._lock:
+            self.ensure_conversation(conversation_id)
+            cursor = self._conn.execute(
+                """INSERT INTO tool_observations
+                   (conversation_id, turn_message_id, tool_name, summary, is_error, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    conversation_id,
+                    int(turn_message_id),
+                    tool_name,
+                    summary,
+                    int(is_error),
+                    self._now(),
+                ),
+            )
+            self._conn.commit()
+            return int(cursor.lastrowid)
+
+    def list_tool_observations(
+        self,
+        conversation_id: str,
+        *,
+        limit: int | None = 20,
+        after_id: int = 0,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [conversation_id, max(0, int(after_id))]
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = "LIMIT ?"
+            params.append(max(0, int(limit)))
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT id, conversation_id, turn_message_id, tool_name,
+                           summary, is_error, created_at
+                    FROM tool_observations
+                    WHERE conversation_id = ? AND id > ?
+                    ORDER BY id DESC
+                    {limit_clause}""",
+                params,
+            ).fetchall()
+        result = [dict(row) for row in reversed(rows)]
+        for item in result:
+            item["is_error"] = bool(item["is_error"])
+        return result
+
+    def save_context_report(self, conversation_id: str, report: dict[str, Any]) -> None:
+        with self._lock:
+            self.ensure_conversation(conversation_id)
+            self._conn.execute(
+                """INSERT INTO conversation_context_reports
+                   (conversation_id, report_json, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(conversation_id) DO UPDATE SET
+                     report_json = excluded.report_json,
+                     updated_at = excluded.updated_at""",
+                (conversation_id, self._json_dump(report), self._now()),
+            )
+            self._conn.commit()
+
+    def get_context_report(self, conversation_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT report_json, updated_at FROM conversation_context_reports "
+                "WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        report = self._json_load_dict(row["report_json"])
+        report["updated_at"] = row["updated_at"]
+        return report
 
     def trim_history(self, conversation_id: str, keep: int = 100) -> int:
         """Delete old messages beyond the keep limit. Returns number deleted."""
@@ -497,6 +676,26 @@ class MemoryStore(GovernanceStoreMixin):
         Returns True if the conversation row existed.
         """
         with self._lock:
+            graph_rows = self._conn.execute(
+                """SELECT node_id FROM graph_memory_nodes
+                   WHERE source_type = 'message'
+                     AND instr(source_id, ?) = 1""",
+                (f"{conversation_id}:",),
+            ).fetchall()
+            graph_node_ids = [row["node_id"] for row in graph_rows]
+            self._delete_graph_memory_nodes(graph_node_ids)
+            self._conn.execute(
+                "DELETE FROM conversation_context_reports WHERE conversation_id = ?",
+                (conversation_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM conversation_summaries WHERE conversation_id = ?",
+                (conversation_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM tool_observations WHERE conversation_id = ?",
+                (conversation_id,),
+            )
             self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
             self._conn.execute(
                 """DELETE FROM skill_evaluations
@@ -660,8 +859,42 @@ class MemoryStore(GovernanceStoreMixin):
                     now,
                 ),
             )
+            self._upsert_graph_memory_fts(node_id, key, text or "")
             self._conn.commit()
         return node_id
+
+    def _delete_graph_memory_nodes(self, node_ids: list[str]) -> None:
+        for node_id in node_ids:
+            self._conn.execute(
+                "DELETE FROM graph_memory_edges WHERE from_node_id = ? OR to_node_id = ?",
+                (node_id, node_id),
+            )
+            self._conn.execute(
+                "DELETE FROM graph_memory_fts WHERE node_id = ?",
+                (node_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM graph_memory_nodes WHERE node_id = ?",
+                (node_id,),
+            )
+
+    def prune_graph_memory_message_sources(
+        self,
+        conversation_id: str,
+        valid_source_ids: set[str],
+    ) -> int:
+        """Remove legacy or stale positional message graph nodes."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT node_id, source_id FROM graph_memory_nodes
+                   WHERE source_type = 'message'
+                     AND instr(source_id, ?) = 1""",
+                (f"{conversation_id}:",),
+            ).fetchall()
+            stale_ids = [row["node_id"] for row in rows if row["source_id"] not in valid_source_ids]
+            self._delete_graph_memory_nodes(stale_ids)
+            self._conn.commit()
+        return len(stale_ids)
 
     def upsert_graph_memory_edge(
         self,
@@ -723,36 +956,38 @@ class MemoryStore(GovernanceStoreMixin):
         node_types: list[str] | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """Search graph nodes by deterministic key/text overlap."""
-        tokens = [token.lower() for token in str(query or "").split() if token.strip()]
-        if not tokens:
+        """Search graph nodes through multilingual SQLite FTS5."""
+        terms = lexical_terms(query, limit=24)
+        if not terms:
             return []
         allowed_types = set(node_types or _GRAPH_NODE_TYPES)
         for node_type in allowed_types:
             self._normalise_graph_node_type(node_type)
+        placeholders = ",".join("?" for _ in allowed_types)
+        match_query = " OR ".join(f'"{term}"' for term in terms)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM graph_memory_nodes ORDER BY updated_at DESC"
+                f"""SELECT n.*, bm25(graph_memory_fts) AS fts_rank
+                    FROM graph_memory_fts
+                    JOIN graph_memory_nodes n ON n.node_id = graph_memory_fts.node_id
+                    WHERE graph_memory_fts MATCH ?
+                      AND n.node_type IN ({placeholders})
+                    ORDER BY CASE n.node_type
+                               WHEN 'cue' THEN 0
+                               WHEN 'tag' THEN 1
+                               ELSE 2
+                             END,
+                             fts_rank,
+                             n.updated_at DESC
+                    LIMIT ?""",
+                [match_query, *sorted(allowed_types), max(0, int(limit))],
             ).fetchall()
-        scored: list[tuple[float, dict[str, Any]]] = []
+        result: list[dict[str, Any]] = []
         for row in rows:
             node = self._row_to_graph_node(row)
-            if node["node_type"] not in allowed_types:
-                continue
-            haystack = f"{node['key']} {node['text']}".lower()
-            score = 0.0
-            for token in tokens:
-                if token == node["key"].lower():
-                    score += 3.0
-                elif token in node["key"].lower():
-                    score += 2.0
-                elif token in haystack:
-                    score += 1.0
-            if score > 0:
-                node["score"] = score
-                scored.append((score, node))
-        scored.sort(key=lambda item: (item[0], item[1]["updated_at"]), reverse=True)
-        return [node for _, node in scored[: max(0, int(limit))]]
+            node["score"] = -float(row["fts_rank"] or 0.0)
+            result.append(node)
+        return result
 
     def expand_graph_memory(
         self,

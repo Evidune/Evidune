@@ -8,6 +8,7 @@ always available in tool-use mode. Pair them with external tools
 from __future__ import annotations
 
 from agent.tools.base import Tool
+from agent.tools.conversation import conversation_tools as conversation_tools
 from agent.tools.identity_tools import identity_tools as identity_tools
 from memory.store import MemoryStore
 from skills.registry import SkillRegistry
@@ -153,51 +154,6 @@ def skill_tools(skills: SkillRegistry) -> list[Tool]:
                 "required": ["skill_name", "file"],
             },
             handler=read_skill_reference,
-        ),
-    ]
-
-
-def conversation_tools(memory: MemoryStore, current_conversation_id: str) -> list[Tool]:
-    """Let the LLM browse other conversations (useful for cross-chat continuity)."""
-
-    async def list_conversations(limit: int = 10) -> list[dict]:
-        convs = memory.list_conversations(limit=limit)
-        return [
-            {
-                "id": c["id"],
-                "title": c["title"] or "(untitled)",
-                "preview": c["preview"],
-                "updated_at": c["updated_at"],
-                "is_current": c["id"] == current_conversation_id,
-            }
-            for c in convs
-        ]
-
-    async def read_conversation(conversation_id: str, limit: int = 20) -> list[dict]:
-        return memory.get_history(conversation_id, limit=limit)
-
-    return [
-        Tool(
-            name="list_conversations",
-            description="List recent conversations (id, title, preview).",
-            parameters={
-                "type": "object",
-                "properties": {"limit": {"type": "integer", "default": 10}},
-            },
-            handler=list_conversations,
-        ),
-        Tool(
-            name="read_conversation",
-            description="Read the message history of another conversation by id.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "conversation_id": {"type": "string"},
-                    "limit": {"type": "integer", "default": 20},
-                },
-                "required": ["conversation_id"],
-            },
-            handler=read_conversation,
         ),
     ]
 

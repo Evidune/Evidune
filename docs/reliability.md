@@ -28,6 +28,12 @@ Run the deterministic browser harness for the web gateway with:
   should be checked automatically.
 - Use repository-local artifacts for context. If a failure only exists in chat,
   the next agent cannot debug it.
+- Diagnose prompt pressure through the persisted `context_detail` report or
+  `GET /api/conversations/{conversation_id}/context`; do not infer assembled
+  context from the configured model window alone.
+- Conversation transcript rows must not be removed by normal prompt-budget
+  management. Rolling summaries and recent-message selection are derived
+  context, not destructive retention policies.
 
 ## Next Reliability Milestones
 

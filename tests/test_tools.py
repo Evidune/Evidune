@@ -326,6 +326,18 @@ class TestConversationTools:
         assert ids == {"c1", "c2"}
         assert any(c["is_current"] for c in listing)
 
+    @pytest.mark.asyncio
+    async def test_context_detail_reports_last_assembled_context(self, memory: MemoryStore):
+        memory.add_message("c1", "user", "hi")
+        memory.save_context_report("c1", {"transcript": {"preserved_in_full": True}})
+        tools = {t.name: t for t in conversation_tools(memory, current_conversation_id="c1")}
+
+        result = await tools["context_detail"].handler()
+
+        assert result["available"] is True
+        assert result["conversation_id"] == "c1"
+        assert result["transcript"]["preserved_in_full"] is True
+
 
 class TestPlanTools:
     @pytest.mark.asyncio

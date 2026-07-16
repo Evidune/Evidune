@@ -2,32 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
-_TOKEN_RE = re.compile(r"[a-z0-9_./-]+|[\u4e00-\u9fff]", re.IGNORECASE)
-_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "for",
-    "how",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "should",
-    "the",
-    "this",
-    "to",
-    "use",
-    "with",
-    "work",
-}
+from memory.lexical import lexical_terms
+
 SOURCE_PRIORITY = {
     "skill": 5,
     "skill_reference": 4,
@@ -56,13 +35,4 @@ class ReconstructedContext:
 
 
 def extract_cues(text: str, *, max_cues: int = 30) -> list[str]:
-    cues: list[str] = []
-    for raw in _TOKEN_RE.findall(text or ""):
-        token = raw.lower().strip("._/-")
-        if len(token) < 2 or token in _STOPWORDS:
-            continue
-        if token not in cues:
-            cues.append(token)
-        if len(cues) >= max_cues:
-            break
-    return cues
+    return lexical_terms(text, limit=max_cues)

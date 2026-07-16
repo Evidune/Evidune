@@ -165,6 +165,15 @@ class TestConversationEndpoints:
         result = gateway._conversation_history("nope")
         assert "error" in result
 
+    def test_conversation_context_detail(self, gateway: WebGateway, store: MemoryStore):
+        store.add_message("c1", "user", "hello")
+        store.save_context_report("c1", {"summary": {"present": True}})
+
+        result = gateway._conversation_context("c1")
+
+        assert result["available"] is True
+        assert result["context"]["summary"]["present"] is True
+
     def test_archive_sets_status(self, gateway: WebGateway, store: MemoryStore):
         store.add_message("c1", "user", "hi")
         result = gateway._set_status("c1", "archived")
