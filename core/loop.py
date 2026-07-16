@@ -1014,6 +1014,7 @@ def main(argv: list[str] | None = None) -> int:
             "validate",
             "delivery",
             "maintenance",
+            "eval",
         ],
         help="Command to execute",
     )
@@ -1037,6 +1038,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--message", default="", help="Commit message for delivery submit")
     parser.add_argument("--pr-title", default="", help="Pull request title for delivery submit")
     parser.add_argument("--pr-body", default="", help="Pull request body for delivery submit")
+    parser.add_argument("--manifest", default="", help="Evaluation corpus manifest")
+    parser.add_argument("--catalog", default="", help="Pinned third-party Skill catalog")
+    parser.add_argument("--split", default="development", help="Evaluation corpus split")
+    parser.add_argument("--skill-path", default="", help="Parent or active SKILL.md path")
+    parser.add_argument("--candidate-path", default="", help="Candidate SKILL.md path")
+    parser.add_argument("--skill-name", default="", help="Skill name override for evaluation")
+    parser.add_argument("--mutation", action="append", default=[], help="Known-bad mutation")
+    parser.add_argument(
+        "--with-baseline", action="store_true", help="Also execute a no-Skill baseline"
+    )
+    parser.add_argument(
+        "--promote-on-success",
+        action="store_true",
+        help="Promote a provenance-linked candidate after all holdout gates pass",
+    )
+    parser.add_argument(
+        "--iterate-on-failure",
+        action="store_true",
+        help="Stage an immutable candidate from attributed evaluation failures",
+    )
+    parser.add_argument("--trials", type=int, default=3, help="Trials per task and variant")
+    parser.add_argument("--experiment-id", default="", help="Skill experiment id")
+    parser.add_argument("--format", default="json", help="Evaluation report format")
+    parser.add_argument("--reason", default="", help="Lifecycle transition reason")
+    parser.add_argument("--dataset", default="dev", help="External benchmark dataset name")
+    parser.add_argument("--source-commit", default="", help="Pinned 40-character source commit")
+    parser.add_argument("--limit", type=int, default=30, help="Maximum imported corpus tasks")
     parser.add_argument("--section", default="", help="Section for configure")
     parser.add_argument("--provider", default="", help="LLM provider for configure/onboard")
     parser.add_argument("--model", default="", help="LLM model for configure/onboard")
@@ -1130,6 +1158,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "maintenance":
             return _handle_maintenance_command(config, base_dir, config_path, args.subcommand)
+        if args.command == "eval":
+            from core.evaluation_cli import handle_evaluation_command
+
+            return asyncio.run(handle_evaluation_command(config, base_dir, args))
     except ValueError as exc:
         parser.error(str(exc))
     return 0

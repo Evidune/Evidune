@@ -37,17 +37,19 @@ class TestInitProject:
         exit_code = main(["run", "--config", str(project_dir / "evidune.yaml")])
         assert exit_code == 0
 
-        skill_content = (project_dir / "skills" / "task-execution" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        assert "Auto-updated by evidune" in skill_content
-
         store = MemoryStore(project_dir / ".evidune" / "memory.db")
         try:
             runs = store.list_iteration_runs()
             assert len(runs) == 1
+            candidates = store.list_skill_experiments("task-execution", status="candidate")
+            assert len(candidates) == 1
+            assert "Auto-updated by evidune" in candidates[0]["candidate_content"]
         finally:
             store.close()
+        active = (project_dir / "skills" / "task-execution" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        assert "Auto-updated by evidune" not in active
 
     def test_init_project_refuses_to_overwrite_existing_files(self, tmp_path: Path):
         project_dir = tmp_path / "demo"
@@ -66,5 +68,10 @@ def test_bundled_agent_example_runs_one_iteration(tmp_path: Path):
     assert exit_code == 0
 
     assert (copied / ".evidune" / "agent-memory.db").exists()
-    skill_content = (copied / "skills" / "task-execution" / "SKILL.md").read_text(encoding="utf-8")
-    assert "Auto-updated by evidune" in skill_content
+    store = MemoryStore(copied / ".evidune" / "agent-memory.db")
+    try:
+        candidates = store.list_skill_experiments("task-execution", status="candidate")
+        assert len(candidates) == 1
+        assert "Auto-updated by evidune" in candidates[0]["candidate_content"]
+    finally:
+        store.close()

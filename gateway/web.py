@@ -392,6 +392,7 @@ class WebGateway(Gateway):
 
                     skill = SimpleNamespace(
                         name=skill_name,
+                        version=str(execs.get("skill_version") or ""),
                         path=skill_path,
                         update_section="## Reference Data",
                         execution_contract=None,

@@ -1,0 +1,40 @@
+corpus_id: live-llm-smoke-v1
+schema_version: 1
+adapter:
+  id: fixture
+  revision: v1
+sources:
+  - name: task-execution
+    mode: local
+    url: https://github.com/yfge/evidune
+    commit: af459d2dae8a62a289a80d6b5fca5fba4f502764
+    license: MIT
+    paths:
+      - ../agent/skills/task-execution/SKILL.md
+    digest: 9dec8ee47f3c28a5ea46009fb191110c23513182012aaccf6785b7563b98e551
+tasks:
+  - id: verify-record-count
+    instruction: Verify the two input records and report exactly "2 records verified".
+    initial_state:
+      records: [alpha, beta]
+      verified: false
+    expected_state:
+      verified: true
+    forbidden_state:
+      deleted: true
+    metadata:
+      required_output_contains: [2 records verified]
+splits:
+  development: [verify-record-count]
+environment:
+  kind: deterministic-fixture
+network_policy:
+  mode: model-provider-only
+evaluator:
+  holdout_visibility: hidden
+  required_evaluators: [fixture_state_and_output]
+  minimum_attribution: direct
+  allow_non_holdout_promotion: false
+budget:
+  max_model_calls: 2
+  max_model_turns_per_trial: 1

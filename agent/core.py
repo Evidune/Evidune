@@ -25,6 +25,7 @@ from agent.skill_rewriter import propose_skill_rewrite
 from agent.skill_synthesizer import SkillSynthesizer
 from agent.title_generator import TitleGenerator
 from agent.tools.base import ToolCall
+from agent.tools.evidence import evidence_commitment_tools
 from agent.tools.graph_memory import graph_memory_tools
 from agent.tools.internal import (
     conversation_tools,
@@ -43,6 +44,7 @@ from skills.evaluation import (
     parse_evaluation_contract,
     upsert_contract_frontmatter,
 )
+from skills.governance import EvaluationResult, EvaluationVerdict, canonical_digest, text_digest
 from skills.loader import Skill, parse_skill
 from skills.models import SkillMatch
 from skills.registry import SkillRegistry
@@ -221,6 +223,7 @@ class AgentCore:
         )
         registry.register_many(plan_tools(self.memory, current_conversation_id=conversation_id))
         if mode == "execute":
+            registry.register_many(evidence_commitment_tools())
             registry.register_many(self.tool_registry.all())
         return registry
 
@@ -302,6 +305,26 @@ class AgentCore:
             "type": "function",
             "function": {"name": tc.name, "arguments": _json.dumps(tc.arguments)},
         }
+
+    @staticmethod
+    def _extract_evidence_commitments(tool_trace: list[dict]) -> list[dict[str, Any]]:
+        commitments: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for entry in tool_trace:
+            if entry.get("name") != "commit_outcome_evidence" or entry.get("is_error"):
+                continue
+            try:
+                payload = json.loads(str(entry.get("result") or ""))
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or payload.get("kind") != "evidence_commitment":
+                continue
+            digest = str(payload.get("commitment_digest") or "")
+            if not digest or digest in seen:
+                continue
+            seen.add(digest)
+            commitments.append(payload)
+        return commitments
 
     def _resolve_identity(
         self, message: InboundMessage, conversation_meta: dict | None = None
@@ -877,7 +900,18 @@ class AgentCore:
         )
 
         # 8. Record skill execution(s) for outcome iteration / feedback
+        contract_statuses: dict[str, str] = {}
+        if self.self_evaluator:
+            for skill in execution_skills:
+                contract_statuses[skill.name] = await self._ensure_skill_evaluation_contract(
+                    skill,
+                    user_input=message.text,
+                    assistant_output=response_text,
+                )
         execution_ids: list[int] = []
+        evidence_commitments = self._extract_evidence_commitments(tool_trace)
+        evidence_binding_ids: list[str] = []
+        evidence_binding_errors: list[str] = []
         for skill in execution_skills:
             origin = self._skill_origin(skill.name)
             self.memory.upsert_skill_state(
@@ -886,20 +920,99 @@ class AgentCore:
                 path=str(skill.path),
                 status=self.memory.resolve_skill_status(skill.name),
             )
+            skill_content = (
+                skill.path.read_text(encoding="utf-8")
+                if skill.path.is_file()
+                else skill.instructions
+            )
+            execution_contract_digest = ""
+            if skill.execution_contract is not None:
+                execution_contract_digest = self.memory.record_contract_snapshot(
+                    contract_kind="execution",
+                    contract=skill.execution_contract.to_dict(),
+                    contract_version=str(skill.execution_contract.version),
+                    source=str(skill.path),
+                )
+            outcome_contract_digest = ""
+            if skill.outcome_contract is not None:
+                outcome_contract_digest = self.memory.record_contract_snapshot(
+                    contract_kind="outcome",
+                    contract=skill.outcome_contract.to_dict(),
+                    source=str(skill.path),
+                )
             eid = self.memory.record_execution(
                 skill_name=skill.name,
+                skill_version=skill.version,
+                skill_digest=text_digest(skill_content),
                 user_input=message.text,
                 assistant_output=response_text,
                 conversation_id=message.conversation_id,
                 harness_task_id=task_id,
+                tool_trace=tool_trace,
+                external_entities=[
+                    {
+                        "entity_type": item["entity_type"],
+                        "entity_id": item["entity_id"],
+                        "commitment_digest": item["commitment_digest"],
+                    }
+                    for item in evidence_commitments
+                    if not item.get("skill_name") or item.get("skill_name") == skill.name
+                ],
+                model_ref={
+                    "provider": self.llm.__class__.__name__,
+                    "model": str(getattr(self.llm, "model", "")),
+                    "temperature": getattr(self.llm, "temperature", None),
+                },
+                execution_contract_digest=execution_contract_digest,
+                outcome_contract_digest=outcome_contract_digest,
             )
             execution_ids.append(eid)
+            for commitment in evidence_commitments:
+                target_skill = str(commitment.get("skill_name") or "")
+                if target_skill and target_skill != skill.name:
+                    continue
+                if not target_skill and len(execution_skills) != 1:
+                    evidence_binding_errors.append(
+                        "Ambiguous evidence commitment requires skill_name when multiple Skills execute"
+                    )
+                    continue
+                plan = dict(commitment["observation_plan"])
+                try:
+                    binding_id = self.memory.create_evidence_binding(
+                        execution_id=eid,
+                        skill_name=skill.name,
+                        skill_version=skill.version,
+                        entity_type=commitment["entity_type"],
+                        entity_id=commitment["entity_id"],
+                        intervention=commitment["intervention"],
+                        expected_state=commitment["expected_state"],
+                        forbidden_state=commitment["forbidden_state"],
+                        observation_plan=plan,
+                        attribution_policy=commitment["attribution_policy"],
+                        minimum_evidence_grade=commitment["minimum_evidence_grade"],
+                        probe_digest=canonical_digest(
+                            {"probe_id": plan.get("probe_id"), "horizons": plan.get("horizons")}
+                        ),
+                        evaluator_digest=canonical_digest(
+                            {
+                                "evaluator_id": plan.get("evaluator_id"),
+                                "evaluator_revision": plan.get("evaluator_revision"),
+                                "horizons": plan.get("horizons"),
+                            }
+                        ),
+                        contract_digest=outcome_contract_digest,
+                    )
+                except ValueError as exc:
+                    evidence_binding_errors.append(str(exc))
+                else:
+                    evidence_binding_ids.append(binding_id)
         execution_evaluations = await self._maybe_evaluate_executions(
             execution_skills,
             message.text,
             response_text,
             execution_ids,
             tool_trace=tool_trace,
+            contract_statuses=contract_statuses,
         )
         lifecycle_updates = await self._maybe_reconcile_skill_feedback(execution_skills)
 
@@ -941,6 +1054,8 @@ class AgentCore:
                 "facts_extracted": extracted_count,
                 "evaluations_recorded": len(execution_evaluations),
                 "execution_evaluations": execution_evaluations,
+                "evidence_binding_ids": evidence_binding_ids,
+                "evidence_binding_errors": evidence_binding_errors,
                 "outcome_governance": [],
                 "emerged_skill": emergence_decision.emerged_skill,
                 "skill_creation": emergence_decision.skill_creation,
@@ -1009,6 +1124,7 @@ class AgentCore:
         execution_ids: list[int],
         *,
         tool_trace: list[dict] | None = None,
+        contract_statuses: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Persist cross-model evaluation scores for matched skill executions."""
         if not self.self_evaluator:
@@ -1016,10 +1132,17 @@ class AgentCore:
 
         saved: list[dict[str, Any]] = []
         for skill, execution_id in zip(skills, execution_ids, strict=False):
-            contract_status = await self._ensure_skill_evaluation_contract(
-                skill,
-                user_input=user_input,
-                assistant_output=assistant_output,
+            contract_status = (contract_statuses or {}).get(skill.name)
+            if contract_status is None:
+                contract_status = await self._ensure_skill_evaluation_contract(
+                    skill,
+                    user_input=user_input,
+                    assistant_output=assistant_output,
+                )
+            execution = self.memory.get_skill_executions_by_id(execution_id) or {}
+            contract = skill.execution_contract
+            evaluator_revision = (
+                f"contract-v{contract.version}" if contract is not None else "legacy-v1"
             )
             try:
                 evaluation = await self.self_evaluator.evaluate(
@@ -1033,7 +1156,49 @@ class AgentCore:
             # Unparseable judge output is not evidence; keep it out of the
             # score averages that drive rewrite/disable decisions.
             if not evaluation.valid:
+                self.memory.record_evaluation_result(
+                    EvaluationResult(
+                        execution_id=execution_id,
+                        skill_name=skill.name,
+                        skill_version=skill.version,
+                        contract_digest=execution.get("execution_contract_digest", ""),
+                        evaluator_id="cross_model_skill_judge",
+                        evaluator_revision=evaluator_revision,
+                        evaluator_type="llm_judge",
+                        verdict=EvaluationVerdict.INVALID,
+                        uncertainty="high",
+                        reasoning=evaluation.reasoning,
+                        evidence_refs=[f"execution://{execution_id}"],
+                        metadata={"advisory": True, "parse_valid": False},
+                    ).to_dict()
+                )
                 continue
+            pass_threshold = contract.min_pass_score if contract is not None else 0.7
+            typed_result = EvaluationResult(
+                execution_id=execution_id,
+                skill_name=skill.name,
+                skill_version=skill.version,
+                contract_digest=execution.get("execution_contract_digest", ""),
+                evaluator_id="cross_model_skill_judge",
+                evaluator_revision=evaluator_revision,
+                evaluator_type="llm_judge",
+                verdict=(
+                    EvaluationVerdict.PASS
+                    if evaluation.score >= pass_threshold
+                    else EvaluationVerdict.FAIL
+                ),
+                score=evaluation.score,
+                uncertainty="high",
+                dimensions={
+                    "criteria_scores": evaluation.criteria_scores or {},
+                    "observed_metrics": evaluation.observed_metrics or {},
+                    "missing_observations": evaluation.missing_observations or [],
+                },
+                reasoning=evaluation.reasoning,
+                evidence_refs=[f"execution://{execution_id}"],
+                metadata={"advisory": True, "parse_valid": True},
+            )
+            self.memory.record_evaluation_result(typed_result.to_dict())
             if self.memory.update_execution_score(
                 execution_id,
                 evaluation.score,
@@ -1235,7 +1400,11 @@ class AgentCore:
                 task_kind="skill_feedback",
             )
             summary = packet.feedback
-            if summary is None or (summary.signal_samples == 0 and summary.score_samples == 0):
+            if summary is None or (
+                summary.signal_samples == 0
+                and summary.score_samples == 0
+                and not packet.governance_aggregate.get("contributing_execution_ids")
+            ):
                 continue
             workflow = IterationHarness(self.memory)
             if workflow.rewrite_is_due(packet):
@@ -1245,6 +1414,10 @@ class AgentCore:
             decision = workflow.run(packet=packet)
             if decision.decision in {"rollback", "disable"}:
                 self.skills.unregister(skill.name)
+                updated.append(skill.name)
+            elif decision.skill_status == "candidate":
+                # The active registry intentionally stays on the parent until
+                # an execution-grounded experiment promotes the candidate.
                 updated.append(skill.name)
             elif decision.update.has_changes:
                 # A rewrite/refresh changed SKILL.md on disk; re-register so the

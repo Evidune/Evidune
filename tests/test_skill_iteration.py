@@ -105,24 +105,30 @@ def _setup_project(tmp_path: Path, auto_update: bool = True) -> Path:
 
 
 class TestSkillSelfIteration:
-    def test_updates_outcome_skill_reference_data(self, tmp_path: Path):
+    def test_stages_outcome_skill_candidate_without_mutating_active(self, tmp_path: Path):
         cfg_path = _setup_project(tmp_path)
         config = load_config(cfg_path)
+        skill_path = tmp_path / "skills" / "write-article" / "SKILL.md"
+        original = skill_path.read_text()
 
         run_iteration(config, base_dir=tmp_path)
 
-        skill_content = (tmp_path / "skills" / "write-article" / "SKILL.md").read_text()
+        assert skill_path.read_text() == original
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            candidates = store.list_skill_experiments("write-article", status="candidate")
+            assert len(candidates) == 1
+            skill_content = candidates[0]["candidate_content"]
+        finally:
+            store.close()
 
-        # Reference Data section should be replaced with outcome governance data
         assert "KPI Window: reads" in skill_content
         assert "Current value:" in skill_content
         assert "Baseline value:" in skill_content
         assert "Auto-updated by evidune" in skill_content
 
-        # Placeholder text is gone
         assert "(placeholder — will be replaced by evidune)" not in skill_content
 
-        # Instructions are rewritten with a managed adjustment block
         assert "## Instructions" in skill_content
         assert "Write good stuff." in skill_content
         assert "### Outcome-Backed Adjustments" in skill_content
@@ -158,10 +164,11 @@ class TestSkillSelfIteration:
 
         report = run_iteration(config, base_dir=tmp_path)
 
-        # The update list should include the skill file that was changed
-        changed_paths = [u.path for u in report.updates if u.has_changes]
-        assert any("write-article/SKILL.md" in p for p in changed_paths)
-        assert not any("other-skill" in p for p in changed_paths)
+        candidates = [u for u in report.updates if u.strategy.endswith("_candidate")]
+        assert len(candidates) == 1
+        assert candidates[0].path.startswith("candidate://")
+        assert candidates[0].has_changes is False
+        assert not any("other-skill" in u.path for u in report.updates)
 
     def test_custom_update_section(self, tmp_path: Path):
         # Skill with custom update_section frontmatter
@@ -224,9 +231,16 @@ class TestSkillSelfIteration:
         config = load_config(cfg_path)
         run_iteration(config, base_dir=tmp_path)
 
-        skill_content = (tmp_path / "skills" / "custom" / "SKILL.md").read_text()
+        active = (tmp_path / "skills" / "custom" / "SKILL.md").read_text()
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            candidates = store.list_skill_experiments("custom", status="candidate")
+            assert len(candidates) == 1
+            skill_content = candidates[0]["candidate_content"]
+        finally:
+            store.close()
 
-        # Custom section was updated
+        assert "(old data here)" in active
         assert "Auto-updated by evidune" in skill_content
         assert "KPI Window: reads" in skill_content
         assert "(old data here)" not in skill_content
@@ -234,7 +248,7 @@ class TestSkillSelfIteration:
         # Default "## Reference Data" section was NOT touched
         assert "This one should NOT be updated." in skill_content
 
-    def test_rolls_back_previous_rewrite_after_negative_feedback(self, tmp_path: Path):
+    def test_rejects_pending_candidate_after_negative_feedback(self, tmp_path: Path):
         cfg_path = _setup_project(tmp_path)
         config = load_config(cfg_path)
 
@@ -259,4 +273,10 @@ class TestSkillSelfIteration:
 
         assert "Write good stuff." in skill_content
         assert "### Outcome-Backed Adjustments" not in skill_content
-        assert "Auto-updated by evidune" in skill_content
+        assert "Auto-updated by evidune" not in skill_content
+        store = MemoryStore(tmp_path / "memory.db")
+        try:
+            rejected = store.list_skill_experiments("write-article", status="rejected")
+            assert len(rejected) == 1
+        finally:
+            store.close()

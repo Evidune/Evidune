@@ -25,14 +25,29 @@ CREATE TABLE IF NOT EXISTS conversations (
 
 CREATE TABLE IF NOT EXISTS skill_executions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    execution_uid TEXT DEFAULT '',
     skill_name TEXT NOT NULL,
+    skill_version TEXT DEFAULT '',
+    skill_digest TEXT DEFAULT '',
     conversation_id TEXT,
     harness_task_id TEXT DEFAULT '',
+    experiment_id TEXT DEFAULT '',
+    corpus_id TEXT DEFAULT '',
+    benchmark_task_id TEXT DEFAULT '',
+    variant TEXT DEFAULT '',
     user_input TEXT NOT NULL,
     assistant_output TEXT NOT NULL,
+    tool_trace_json TEXT DEFAULT '[]',
+    artifact_refs_json TEXT DEFAULT '[]',
+    external_entities_json TEXT DEFAULT '[]',
+    model_ref_json TEXT DEFAULT '{}',
+    execution_contract_digest TEXT DEFAULT '',
+    outcome_contract_digest TEXT DEFAULT '',
     signals_json TEXT DEFAULT '{}',
     cross_model_score REAL,
     evaluator_reasoning TEXT,
+    started_at TEXT DEFAULT '',
+    completed_at TEXT DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -98,6 +113,146 @@ CREATE TABLE IF NOT EXISTS skill_evaluations (
     reasoning TEXT DEFAULT '',
     contract_version INTEGER DEFAULT 1,
     created_at TEXT NOT NULL,
+    FOREIGN KEY (execution_id) REFERENCES skill_executions(id)
+);
+
+CREATE TABLE IF NOT EXISTS evaluation_contract_snapshots (
+    digest TEXT PRIMARY KEY,
+    contract_kind TEXT NOT NULL,
+    contract_version TEXT DEFAULT '',
+    contract_json TEXT NOT NULL,
+    source TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS evaluation_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    result_uid TEXT NOT NULL UNIQUE,
+    execution_id INTEGER NOT NULL,
+    skill_name TEXT DEFAULT '',
+    skill_version TEXT DEFAULT '',
+    evaluator_id TEXT NOT NULL,
+    evaluator_revision TEXT NOT NULL,
+    evaluator_type TEXT NOT NULL,
+    contract_digest TEXT DEFAULT '',
+    verdict TEXT NOT NULL,
+    score REAL,
+    uncertainty TEXT DEFAULT 'unknown',
+    dimensions_json TEXT DEFAULT '{}',
+    failure_modes_json TEXT DEFAULT '[]',
+    evidence_refs_json TEXT DEFAULT '[]',
+    hard_gate_failures_json TEXT DEFAULT '[]',
+    attribution_grade TEXT DEFAULT 'unknown',
+    reasoning TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (execution_id) REFERENCES skill_executions(id)
+);
+
+CREATE TABLE IF NOT EXISTS evidence_bindings (
+    id TEXT PRIMARY KEY,
+    execution_id INTEGER NOT NULL,
+    skill_name TEXT NOT NULL,
+    skill_version TEXT DEFAULT '',
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    intervention_json TEXT DEFAULT '{}',
+    expected_state_json TEXT DEFAULT '{}',
+    forbidden_state_json TEXT DEFAULT '{}',
+    observation_plan_json TEXT DEFAULT '{}',
+    attribution_policy TEXT DEFAULT 'unknown',
+    minimum_evidence_grade TEXT DEFAULT 'unknown',
+    probe_digest TEXT DEFAULT '',
+    evaluator_digest TEXT DEFAULT '',
+    contract_digest TEXT DEFAULT '',
+    status TEXT DEFAULT 'committed',
+    reason TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (execution_id) REFERENCES skill_executions(id)
+);
+
+CREATE TABLE IF NOT EXISTS probe_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    binding_id TEXT NOT NULL,
+    horizon_id TEXT NOT NULL,
+    probe_revision TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL,
+    payload_json TEXT DEFAULT '{}',
+    error TEXT DEFAULT '',
+    lease_owner TEXT DEFAULT '',
+    started_at TEXT DEFAULT '',
+    completed_at TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(binding_id, horizon_id, probe_revision, attempt_number),
+    FOREIGN KEY (binding_id) REFERENCES evidence_bindings(id)
+);
+
+CREATE TABLE IF NOT EXISTS evidence_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    binding_id TEXT NOT NULL,
+    horizon_id TEXT NOT NULL,
+    probe_revision TEXT NOT NULL,
+    observation_kind TEXT NOT NULL,
+    payload_json TEXT DEFAULT '{}',
+    evidence_ref TEXT DEFAULT '',
+    observed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(binding_id, horizon_id, probe_revision),
+    FOREIGN KEY (binding_id) REFERENCES evidence_bindings(id)
+);
+
+CREATE TABLE IF NOT EXISTS evidence_horizon_leases (
+    binding_id TEXT NOT NULL,
+    horizon_id TEXT NOT NULL,
+    probe_revision TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    leased_until TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (binding_id, horizon_id, probe_revision),
+    FOREIGN KEY (binding_id) REFERENCES evidence_bindings(id)
+);
+
+CREATE TABLE IF NOT EXISTS skill_version_experiments (
+    id TEXT PRIMARY KEY,
+    skill_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'candidate',
+    parent_version TEXT DEFAULT '',
+    parent_digest TEXT NOT NULL,
+    parent_content TEXT NOT NULL,
+    candidate_version TEXT DEFAULT '',
+    candidate_digest TEXT NOT NULL,
+    candidate_content TEXT NOT NULL,
+    source_execution_ids_json TEXT DEFAULT '[]',
+    corpus_id TEXT DEFAULT '',
+    split TEXT DEFAULT '',
+    model_ref_json TEXT DEFAULT '{}',
+    budget_json TEXT DEFAULT '{}',
+    policy_json TEXT DEFAULT '{}',
+    evidence_json TEXT DEFAULT '{}',
+    reason TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS skill_experiment_trials (
+    id TEXT PRIMARY KEY,
+    experiment_id TEXT NOT NULL,
+    task_ref TEXT NOT NULL,
+    split TEXT NOT NULL,
+    variant TEXT NOT NULL,
+    trial_number INTEGER NOT NULL,
+    execution_id INTEGER,
+    status TEXT NOT NULL,
+    classification TEXT DEFAULT '',
+    result_json TEXT DEFAULT '{}',
+    started_at TEXT DEFAULT '',
+    completed_at TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(experiment_id, task_ref, variant, trial_number),
+    FOREIGN KEY (experiment_id) REFERENCES skill_version_experiments(id),
     FOREIGN KEY (execution_id) REFERENCES skill_executions(id)
 );
 
@@ -350,10 +505,29 @@ def _migrate_conversations_metadata(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_skill_executions(conn: sqlite3.Connection) -> None:
-    """Older DBs do not track harness_task_id on executions."""
+    """Add immutable lineage metadata to older execution tables."""
     cols = [r[1] for r in conn.execute("PRAGMA table_info(skill_executions)").fetchall()]
-    if "harness_task_id" not in cols:
-        conn.execute("ALTER TABLE skill_executions ADD COLUMN harness_task_id TEXT DEFAULT ''")
+    additions = {
+        "execution_uid": "TEXT DEFAULT ''",
+        "skill_version": "TEXT DEFAULT ''",
+        "skill_digest": "TEXT DEFAULT ''",
+        "harness_task_id": "TEXT DEFAULT ''",
+        "experiment_id": "TEXT DEFAULT ''",
+        "corpus_id": "TEXT DEFAULT ''",
+        "benchmark_task_id": "TEXT DEFAULT ''",
+        "variant": "TEXT DEFAULT ''",
+        "tool_trace_json": "TEXT DEFAULT '[]'",
+        "artifact_refs_json": "TEXT DEFAULT '[]'",
+        "external_entities_json": "TEXT DEFAULT '[]'",
+        "model_ref_json": "TEXT DEFAULT '{}'",
+        "execution_contract_digest": "TEXT DEFAULT ''",
+        "outcome_contract_digest": "TEXT DEFAULT ''",
+        "started_at": "TEXT DEFAULT ''",
+        "completed_at": "TEXT DEFAULT ''",
+    }
+    for column, declaration in additions.items():
+        if column not in cols:
+            conn.execute(f"ALTER TABLE skill_executions ADD COLUMN {column} {declaration}")
 
 
 def _migrate_emerged_skills(conn: sqlite3.Connection) -> None:
@@ -421,6 +595,14 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_executions_task ON skill_executions(harness_task_id)"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_executions_uid ON skill_executions(execution_uid)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_executions_version "
+        "ON skill_executions(skill_name, skill_version)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_executions_experiment " "ON skill_executions(experiment_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_source ON facts(source)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_namespace ON facts(namespace)")
     conn.execute(
@@ -442,6 +624,40 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skill_evaluations_execution ON skill_evaluations(execution_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evaluation_results_execution "
+        "ON evaluation_results(execution_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evaluation_results_skill_version "
+        "ON evaluation_results(skill_name, skill_version)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_bindings_execution "
+        "ON evidence_bindings(execution_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_bindings_status ON evidence_bindings(status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_probe_attempts_binding ON probe_attempts(binding_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_observations_binding "
+        "ON evidence_observations(binding_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_leases_until "
+        "ON evidence_horizon_leases(leased_until)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_skill_experiments_skill "
+        "ON skill_version_experiments(skill_name, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_skill_experiment_trials_experiment "
+        "ON skill_experiment_trials(experiment_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_outcome_observations_skill ON outcome_observations(skill_name)"

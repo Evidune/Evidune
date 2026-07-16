@@ -4,9 +4,9 @@ Outcome-driven skill self-evolution framework for AI agents.
 
 [中文说明](README.zh-CN.md)
 
-Evidune turns real outcomes into skill updates. It helps agents capture what
-actually worked, rewrite reusable skills, and carry those improvements forward
-across future runs.
+Evidune turns real outcomes into skill updates. It records the exact Skill
+version that executed, binds immediate and delayed evidence to that execution,
+and validates candidate improvements before they can replace the active Skill.
 
 ## Status
 
@@ -141,7 +141,7 @@ flowchart TD
     I --> J["Resolve identity, mode, facts, and matched skills"]
     J --> K["Execute with internal tools and enabled external tools"]
     K --> L["Persist messages, tool trace, skill executions, and feedback hooks"]
-    L --> X["Evaluate matched skills with their evaluation contracts"]
+    L --> X["Evaluate exact Skill executions with typed evidence"]
     X --> M["Fact extraction by cadence"]
     X --> N["Skill emergence: explicit requests immediately, implicit patterns by cadence"]
 
@@ -152,7 +152,7 @@ flowchart TD
 
     M --> S["Persist facts"]
     N --> T["Create, update, reuse, disable, or activate skill packages"]
-    X --> Y["Persist contract scores, observed signals, and missing evidence"]
+    X --> Y["Persist verdicts, dimensions, evidence bindings, and uncertainty"]
     R --> U["Record iteration ledger and changed files"]
 
     S --> V["Shared memory and skill state"]
@@ -183,11 +183,12 @@ project skills, active generated skills, their lifecycle status, match reasons,
 references, scripts, evaluation contract, and runtime metadata.
 
 Each skill can carry an `evaluation_contract` in `SKILL.md` frontmatter. The
-contract defines success criteria, observable signals, failure modes, scoring
-thresholds, and sample counts for rewrite or disable decisions. New generated
-skills include a contract and `references/evaluation-contract.md`; legacy skills
-without a contract can have one discovered on first matched execution and stored
-in SQLite or written back when `skills.auto_update` allows it.
+contract defines success criteria, observable signals, failure modes, hard
+gates, optional native measurements, and sample counts for rewrite or disable
+decisions. New generated skills include a contract and
+`references/evaluation-contract.md`; legacy skills without a contract can have
+one discovered on first matched execution and stored in SQLite or written back
+when `skills.auto_update` allows it.
 
 Evidune improves skills through two paths:
 
@@ -211,6 +212,115 @@ turn generated skills into hidden executable tools; executable behavior still
 comes from configured runtime tools and their security boundary. See
 [docs/product-specs/skill-iteration.md](docs/product-specs/skill-iteration.md)
 for the deeper product model.
+
+## Execution-Grounded Evaluation
+
+Evidune does not require every domain to produce one normalized numeric score.
+Evaluators return typed results such as `pass`, `fail`, `inconclusive`,
+`censored`, or `invalid`, together with native dimensions, evidence references,
+uncertainty, and optional scores when a numeric measurement is genuinely useful.
+Safety, permission, policy, and final-state failures are hard gates; strong
+latency or business metrics cannot average them away.
+
+```mermaid
+flowchart LR
+    A["Active Skill version"] --> B["Real execution"]
+    B --> C["Immediate evidence and tool trace"]
+    B --> D["Bindings for delayed external evidence"]
+    C --> E["Typed evaluators"]
+    D --> E
+    E --> F["Version-specific attribution"]
+    F --> G["Immutable candidate Skill"]
+    G --> H["Replay / hidden holdout / canary"]
+    H --> I["Promote"]
+    H --> J["Reject or roll back"]
+```
+
+The loop preserves the exact Skill content digest, execution id, model and tool
+configuration, contracts, corpus task, evidence, and evaluator revision behind
+every candidate decision. Provider outages, timeouts, malformed responses, and
+environment failures remain invalid infrastructure evidence instead of being
+silently counted as Skill failures.
+
+Candidates never overwrite the active `SKILL.md` while they are being generated
+or tested. Development evidence may guide a rewrite; hidden holdout and security
+holdout results can accept or reject it but are excluded from future rewrite
+prompts. Known-bad mutations and deterministic fault injection verify that the
+configured evaluator can detect a real defect before automatic promotion is
+trusted.
+
+The repository includes commit-pinned official Skill fixtures and AppWorld
+corpora under `examples/evaluation/`. To prepare the optional AppWorld
+environment:
+
+```bash
+pip install -e ".[benchmarks]"
+appworld install
+appworld download data --root .evidune/runtime/appworld-root
+appworld verify tasks --root .evidune/runtime/appworld-root
+```
+
+Sync and verify the pinned sources:
+
+```bash
+python -m core.loop eval sources sync \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --catalog examples/evaluation/official-skills.yaml
+python -m core.loop eval corpus sync \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml
+python -m core.loop eval corpus verify \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml
+```
+
+With a real LLM configured, a development run can stage an immutable candidate
+from attributed failures. A later source-disjoint holdout run validates that
+candidate and the required no-op fault:
+
+```bash
+python -m core.loop eval run \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml \
+  --split development \
+  --skill-path examples/evaluation/skills/appworld-operator/SKILL.md \
+  --mutation skip_execution \
+  --trials 6 \
+  --iterate-on-failure
+
+python -m core.loop eval run \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml \
+  --split holdout \
+  --skill-path examples/evaluation/skills/appworld-operator/SKILL.md \
+  --experiment-id <candidate-experiment-id> \
+  --mutation skip_execution \
+  --trials 6
+```
+
+Replay and reports are deterministic over persisted evaluation evidence:
+
+```bash
+python -m core.loop eval replay \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --experiment-id <candidate-experiment-id>
+python -m core.loop eval report \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --experiment-id <candidate-experiment-id> \
+  --format markdown
+```
+
+Promotion remains an explicit lifecycle action. See
+[Generalized Execution-Grounded Skill Evaluation and Iteration](docs/exec-plans/active/external-outcome-commitments.md)
+for the contracts, leakage controls, mutation policy, validation layers, and
+rollout status.
 
 ## Local Iteration
 

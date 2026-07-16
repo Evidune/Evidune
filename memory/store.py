@@ -17,6 +17,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from memory.governance_store import GovernanceStoreMixin
 from memory.rows import (
     row_to_execution,
     row_to_fact,
@@ -42,7 +43,7 @@ _GRAPH_NODE_TYPES = {"cue", "tag", "content"}
 _GRAPH_SOURCE_TYPES = {"", "fact", "message", "skill", "skill_reference", "harness_artifact"}
 
 
-class MemoryStore:
+class MemoryStore(GovernanceStoreMixin):
     """SQLite-backed cross-session memory.
 
     Stores conversations, messages, facts (namespaced), skill
@@ -921,24 +922,59 @@ class MemoryStore:
         signals: dict | None = None,
         cross_model_score: float | None = None,
         evaluator_reasoning: str | None = None,
+        execution_uid: str = "",
+        skill_version: str = "",
+        skill_digest: str = "",
+        experiment_id: str = "",
+        corpus_id: str = "",
+        benchmark_task_id: str = "",
+        variant: str = "",
+        tool_trace: list[dict[str, Any]] | None = None,
+        artifact_refs: list[str] | None = None,
+        external_entities: list[dict[str, Any]] | None = None,
+        model_ref: dict[str, Any] | None = None,
+        execution_contract_digest: str = "",
+        outcome_contract_digest: str = "",
+        started_at: str = "",
+        completed_at: str = "",
     ) -> int:
         """Record a skill execution. Returns the new row id."""
         with self._lock:
             now = self._now()
+            execution_uid = execution_uid or f"exe_{uuid.uuid4().hex}"
             cursor = self._conn.execute(
                 """INSERT INTO skill_executions
-                   (skill_name, conversation_id, harness_task_id, user_input, assistant_output,
-                    signals_json, cross_model_score, evaluator_reasoning, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (execution_uid, skill_name, skill_version, skill_digest, conversation_id,
+                    harness_task_id, experiment_id, corpus_id, benchmark_task_id, variant,
+                    user_input, assistant_output, tool_trace_json, artifact_refs_json,
+                    external_entities_json, model_ref_json, execution_contract_digest,
+                    outcome_contract_digest, signals_json, cross_model_score,
+                    evaluator_reasoning, started_at, completed_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    execution_uid,
                     skill_name,
+                    skill_version,
+                    skill_digest,
                     conversation_id,
                     harness_task_id or "",
+                    experiment_id,
+                    corpus_id,
+                    benchmark_task_id,
+                    variant,
                     user_input,
                     assistant_output,
+                    self._json_dump(tool_trace or []),
+                    self._json_dump(artifact_refs or []),
+                    self._json_dump(external_entities or []),
+                    self._json_dump(model_ref or {}),
+                    execution_contract_digest,
+                    outcome_contract_digest,
                     json.dumps(signals or {}, ensure_ascii=False),
                     cross_model_score,
                     evaluator_reasoning,
+                    started_at or now,
+                    completed_at or now,
                     now,
                 ),
             )
@@ -1193,8 +1229,7 @@ class MemoryStore:
         """Get recent executions for a skill (newest first)."""
         with self._lock:
             rows = self._conn.execute(
-                """SELECT id, skill_name, conversation_id, harness_task_id, user_input, assistant_output,
-                          signals_json, cross_model_score, evaluator_reasoning, created_at
+                """SELECT *
                    FROM skill_executions
                    WHERE skill_name = ?
                    ORDER BY id DESC

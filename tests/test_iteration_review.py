@@ -48,6 +48,31 @@ class TestReviewProposal:
         assert all(result.checks.values())
         assert result.reasons == []
 
+    def test_rewrite_copying_source_task_phrase_is_rejected(self):
+        task = "Forward the quarterly planning message to the exact specified recipient today"
+        proposal = VALID_REWRITE.replace(
+            "- Reinforce this observed pattern: use examples.",
+            f"- Always {task}.",
+        )
+        packet = _packet(executions=[{"user_input": task}])
+
+        result = review_proposal("rewrite", packet, proposal)
+
+        assert result.approved is False
+        assert result.checks["source_task_not_copied"] is False
+
+    def test_rewrite_repeating_rejected_candidate_body_is_rejected(self):
+        rejected = VALID_REWRITE.replace(
+            "name: writer",
+            "name: writer\nversion: rejected-candidate",
+        )
+        packet = _packet(experiment_history=[{"status": "rejected", "candidate_content": rejected}])
+
+        result = review_proposal("rewrite", packet, VALID_REWRITE)
+
+        assert result.approved is False
+        assert result.checks["not_duplicate_rejected_candidate"] is False
+
     def test_empty_proposal_is_rejected(self):
         result = review_proposal("rewrite", _packet(), "   \n")
         assert result.approved is False

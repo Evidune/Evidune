@@ -86,6 +86,41 @@ class InspectingToolListLLM(LLMClient):
         return CompletionResult(text=self.response)
 
 
+class EvidenceCommitmentLLM(LLMClient):
+    def __init__(self):
+        self.calls = 0
+
+    async def complete(self, messages, **kwargs):
+        return "published"
+
+    async def complete_with_tools(self, messages, tools, **kwargs):
+        if self.calls == 0:
+            self.calls += 1
+            return CompletionResult(
+                tool_calls=[
+                    ToolCall(
+                        id="commit-1",
+                        name="commit_outcome_evidence",
+                        arguments={
+                            "skill_name": "greet",
+                            "entity_type": "article",
+                            "entity_id": "article-42",
+                            "observation_plan": {
+                                "probe_id": "article_status",
+                                "probe_revision": "v1",
+                                "evaluator_id": "published_predicate",
+                                "evaluator_revision": "v1",
+                                "horizons": [{"id": "next_day"}],
+                            },
+                            "attribution_policy": "direct",
+                            "minimum_evidence_grade": "direct",
+                        },
+                    )
+                ]
+            )
+        return CompletionResult(text="published")
+
+
 def _write_skill(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -429,6 +464,45 @@ class TestAgentCore:
         assert "Operating Mode: Execute" in llm.last_messages[0]["content"]
 
     @pytest.mark.asyncio
+    async def test_outcome_commitment_is_bound_to_exact_skill_execution(
+        self,
+        skill_registry: SkillRegistry,
+        memory: MemoryStore,
+    ):
+        llm = EvidenceCommitmentLLM()
+        tool_registry = ToolRegistry()
+        tool_registry.register(
+            Tool(
+                name="noop",
+                description="Keeps execution tool mode enabled.",
+                parameters={"type": "object", "properties": {}},
+                handler=lambda: None,
+            )
+        )
+        agent = AgentCore(
+            llm=llm,
+            skill_registry=skill_registry,
+            memory=memory,
+            tool_registry=tool_registry,
+        )
+
+        response = await agent.handle(
+            InboundMessage(
+                text="Greet the user and publish the article",
+                sender_id="u",
+                channel="cli",
+                conversation_id="c-evidence",
+            )
+        )
+
+        assert len(response.metadata["execution_ids"]) == 1
+        assert len(response.metadata["evidence_binding_ids"]) == 1
+        binding = memory.get_evidence_binding(response.metadata["evidence_binding_ids"][0])
+        assert binding["execution_id"] == response.metadata["execution_ids"][0]
+        assert binding["skill_name"] == "greet"
+        assert binding["entity_id"] == "article-42"
+
+    @pytest.mark.asyncio
     async def test_reuses_stored_conversation_mode(self, agent: AgentCore, memory: MemoryStore):
         first = InboundMessage(
             text="plan first",
@@ -698,11 +772,11 @@ class TestAgentCore:
         assert skill_path.read_text(encoding="utf-8").startswith("---\nname: greet")
 
     @pytest.mark.asyncio
-    async def test_harness_rewrite_reregisters_skill_from_disk(
+    async def test_harness_rewrite_stages_candidate_without_changing_active_skill(
         self, llm: MockLLM, tmp_path: Path, memory: MemoryStore
     ):
-        # After a rewrite, the live registry must serve the new instructions so
-        # the observation window's evaluations measure the rewritten content.
+        # Automatic rewrites stage candidates; the active registry and file do
+        # not change until execution-grounded promotion succeeds.
         reg = SkillRegistry()
         skill_path = _write_skill(
             tmp_path / "skills" / "writer" / "SKILL.md",
@@ -731,10 +805,12 @@ class TestAgentCore:
 
         assert updated == ["writer"]
         on_disk = skill_path.read_text(encoding="utf-8")
-        assert "### Outcome-Backed Adjustments" in on_disk
-        assert memory.get_skill_state("writer")["status"] == "observing"
-        # The in-memory registry entry was re-parsed from disk, not left stale.
-        assert "Outcome-Backed Adjustments" in reg.get("writer").instructions
+        assert "### Outcome-Backed Adjustments" not in on_disk
+        assert memory.get_skill_state("writer")["status"] == "active"
+        event = memory.get_latest_skill_lifecycle_event("writer", "candidate")
+        experiment = memory.get_skill_experiment(event["evidence"]["experiment_id"])
+        assert "Outcome-Backed Adjustments" in experiment["candidate_content"]
+        assert "Outcome-Backed Adjustments" not in reg.get("writer").instructions
 
 
 class TestAgentWithIdentity:

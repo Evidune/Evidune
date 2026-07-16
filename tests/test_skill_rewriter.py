@@ -93,6 +93,36 @@ class TestProposeSkillRewrite:
         gutted = LLM_PROPOSAL.replace("Write helpful content.", "Do something else.")
         assert await propose_skill_rewrite(StaticLLM(gutted), _packet()) == ""
 
+    @pytest.mark.asyncio
+    async def test_prompt_includes_failed_requirement_but_not_private_trace(self):
+        packet = _packet()
+        packet.skill_version = "1.0.0"
+        packet.typed_evaluation_results = [
+            {
+                "verdict": "fail",
+                "attribution_grade": "direct",
+                "skill_version": "1.0.0",
+                "metadata": {
+                    "evaluation": {
+                        "failures": [
+                            {
+                                "label": "state_mismatch",
+                                "requirement": "target friends match source friends",
+                                "trace": "PRIVATE_EXPECTED_RECORD_IDS=[1, 2, 3]",
+                            }
+                        ]
+                    }
+                },
+            }
+        ]
+        llm = StaticLLM(LLM_PROPOSAL)
+
+        await propose_skill_rewrite(llm, packet)
+
+        assert "target friends match source friends" in llm.prompts[0]
+        assert "state_mismatch" in llm.prompts[0]
+        assert "PRIVATE_EXPECTED_RECORD_IDS" not in llm.prompts[0]
+
 
 @pytest.fixture
 def memory(tmp_path: Path):
@@ -129,6 +159,12 @@ def _rewrite_inputs():
     return result, feedback
 
 
+def _candidate(memory: MemoryStore):
+    event = memory.get_latest_skill_lifecycle_event("writer", "candidate")
+    assert event is not None
+    return memory.get_skill_experiment(event["evidence"]["experiment_id"]), event
+
+
 class TestHarnessLLMProposalPreference:
     def test_valid_llm_proposal_is_preferred_over_template(
         self, tmp_path: Path, memory: MemoryStore
@@ -148,11 +184,11 @@ class TestHarnessLLMProposalPreference:
         decision = IterationHarness(memory).run(packet=packet)
 
         assert decision.decision == "rewrite"
-        assert decision.skill_status == "observing"
-        updated = skill_path.read_text(encoding="utf-8")
-        assert "Lead with a concrete hook drawn from exemplar A." in updated
-        assert "Auto-updated by evidune" in updated  # reference data still refreshed
-        event = memory.get_latest_skill_lifecycle_event("writer", "rewrite")
+        assert decision.skill_status == "candidate"
+        assert skill_path.read_text(encoding="utf-8") == CURRENT
+        candidate, event = _candidate(memory)
+        assert "Lead with a concrete hook drawn from exemplar A." in candidate["candidate_content"]
+        assert "Auto-updated by evidune" in candidate["candidate_content"]
         assert event["evidence"]["rewrite_source"] == "llm"
 
     def test_rejected_llm_proposal_falls_back_to_template(
@@ -175,10 +211,10 @@ class TestHarnessLLMProposalPreference:
         decision = IterationHarness(memory).run(packet=packet)
 
         assert decision.decision == "rewrite"
-        updated = skill_path.read_text(encoding="utf-8")
-        assert "description: Changed" not in updated
-        assert "### Outcome-Backed Adjustments" in updated
-        event = memory.get_latest_skill_lifecycle_event("writer", "rewrite")
+        assert skill_path.read_text(encoding="utf-8") == CURRENT
+        candidate, event = _candidate(memory)
+        assert "description: Changed" not in candidate["candidate_content"]
+        assert "### Outcome-Backed Adjustments" in candidate["candidate_content"]
         assert event["evidence"]["rewrite_source"] == "template"
 
     def test_no_proposal_uses_template(self, tmp_path: Path, memory: MemoryStore):
@@ -196,6 +232,57 @@ class TestHarnessLLMProposalPreference:
         decision = IterationHarness(memory).run(packet=packet)
 
         assert decision.decision == "rewrite"
-        assert "### Outcome-Backed Adjustments" in skill_path.read_text(encoding="utf-8")
-        event = memory.get_latest_skill_lifecycle_event("writer", "rewrite")
+        assert skill_path.read_text(encoding="utf-8") == CURRENT
+        candidate, event = _candidate(memory)
+        assert "### Outcome-Backed Adjustments" in candidate["candidate_content"]
         assert event["evidence"]["rewrite_source"] == "template"
+
+    def test_holdout_executions_are_excluded_from_iteration_evidence(
+        self, tmp_path: Path, memory: MemoryStore
+    ):
+        skill, _skill_path = _skill_setup(tmp_path)
+        execution_id = memory.record_execution(
+            skill_name="writer",
+            skill_version="",
+            corpus_id="hidden-corpus",
+            benchmark_task_id="hidden-task",
+            variant="candidate",
+            user_input="private holdout prompt",
+            assistant_output="failed",
+        )
+        memory.record_evaluation_result(
+            {
+                "execution_id": execution_id,
+                "skill_name": "writer",
+                "skill_version": "",
+                "evaluator_id": "hidden-state",
+                "evaluator_revision": "v1",
+                "evaluator_type": "state_diff",
+                "verdict": "fail",
+                "attribution_grade": "direct",
+                "metadata": {"split": "holdout"},
+            }
+        )
+
+        packet = build_decision_packet(memory, skill=skill, current=CURRENT, surface="eval")
+
+        assert packet.typed_evaluation_results == []
+        assert packet.executions == []
+        assert packet.governance_aggregate["contributing_execution_ids"] == []
+
+    def test_repeated_development_failures_from_rejected_candidate_trigger_next_rewrite(
+        self, memory: MemoryStore
+    ):
+        packet = _packet()
+        packet.experiment_history = [{"status": "rejected", "candidate_version": "1.0.1-candidate"}]
+        packet.typed_evaluation_results = [
+            {
+                "skill_version": "1.0.1-candidate",
+                "verdict": "fail",
+                "attribution_grade": "direct",
+                "failure_modes": ["state_mismatch"],
+            }
+            for _ in range(3)
+        ]
+
+        assert IterationHarness(memory).rewrite_is_due(packet) is True

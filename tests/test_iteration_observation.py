@@ -37,32 +37,29 @@ def _skill_setup(tmp_path: Path):
 
 
 def _apply_first_rewrite(memory: MemoryStore, skill, skill_path: Path) -> None:
-    result = SimpleNamespace(
-        top_performers=[SimpleNamespace(title="A", metrics={"reads": 100})],
-        patterns=["Use concrete examples"],
+    """Seed a legacy in-place rewrite to preserve rollback compatibility coverage."""
+    before = skill_path.read_text(encoding="utf-8")
+    after = before.replace(
+        "Write helpful content.",
+        "Write helpful content.\n\n### Outcome-Backed Adjustments\n\n- Use concrete examples.",
     )
-    feedback = SkillFeedbackSummary(
-        signal_confidence=0.8,
-        signal_samples=3,
-        has_strong_signal=True,
-        average_score=0.9,
-        score_samples=2,
-        combined_confidence=0.8,
-        should_rewrite=True,
-        should_disable=False,
-        evidence={"average_score": 0.9},
+    skill_path.write_text(after, encoding="utf-8")
+    memory.upsert_skill_state(
+        "writer",
+        origin="base",
+        path=str(skill_path),
+        status="observing",
+        reason="legacy compatibility fixture",
     )
-    decision = IterationHarness(memory).run(
-        packet=build_decision_packet(
-            memory,
-            skill=skill,
-            current=skill_path.read_text(encoding="utf-8"),
-            feedback=feedback,
-            result=result,
-            surface="run",
-        )
+    memory.record_skill_lifecycle_event(
+        "writer",
+        "rewrite",
+        status="observing",
+        path=str(skill_path),
+        reason="legacy compatibility fixture",
+        content_before=before,
+        content_after=after,
     )
-    assert decision.decision == "rewrite"
     assert memory.get_skill_state("writer")["status"] == "observing"
 
 

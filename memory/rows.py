@@ -24,18 +24,49 @@ def row_to_fact(row) -> Fact:
 
 
 def row_to_execution(row) -> dict[str, Any]:
-    return {
+    keys = set(row.keys())
+    payload = {
         "id": row["id"],
+        "execution_uid": row["execution_uid"] if "execution_uid" in keys else "",
         "skill_name": row["skill_name"],
+        "skill_version": row["skill_version"] if "skill_version" in keys else "",
+        "skill_digest": row["skill_digest"] if "skill_digest" in keys else "",
         "conversation_id": row["conversation_id"],
         "harness_task_id": row["harness_task_id"] or "",
+        "experiment_id": row["experiment_id"] if "experiment_id" in keys else "",
+        "corpus_id": row["corpus_id"] if "corpus_id" in keys else "",
+        "benchmark_task_id": row["benchmark_task_id"] if "benchmark_task_id" in keys else "",
+        "variant": row["variant"] if "variant" in keys else "",
         "user_input": row["user_input"],
         "assistant_output": row["assistant_output"],
+        "tool_trace": (
+            json.loads(row["tool_trace_json"] or "[]") if "tool_trace_json" in keys else []
+        ),
+        "artifact_refs": (
+            json.loads(row["artifact_refs_json"] or "[]") if "artifact_refs_json" in keys else []
+        ),
+        "external_entities": (
+            json.loads(row["external_entities_json"] or "[]")
+            if "external_entities_json" in keys
+            else []
+        ),
+        "model_ref": (
+            json.loads(row["model_ref_json"] or "{}") if "model_ref_json" in keys else {}
+        ),
+        "execution_contract_digest": (
+            row["execution_contract_digest"] if "execution_contract_digest" in keys else ""
+        ),
+        "outcome_contract_digest": (
+            row["outcome_contract_digest"] if "outcome_contract_digest" in keys else ""
+        ),
         "signals": json.loads(row["signals_json"] or "{}"),
         "score": row["cross_model_score"],
         "evaluator_reasoning": row["evaluator_reasoning"],
+        "started_at": row["started_at"] if "started_at" in keys else row["created_at"],
+        "completed_at": row["completed_at"] if "completed_at" in keys else row["created_at"],
         "created_at": row["created_at"],
     }
+    return payload
 
 
 def row_to_iteration_run(row, updates: list[dict[str, Any]] | None = None) -> dict[str, Any]:

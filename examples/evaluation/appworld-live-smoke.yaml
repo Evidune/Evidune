@@ -1,0 +1,62 @@
+corpus_id: appworld-test_normal-66ad8099e121-22c43adc0b43
+schema_version: 1
+retrieved_at: '2026-07-15T12:16:12.218832+00:00'
+adapter:
+  id: appworld
+  revision: v1
+sources:
+  - name: appworld
+    mode: git
+    url: https://github.com/StonyBrookNLP/appworld.git
+    commit: 66ad8099e12188ece0d3fe45e661dbc01880813b
+    license: Apache-2.0
+    paths:
+      - README.md
+tasks:
+  - id: fd1f8fa_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: fd1f8fa_1
+      dataset: test_normal
+  - id: fd1f8fa_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: fd1f8fa_2
+      dataset: test_normal
+  - id: fd1f8fa_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: fd1f8fa_3
+      dataset: test_normal
+splits:
+  development:
+    - fd1f8fa_1
+  holdout:
+    - fd1f8fa_2
+    - fd1f8fa_3
+environment:
+  kind: appworld
+  package_version: 0.1.3.post1
+  root: .evidune/runtime/appworld-root
+  experiment_name: appworld-test_normal-66ad8099e121-22c43adc0b43
+  protected_data: true
+network_policy:
+  mode: deny
+  allowed_hosts: []
+evaluator:
+  holdout_visibility: hidden
+  required_evaluators:
+    - appworld_state_evaluator
+  required_mutations:
+    - skip_execution
+  minimum_attribution: direct
+  minimum_valid_trials: 3
+  require_live_model: true
+  fail_fast_development: false
+  allow_non_holdout_promotion: false
+budget:
+  max_model_calls: 648
+  max_trial_seconds: 300
+  max_model_turns_per_trial: 18
+  max_tool_calls_per_trial: 30
+  model_call_timeout_seconds: 120

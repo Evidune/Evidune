@@ -4,7 +4,7 @@
 
 Evidune 是一个面向 AI agents 的结果驱动型技能自进化框架。
 
-它把真实运行结果转化为技能更新，让 agent 不只是完成当前任务，还能把有效做法沉淀为可复用技能，并在后续运行中持续带着这些改进前进。
+它把真实运行结果转化为技能更新：记录实际执行的精确 Skill 版本，把即时和延迟证据绑定到该次执行，并在候选改进替换活动 Skill 前完成验证。
 
 ## 状态
 
@@ -103,7 +103,7 @@ flowchart TD
     I --> J["解析 identity、mode、facts 和匹配 skills"]
     J --> K["使用内部工具和已开启的 external tools 执行"]
     K --> L["持久化消息、tool trace、skill executions 和反馈入口"]
-    L --> X["按各 skill 的 evaluation contract 评价执行结果"]
+    L --> X["用类型化证据评价精确的 Skill 执行"]
     X --> M["按 cadence 做 fact extraction"]
     X --> N["skill emergence：显式请求立即触发，隐式模式按 cadence 触发"]
 
@@ -114,7 +114,7 @@ flowchart TD
 
     M --> S["持久化 facts"]
     N --> T["创建、更新、复用、禁用或激活 skill 包"]
-    X --> Y["持久化 contract 评分、观测信号和缺失证据"]
+    X --> Y["持久化 verdict、维度、证据绑定和不确定性"]
     R --> U["记录 iteration ledger 和变更文件"]
 
     S --> V["共享 memory 和 skill state"]
@@ -136,10 +136,11 @@ skills、active generated skills、生命周期状态、匹配原因、reference
 evaluation contract 和运行时元数据。
 
 每个 skill 都可以在 `SKILL.md` frontmatter 中带 `evaluation_contract`。这个契约
-定义成功标准、可观测信号、失败模式、评分阈值，以及触发 rewrite/disable 需要的样本数。
-新生成的 skill 会自带 contract 和 `references/evaluation-contract.md`；旧 skill
-第一次被匹配执行且缺少 contract 时，会自动发现 runtime contract，并在
-`skills.auto_update` 允许时写回 `SKILL.md`，否则只落 SQLite。
+定义成功标准、可观测信号、失败模式、硬门槛、可选的原生数值，以及触发
+rewrite/disable 需要的样本数。新生成的 skill 会自带 contract 和
+`references/evaluation-contract.md`；旧 skill 第一次被匹配执行且缺少 contract
+时，会自动发现 runtime contract，并在 `skills.auto_update` 允许时写回
+`SKILL.md`，否则只落 SQLite。
 
 Evidune 通过两条路径改进 skill：
 
@@ -157,6 +158,106 @@ Evidune 通过两条路径改进 skill：
 自动合成默认只写 Markdown skill 包，不会把生成的 skill 偷偷变成可执行工具；可执行能力
 仍来自已配置的 runtime tools 及其安全边界。更完整的产品模型见
 [docs/product-specs/skill-iteration.md](docs/product-specs/skill-iteration.md)。
+
+## 基于真实执行的评价闭环
+
+Evidune 不要求所有领域都压缩成一个归一化数值分数。Evaluator 返回
+`pass`、`fail`、`inconclusive`、`censored` 或 `invalid` 等类型化结果，并携带
+原生维度、证据引用、不确定性；只有指标本身适合数值化时才使用可选 score。安全、
+权限、策略和最终状态失败属于硬门槛，不能被更好的延迟、成本或业务指标平均抵消。
+
+```mermaid
+flowchart LR
+    A["活动 Skill 版本"] --> B["真实执行"]
+    B --> C["即时证据和工具轨迹"]
+    B --> D["延迟外部证据绑定"]
+    C --> E["类型化 Evaluators"]
+    D --> E
+    E --> F["按版本归因"]
+    F --> G["不可变候选 Skill"]
+    G --> H["Replay / 隐藏集 / Canary"]
+    H --> I["晋级"]
+    H --> J["拒绝或回滚"]
+```
+
+闭环会保留每次候选决策背后的精确 Skill 内容摘要、execution id、模型与工具配置、
+契约、语料任务、证据和 evaluator revision。Provider 故障、超时、无效响应和环境
+不可用会作为无效基础设施证据保存，不会静默算成 Skill 失败。
+
+候选在生成和测试期间不会覆盖活动 `SKILL.md`。Development 证据可以指导重写；
+隐藏 holdout 和 security holdout 只负责接受或拒绝候选，结果不会进入未来重写
+prompt。已知坏变异和确定性故障注入用于证明评价器确实能发现缺陷，然后才值得信任
+自动晋级。
+
+仓库在 `examples/evaluation/` 下提供了 commit-pinned 官方 Skill fixtures 和
+AppWorld 语料。准备可选 AppWorld 环境：
+
+```bash
+pip install -e ".[benchmarks]"
+appworld install
+appworld download data --root .evidune/runtime/appworld-root
+appworld verify tasks --root .evidune/runtime/appworld-root
+```
+
+同步并验证固定来源：
+
+```bash
+python -m core.loop eval sources sync \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --catalog examples/evaluation/official-skills.yaml
+python -m core.loop eval corpus sync \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml
+python -m core.loop eval corpus verify \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml
+```
+
+配置真实 LLM 后，development 运行可以根据可归因失败创建不可变候选；随后使用
+来源不重叠的 holdout 验证候选以及必需的 no-op 故障：
+
+```bash
+python -m core.loop eval run \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml \
+  --split development \
+  --skill-path examples/evaluation/skills/appworld-operator/SKILL.md \
+  --mutation skip_execution \
+  --trials 6 \
+  --iterate-on-failure
+
+python -m core.loop eval run \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --manifest examples/evaluation/appworld-live-smoke.yaml \
+  --split holdout \
+  --skill-path examples/evaluation/skills/appworld-operator/SKILL.md \
+  --experiment-id <candidate-experiment-id> \
+  --mutation skip_execution \
+  --trials 6
+```
+
+Replay 和报告基于已持久化的评价证据确定性生成：
+
+```bash
+python -m core.loop eval replay \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --experiment-id <candidate-experiment-id>
+python -m core.loop eval report \
+  --config examples/agent/evidune.yaml \
+  --base-dir . \
+  --experiment-id <candidate-experiment-id> \
+  --format markdown
+```
+
+晋级仍是显式生命周期操作。契约、数据泄漏控制、变异策略、验证分层和当前 rollout
+状态见
+[通用执行证据驱动的 Skill 评价与迭代设计](docs/exec-plans/active/external-outcome-commitments.md)。
 
 ## 本地迭代
 

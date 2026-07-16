@@ -1,0 +1,222 @@
+corpus_id: appworld-test_normal-66ad8099e121-c8c70c1136c4
+schema_version: 1
+retrieved_at: '2026-07-15T10:33:07.009630+00:00'
+adapter:
+  id: appworld
+  revision: v1
+sources:
+  - name: appworld
+    mode: git
+    url: https://github.com/StonyBrookNLP/appworld.git
+    commit: 66ad8099e12188ece0d3fe45e661dbc01880813b
+    license: Apache-2.0
+    paths:
+      - README.md
+tasks:
+  - id: 3d9a636_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 3d9a636_1
+      dataset: test_normal
+  - id: 3d9a636_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 3d9a636_2
+      dataset: test_normal
+  - id: 3d9a636_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 3d9a636_3
+      dataset: test_normal
+  - id: fd1f8fa_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: fd1f8fa_1
+      dataset: test_normal
+  - id: fd1f8fa_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: fd1f8fa_2
+      dataset: test_normal
+  - id: fd1f8fa_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: fd1f8fa_3
+      dataset: test_normal
+  - id: 325d6ec_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 325d6ec_1
+      dataset: test_normal
+  - id: 325d6ec_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 325d6ec_2
+      dataset: test_normal
+  - id: 325d6ec_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 325d6ec_3
+      dataset: test_normal
+  - id: 29a7b7e_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 29a7b7e_1
+      dataset: test_normal
+  - id: 29a7b7e_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 29a7b7e_2
+      dataset: test_normal
+  - id: 29a7b7e_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 29a7b7e_3
+      dataset: test_normal
+  - id: 21abae1_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 21abae1_1
+      dataset: test_normal
+  - id: 21abae1_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 21abae1_2
+      dataset: test_normal
+  - id: 21abae1_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 21abae1_3
+      dataset: test_normal
+  - id: 634f342_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 634f342_1
+      dataset: test_normal
+  - id: 634f342_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 634f342_2
+      dataset: test_normal
+  - id: 634f342_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 634f342_3
+      dataset: test_normal
+  - id: '8749218_1'
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: '8749218_1'
+      dataset: test_normal
+  - id: '8749218_2'
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: '8749218_2'
+      dataset: test_normal
+  - id: '8749218_3'
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: '8749218_3'
+      dataset: test_normal
+  - id: 2d9f728_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 2d9f728_1
+      dataset: test_normal
+  - id: 2d9f728_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 2d9f728_2
+      dataset: test_normal
+  - id: 2d9f728_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 2d9f728_3
+      dataset: test_normal
+  - id: 6f4b9a5_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 6f4b9a5_1
+      dataset: test_normal
+  - id: 6f4b9a5_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 6f4b9a5_2
+      dataset: test_normal
+  - id: 6f4b9a5_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: 6f4b9a5_3
+      dataset: test_normal
+  - id: d6ac34d_1
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: d6ac34d_1
+      dataset: test_normal
+  - id: d6ac34d_2
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: d6ac34d_2
+      dataset: test_normal
+  - id: d6ac34d_3
+    instruction: __loaded_by_appworld_adapter__
+    metadata:
+      appworld_task_id: d6ac34d_3
+      dataset: test_normal
+splits:
+  development:
+    - 3d9a636_1
+    - 3d9a636_2
+    - 3d9a636_3
+    - fd1f8fa_1
+    - fd1f8fa_2
+    - fd1f8fa_3
+    - 325d6ec_1
+    - 325d6ec_2
+    - 325d6ec_3
+    - 29a7b7e_1
+    - 29a7b7e_2
+    - 29a7b7e_3
+    - 21abae1_1
+    - 21abae1_2
+    - 21abae1_3
+  holdout:
+    - 634f342_1
+    - 634f342_2
+    - 634f342_3
+    - '8749218_1'
+    - '8749218_2'
+    - '8749218_3'
+    - 2d9f728_1
+    - 2d9f728_2
+    - 2d9f728_3
+    - 6f4b9a5_1
+    - 6f4b9a5_2
+    - 6f4b9a5_3
+    - d6ac34d_1
+    - d6ac34d_2
+    - d6ac34d_3
+environment:
+  kind: appworld
+  package_version: 0.1.3.post1
+  root: .evidune/runtime/appworld-root
+  experiment_name: appworld-test_normal-66ad8099e121-c8c70c1136c4
+  protected_data: true
+network_policy:
+  mode: deny
+  allowed_hosts: []
+evaluator:
+  holdout_visibility: hidden
+  required_evaluators:
+    - appworld_state_evaluator
+  minimum_attribution: direct
+  minimum_valid_trials: 3
+  require_live_model: true
+  fail_fast_development: false
+  allow_non_holdout_promotion: false
+budget:
+  max_trial_seconds: 300
+  max_model_calls: 3240
+  max_model_turns_per_trial: 18
+  max_tool_calls_per_trial: 30
+  model_call_timeout_seconds: 120

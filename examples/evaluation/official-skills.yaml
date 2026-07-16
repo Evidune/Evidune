@@ -1,0 +1,49 @@
+catalog_id: official-skills-2026-07-15
+schema_version: 1
+sources:
+  - name: openai-plugins
+    mode: git
+    url: https://github.com/openai/plugins.git
+    commit: 11c74d6ba24d3a6d48f54a194cd00ef3beea18f9
+    license: Apache-2.0
+    paths:
+      - plugins/github/skills/gh-fix-ci/SKILL.md
+      - plugins/github/skills/gh-fix-ci/LICENSE.txt
+  - name: anthropic-skills
+    mode: git
+    url: https://github.com/anthropics/skills.git
+    commit: 9d2f1ae187231d8199c64b5b762e1bdf2244733d
+    license: Apache-2.0
+    paths:
+      - skills/skill-creator/SKILL.md
+      - skills/skill-creator/LICENSE.txt
+  - name: huggingface-skills
+    mode: git
+    url: https://github.com/huggingface/skills.git
+    commit: 52d324945107f68d06d561743cf26194bdbf9cf8
+    license: Apache-2.0
+    paths:
+      - skills/hf-cli/SKILL.md
+      - LICENSE
+skills:
+  - name: gh-fix-ci
+    source: openai-plugins
+    path: plugins/github/skills/gh-fix-ci/SKILL.md
+    review_status: approved
+    intended_fixture: Sandboxed failing GitHub Actions PR inspection and repair tasks
+    fixture_manifest: official-skills-fixtures.yaml
+    fixture_task_ids: [gh-fix-ci-diagnose-before-change]
+  - name: skill-creator
+    source: anthropic-skills
+    path: skills/skill-creator/SKILL.md
+    review_status: approved
+    intended_fixture: Skill creation, validation, and trigger-evaluation workflow
+    fixture_manifest: official-skills-fixtures.yaml
+    fixture_task_ids: [skill-creator-draft-and-tests]
+  - name: hf-cli
+    source: huggingface-skills
+    path: skills/hf-cli/SKILL.md
+    review_status: approved
+    intended_fixture: Sandboxed Hugging Face CLI operations with artifact assertions
+    fixture_manifest: official-skills-fixtures.yaml
+    fixture_task_ids: [hf-cli-select-read-command]

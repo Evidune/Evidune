@@ -25,6 +25,8 @@ _MAX_SIZE_RATIO = 3.0
 # Small skills legitimately grow past 3x when the first evidence sections are
 # appended, so the upper bound also allows a fixed absolute headroom.
 _GROWTH_HEADROOM_CHARS = 2000
+_LEAKAGE_NGRAM_TOKENS = 8
+_TOKEN_RE = re.compile(r"[\w-]+", re.UNICODE)
 
 
 def extract_section(body: str, heading: str) -> str | None:
@@ -132,6 +134,25 @@ def review_proposal(
             if not checks["manual_instructions_preserved"]:
                 reasons.append("manual instructions were deleted or altered")
 
+    if decision in {"rewrite", "refresh"} and packet.executions:
+        checks["source_task_not_copied"] = not _copies_new_source_task_ngram(
+            current,
+            proposed_content,
+            packet.executions,
+        )
+        if not checks["source_task_not_copied"]:
+            reasons.append("proposal copies a source-task phrase into the Skill")
+
+    if decision == "rewrite" and packet.experiment_history:
+        rejected_bodies = {
+            split_frontmatter(str(experiment.get("candidate_content") or ""))[1].strip()
+            for experiment in packet.experiment_history
+            if experiment.get("status") == "rejected"
+        }
+        checks["not_duplicate_rejected_candidate"] = proposed_body.strip() not in rejected_bodies
+        if not checks["not_duplicate_rejected_candidate"]:
+            reasons.append("proposal duplicates a previously rejected candidate")
+
     size_reference = current
     if decision == "rollback":
         content_before = _latest_rewrite_content_before(packet.lifecycle_history)
@@ -168,6 +189,26 @@ def _size_is_sane(reference_length: int, proposed_length: int) -> bool:
         reference_length + _GROWTH_HEADROOM_CHARS,
     )
     return lower <= proposed_length <= upper
+
+
+def _normalized_tokens(value: str) -> list[str]:
+    return [token.casefold() for token in _TOKEN_RE.findall(value)]
+
+
+def _copies_new_source_task_ngram(
+    current: str,
+    proposed: str,
+    executions: list[dict[str, Any]],
+) -> bool:
+    current_text = " ".join(_normalized_tokens(current))
+    proposed_text = " ".join(_normalized_tokens(proposed))
+    for execution in executions:
+        tokens = _normalized_tokens(str(execution.get("user_input") or ""))
+        for index in range(len(tokens) - _LEAKAGE_NGRAM_TOKENS + 1):
+            phrase = " ".join(tokens[index : index + _LEAKAGE_NGRAM_TOKENS])
+            if phrase not in current_text and phrase in proposed_text:
+                return True
+    return False
 
 
 def _latest_rewrite_content_before(history: list[dict[str, Any]]) -> str:

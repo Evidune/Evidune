@@ -118,7 +118,113 @@ def _evidence_block(packet: IterationDecisionPacket) -> str:
     if execution["lowest_criteria"]:
         lines.append(f"- Weakest execution criteria: {', '.join(execution['lowest_criteria'])}")
 
+    typed = packet.governance_aggregate or {}
+    if typed.get("actionable_failure_modes"):
+        failures = ", ".join(
+            f"{name}={count}" for name, count in typed["actionable_failure_modes"].items()
+        )
+        lines.append(f"- Attributed execution failure modes: {failures}")
+    if typed.get("hard_gate_failures"):
+        names = sorted({item["name"] for item in typed["hard_gate_failures"]})
+        lines.append(f"- Hard-gate failures: {', '.join(names)}")
+    if typed.get("contributing_execution_ids"):
+        lines.append(
+            "- Contributing execution ids: "
+            + ", ".join(str(value) for value in typed["contributing_execution_ids"])
+        )
+    lines.extend(_typed_failure_requirements(packet))
+    rejected_versions = {
+        str(experiment.get("candidate_version") or "")
+        for experiment in packet.experiment_history
+        if experiment.get("status") == "rejected"
+    }
+    for experiment in packet.experiment_history[:3]:
+        if experiment.get("status") != "rejected":
+            continue
+        adjustment = str(experiment.get("candidate_content") or "")
+        if "### Outcome-Backed Adjustments" in adjustment:
+            adjustment = adjustment.split("### Outcome-Backed Adjustments", 1)[1]
+        adjustment = " ".join(adjustment.split())[:700]
+        lines.append(
+            f"- Rejected candidate `{experiment.get('candidate_version')}`: "
+            f"reason={experiment.get('reason') or 'validation failed'}; "
+            f"prior adjustment={adjustment or 'unavailable'}"
+        )
+    for execution in packet.executions[:6]:
+        execution_version = str(execution.get("skill_version") or "")
+        if packet.skill_version and execution_version not in {
+            "",
+            packet.skill_version,
+            *rejected_versions,
+        }:
+            continue
+        task = " ".join(str(execution.get("user_input") or "").split())[:240]
+        calls = sorted(
+            {
+                str(api_call)
+                for trace in execution.get("tool_trace") or []
+                if isinstance(trace, dict)
+                for api_call in trace.get("api_calls") or []
+            }
+        )
+        errors = sum(
+            bool(trace.get("is_error"))
+            for trace in execution.get("tool_trace") or []
+            if isinstance(trace, dict)
+        )
+        if task:
+            source_label = (
+                "Rejected candidate execution"
+                if execution_version in rejected_versions
+                else "Active Skill execution"
+            )
+            lines.append(
+                f"- {source_label}: {task}; API calls={', '.join(calls[:12]) or 'none'}; "
+                f"tool errors={errors}"
+            )
+
     return "\n".join(lines) if lines else "- No structured evidence available."
+
+
+def _typed_failure_requirements(packet: IterationDecisionPacket) -> list[str]:
+    """Expose failed public requirements without leaking hidden evaluator values.
+
+    Benchmark evaluators often attach assertion traces containing private expected
+    records. Those traces are useful for governance artifacts but must not become
+    rewrite prompt context. The requirement text and failure label communicate the
+    semantic miss while keeping concrete expected values out of the candidate.
+    """
+    rejected_versions = {
+        str(experiment.get("candidate_version") or "")
+        for experiment in packet.experiment_history
+        if experiment.get("status") == "rejected"
+    }
+    relevant_versions = {"", packet.skill_version, *rejected_versions}
+    lines: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for result in packet.typed_evaluation_results:
+        if result.get("verdict") != "fail":
+            continue
+        if result.get("attribution_grade") not in {"direct", "controlled"}:
+            continue
+        if str(result.get("skill_version") or "") not in relevant_versions:
+            continue
+        evaluation = (result.get("metadata") or {}).get("evaluation") or {}
+        for failure in evaluation.get("failures") or []:
+            requirement = " ".join(str(failure.get("requirement") or "").split())
+            if not requirement:
+                continue
+            label = str(failure.get("label") or "unspecified")
+            key = (label, requirement)
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(
+                f"- Authoritative evaluator failed requirement [{label}]: " f"{requirement[:500]}"
+            )
+            if len(lines) >= 6:
+                return lines
+    return lines
 
 
 def _execution_evidence(evaluations: list[dict[str, Any]]) -> dict[str, Any]:

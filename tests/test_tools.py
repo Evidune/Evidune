@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agent.tools.base import CompletionResult, Tool, ToolCall, ToolResult
+from agent.tools.evidence import evidence_commitment_tools
 from agent.tools.external import ExternalToolsConfig, external_tools
 from agent.tools.graph_memory import graph_memory_tools
 from agent.tools.internal import (
@@ -111,6 +112,40 @@ class TestMemoryTools:
         tools = {t.name: t for t in memory_tools(memory)}
         got = await tools["get_fact"].handler(key="nonexistent")
         assert "no fact" in got
+
+    @pytest.mark.asyncio
+    async def test_evidence_commitment_is_structured_but_does_not_run_probe(self):
+        tool = evidence_commitment_tools()[0]
+        payload = await tool.handler(
+            skill_name="publisher",
+            entity_type="article",
+            entity_id="article-1",
+            observation_plan={
+                "probe_id": "article_status",
+                "probe_revision": "v1",
+                "evaluator_id": "published",
+                "evaluator_revision": "v1",
+                "horizons": [{"id": "next_day"}],
+            },
+            attribution_policy="direct",
+            minimum_evidence_grade="direct",
+        )
+
+        assert payload["kind"] == "evidence_commitment"
+        assert payload["commitment_digest"]
+        assert payload["entity_id"] == "article-1"
+
+        with pytest.raises(ValueError, match="evaluator_revision"):
+            await tool.handler(
+                entity_type="article",
+                entity_id="article-2",
+                observation_plan={
+                    "probe_id": "article_status",
+                    "probe_revision": "v1",
+                    "evaluator_id": "published",
+                    "horizons": [{"id": "next_day"}],
+                },
+            )
 
     @pytest.mark.asyncio
     async def test_search_facts(self, memory: MemoryStore):
