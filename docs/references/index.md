@@ -14,6 +14,7 @@ Published references:
 - [AppWorld 30-Task Repeated Release Validation](appworld-30-task-release-validation.md):
   V4 real-corpus metrics, task-level evidence, candidate regressions,
   reliability improvements, and the decision to defer production canary.
+  [中文报告](appworld-30-task-release-validation.zh-CN.md).
 - [Developer Preview Smoke](developer-preview-smoke.md): reproducible LLM,
   external-tool, and skill-creation smoke checks for public preview readiness.
 - [Configuration CLI](configuration-cli.md): OpenClaw-style model,

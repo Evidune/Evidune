@@ -10,6 +10,8 @@ Evidune 是一个面向 AI agents 的结果驱动型技能自进化框架。
 
 Evidune 目前是 **Developer Preview**。默认体验是给开发者本地使用的通用自迭代 skill agent。它不是托管服务，不提供多用户隔离，应按 alpha 软件对待。
 
+发布验证证据：[AppWorld 30 任务重复发布验证报告](docs/references/appworld-30-task-release-validation.zh-CN.md)。
+
 ## 安装
 
 前置要求：
