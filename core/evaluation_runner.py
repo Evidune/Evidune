@@ -159,11 +159,7 @@ class EvaluationExperimentRunner(
             candidate_name=candidate.name,
             fail_fast_candidate_name=(
                 candidate_variant.name
-                if candidate_variant
-                and (
-                    split != "development"
-                    or bool(corpus.evaluator.get("fail_fast_development", True))
-                )
+                if candidate_variant and bool(corpus.evaluator.get(f"fail_fast_{split}", True))
                 else ""
             ),
             required_candidate_trials=required_trials,

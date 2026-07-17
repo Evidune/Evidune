@@ -213,6 +213,7 @@ evaluator:
   minimum_valid_trials: 3
   require_live_model: true
   fail_fast_development: false
+  fail_fast_holdout: false
   allow_non_holdout_promotion: false
 budget:
   max_trial_seconds: 300

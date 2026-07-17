@@ -49,11 +49,10 @@ async def execute_variant(
     timeout = float(prepared.agent_context.get("trial_timeout_seconds") or 0)
     if timeout <= 0:
         return await run()
-    try:
-        return await asyncio.wait_for(run(), timeout=timeout)
-    except BenchmarkProviderTimeout:
-        raise
-    except TimeoutError as exc:
-        raise BenchmarkProviderTimeout(
-            f"Benchmark trial exceeded {timeout:g} seconds total wall time"
-        ) from exc
+    task = asyncio.create_task(run())
+    done, _pending = await asyncio.wait({task}, timeout=timeout)
+    if task in done:
+        return task.result()
+    task.cancel()
+    await asyncio.sleep(0)
+    raise BenchmarkProviderTimeout(f"Benchmark trial exceeded {timeout:g} seconds total wall time")

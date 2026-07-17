@@ -285,6 +285,36 @@ async def test_appworld_executor_caps_each_model_call_wall_time(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_appworld_executor_hard_timeout_does_not_wait_for_cancellation(tmp_path: Path):
+    class CancellationResistantLLM(_ToolLLM):
+        async def complete_with_tools(self, messages, tools, **kwargs):
+            import asyncio
+
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                await asyncio.sleep(1)
+            return CompletionResult(text="late")
+
+    prepared = PreparedTask(
+        corpus_id="pilot",
+        task=CorpusTask("task-1", "placeholder"),
+        split="development",
+        workspace=str(tmp_path),
+        agent_context={
+            "appworld_world": _World(),
+            "instruction": "Do the visible task",
+            "max_model_turns": 2,
+            "max_tool_calls": 3,
+            "model_call_timeout_seconds": 0.01,
+        },
+    )
+
+    with pytest.raises(TimeoutError, match="exceeded 0.01 seconds"):
+        await AppWorldLLMBenchmarkExecutor(CancellationResistantLLM())(prepared, "Skill", {}, 1)
+
+
+@pytest.mark.asyncio
 async def test_appworld_executor_rejects_empty_model_turn(tmp_path: Path):
     class EmptyLLM(_ToolLLM):
         async def complete_with_tools(self, messages, tools, **kwargs):

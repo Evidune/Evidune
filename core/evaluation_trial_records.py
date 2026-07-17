@@ -8,10 +8,68 @@ from typing import Any
 
 from adapters.benchmark import write_json
 from core.evaluation_models import VariantSpec, utc_now
-from skills.governance import text_digest
+from skills.governance import EvaluationResult, text_digest
 
 
 class EvaluationTrialRecordMixin:
+    def _load_existing_trials(
+        self,
+        experiment_id: str,
+        variants: list[VariantSpec],
+        candidate_name: str,
+    ) -> tuple[
+        dict[tuple[str, str, int], dict[str, Any]],
+        int,
+        int,
+        dict[str, dict[str, int]],
+        list[EvaluationResult],
+        dict[str, dict[str, int]],
+    ]:
+        counts = {
+            variant.name: {"valid": 0, "invalid": 0, "pass": 0, "fail": 0} for variant in variants
+        }
+        valid_tasks = {variant.name: {} for variant in variants}
+        candidate_results: list[EvaluationResult] = []
+        valid_trials = invalid_trials = 0
+        existing = {
+            (row["task_ref"], row["variant"], row["trial_number"]): row
+            for row in self.memory.list_experiment_trials(experiment_id)
+        }
+        for row in existing.values():
+            variant_counts = counts.get(row["variant"])
+            if variant_counts is None:
+                continue
+            if row["status"] == "invalid":
+                invalid_trials += 1
+                variant_counts["invalid"] += 1
+                continue
+            valid_trials += 1
+            variant_counts["valid"] += 1
+            variant_counts[
+                "pass" if row["status"] in {"passed", "mutation_killed"} else "fail"
+            ] += 1
+            task_counts = valid_tasks[row["variant"]]
+            task_counts[row["task_ref"]] = task_counts.get(row["task_ref"], 0) + 1
+            if row["variant"] == candidate_name and row.get("execution_id"):
+                for stored in self.memory.list_evaluation_results(execution_id=row["execution_id"]):
+                    candidate_results.append(
+                        EvaluationResult.from_dict(
+                            {
+                                name: stored[name]
+                                for name in EvaluationResult.__dataclass_fields__
+                                if name in stored
+                            }
+                        )
+                    )
+        return (
+            existing,
+            valid_trials,
+            invalid_trials,
+            counts,
+            candidate_results,
+            valid_tasks,
+        )
+
     def _bind_immediate_evidence(
         self,
         *,

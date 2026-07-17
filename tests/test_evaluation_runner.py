@@ -402,6 +402,99 @@ async def test_runner_stops_when_candidate_failure_makes_promotion_impossible(tm
     store.close()
 
 
+@pytest.mark.asyncio
+async def test_runner_can_disable_holdout_fail_fast_for_release_runs(tmp_path: Path):
+    store = MemoryStore(tmp_path / "memory.db")
+    runner = EvaluationExperimentRunner(store, base_dir=tmp_path)
+    manifest = _corpus(tmp_path)
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        .replace("splits: {development: [update], holdout: []}", "splits: {holdout: [update]}")
+        .replace(
+            "  minimum_attribution: direct\n",
+            "  minimum_attribution: direct\n  fail_fast_holdout: false\n",
+        ),
+        encoding="utf-8",
+    )
+    corpus = load_evaluation_corpus(manifest)
+
+    async def failing(*args):
+        return BenchmarkExecution(output="failed", final_state={"done": False})
+
+    summary = await runner.run(
+        corpus=corpus,
+        split="holdout",
+        variants=[
+            VariantSpec("parent", "1.0.0", "GOOD"),
+            VariantSpec("candidate", "1.0.1-candidate", "BROKEN"),
+        ],
+        trials=3,
+        executor=failing,
+        model_ref={"provider": "fixture", "model": "deterministic"},
+        skill_name="local-skill",
+    )
+
+    assert summary.status == "rejected"
+    assert summary.valid_trials == 6
+    assert summary.variant_counts["candidate"]["fail"] == 3
+    assert summary.early_stop == {}
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_runner_resumes_an_interrupted_candidate_experiment(tmp_path: Path):
+    class StopRun(BaseException):
+        pass
+
+    calls = 0
+
+    async def interrupt_after_parent(prepared, skill_content, model_ref, trial):
+        nonlocal calls
+        calls += 1
+        if calls > 2:
+            raise StopRun()
+        return await _executor(prepared, skill_content, model_ref, trial)
+
+    store = MemoryStore(tmp_path / "memory.db")
+    runner = EvaluationExperimentRunner(store, base_dir=tmp_path)
+    corpus = load_evaluation_corpus(_corpus_with_minimum_valid_trials(tmp_path, 2))
+    variants = [
+        VariantSpec("parent", "1.0.0", "GOOD"),
+        VariantSpec("candidate", "1.0.1-candidate", "GOOD IMPROVED"),
+    ]
+
+    with pytest.raises(StopRun):
+        await runner.run(
+            corpus=corpus,
+            split="development",
+            variants=variants,
+            trials=3,
+            executor=interrupt_after_parent,
+            model_ref={"provider": "fixture", "model": "deterministic"},
+            skill_name="local-skill",
+        )
+
+    experiment_id = store.list_skill_experiments("local-skill")[0]["id"]
+    assert len(store.list_experiment_trials(experiment_id)) == 2
+
+    summary = await runner.run(
+        corpus=corpus,
+        split="development",
+        variants=variants,
+        trials=3,
+        executor=_executor,
+        model_ref={"provider": "fixture", "model": "deterministic"},
+        skill_name="local-skill",
+        experiment_id=experiment_id,
+    )
+
+    assert summary.status == "validated"
+    assert summary.valid_trials == 4
+    assert summary.invalid_trials == 0
+    assert len(store.list_experiment_trials(experiment_id)) == 4
+    store.close()
+
+
 def test_provider_rate_limit_is_not_classified_as_code_regression():
     rate_limit = type("RateLimitError", (Exception,), {})
     assert (

@@ -17,6 +17,8 @@ Evidune is a **Developer Preview**. The default experience is a local,
 self-iterating skill agent for developers. It is not a hosted service, does not
 provide multi-user isolation, and should be treated as alpha software.
 
+Release evidence: [AppWorld 30-task repeated validation](docs/references/appworld-30-task-release-validation.md).
+
 ## Install
 
 Prerequisites:

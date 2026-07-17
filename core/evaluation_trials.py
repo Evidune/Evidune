@@ -41,15 +41,14 @@ class EvaluationTrialMixin(EvaluationTrialRecordMixin):
         dict[str, dict[str, int]],
         dict[str, Any],
     ]:
-        valid_trials = 0
-        invalid_trials = 0
-        counts = {
-            variant.name: {"valid": 0, "invalid": 0, "pass": 0, "fail": 0} for variant in variants
-        }
-        candidate_results: list[EvaluationResult] = []
-        valid_tasks_by_variant: dict[str, dict[str, int]] = {
-            variant.name: {} for variant in variants
-        }
+        (
+            existing_trials,
+            valid_trials,
+            invalid_trials,
+            counts,
+            candidate_results,
+            valid_tasks_by_variant,
+        ) = self._load_existing_trials(experiment_id, variants, candidate_name)
         early_stop: dict[str, Any] = {}
         execution_variants = list(variants)
         if fail_fast_candidate_name:
@@ -99,6 +98,8 @@ class EvaluationTrialMixin(EvaluationTrialRecordMixin):
                         >= required_candidate_trials
                     ):
                         break
+                    if (task.id, variant.name, trial_number) in existing_trials:
+                        continue
                     trial_dir = artifact_dir / "trials" / task.id / variant.name / str(trial_number)
                     started_at = utc_now()
                     try:

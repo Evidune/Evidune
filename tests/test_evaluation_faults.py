@@ -41,6 +41,34 @@ async def test_total_trial_wall_time_is_bounded():
 
 
 @pytest.mark.asyncio
+async def test_total_trial_timeout_does_not_wait_for_cancellation():
+    prepared = PreparedTask(
+        corpus_id="fixture",
+        task=object(),
+        split="development",
+        workspace="/tmp/evidune-hard-timeout-test",
+        agent_context={"trial_timeout_seconds": 0.01},
+    )
+
+    async def cancellation_resistant_executor(*_args):
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            await asyncio.sleep(1)
+        return BenchmarkExecution(output="late")
+
+    with pytest.raises(BenchmarkProviderTimeout, match="exceeded 0.01 seconds"):
+        await execute_variant(
+            adapter=_Adapter(),
+            prepared=prepared,
+            variant=VariantSpec("candidate", "1", "Skill"),
+            model_ref={},
+            trial=1,
+            executor=cancellation_resistant_executor,
+        )
+
+
+@pytest.mark.asyncio
 async def test_inner_provider_timeout_keeps_its_specific_diagnostic():
     prepared = PreparedTask(
         corpus_id="fixture",

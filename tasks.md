@@ -24,8 +24,8 @@ Canonical task board. Use `[ ]` for pending, `[x]` for completed. Append new tas
   - [x] Add pinned `EvaluationCorpus` manifests and a generic `BenchmarkAdapter` contract
   - [x] Add three reviewed official Skills with source-matched faithful fixtures and real-LLM smoke evidence
   - [x] Pin and verify a separate 30-task AppWorld corpus plus a three-task repeated live slice with one development and two source-disjoint holdout tasks; pair sources only where capabilities genuinely match
-  - [ ] Complete the full 20-to-30-task repeated AppWorld release run and publish its immutable report bundle
-  - [ ] Complete real-corpus and production canary validation; deterministic, replay, and opt-in live-LLM layers are implemented
+  - [x] Complete the full 30-task repeated AppWorld release run and publish its immutable report bundle; the tested candidate was rejected
+  - [ ] Complete production shadow/canary validation for a future V4-passing candidate; deterministic, replay, live-LLM, and full AppWorld release layers are implemented
   - [x] Add known-bad Skill mutation tests and a hidden holdout promotion gate
   - Acceptance: every evaluation promotion or rollback is reproducible from its source executions, evidence, contracts, corpus/model/environment revisions, and validation artifacts; at least one known mutation is detected, repaired into a candidate, and validated with a real LLM on hidden tasks without a hard-gate regression
 

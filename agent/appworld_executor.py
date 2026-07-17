@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
@@ -12,6 +11,7 @@ from agent.benchmark_executor import (
     BenchmarkBudgetExceeded,
     BenchmarkProviderTimeout,
     InvalidBenchmarkResponse,
+    complete_with_tools_hard_timeout,
 )
 from agent.llm import LLMClient
 from agent.tools.base import Tool, ToolCall
@@ -206,13 +206,12 @@ class AppWorldLLMBenchmarkExecutor:
         final_text = ""
         for _ in range(max_model_turns):
             try:
-                completion = await asyncio.wait_for(
-                    self.llm.complete_with_tools(
-                        messages,
-                        registry.all(),
-                        temperature=model_ref.get("temperature", 0),
-                    ),
+                completion = await complete_with_tools_hard_timeout(
+                    self.llm,
+                    messages,
+                    registry.all(),
                     timeout=model_call_timeout,
+                    temperature=model_ref.get("temperature", 0),
                 )
             except TimeoutError as exc:
                 raise BenchmarkProviderTimeout(

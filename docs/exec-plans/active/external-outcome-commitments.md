@@ -86,24 +86,25 @@ iteration protocol as any future domain; they do not define the schema.
   tests pass, 30/31 package tests pass (the remaining remote-mode assertion is a local
   proxy-message mismatch), and all 147 packaged tasks verify. A pinned 30-task manifest
   and a source-disjoint three-task live slice are available. Both manifests declare the
-  isolated `.evidune/runtime/appworld-root` data root; the full 30-task repeated live-LLM
-  release run remains outstanding.
+  isolated `.evidune/runtime/appworld-root` data root. The full 30-task repeated V4
+  live-LLM run is complete: development rejected the candidate, holdout was inconclusive,
+  replay failed, and production V5 canary remains a future release gate.
 
-## Implementation Status (2026-07-15)
+## Implementation Status (2026-07-16)
 
-| Capability                                        | Status      | Evidence                                                                                                                                                                                              |
-| ------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Execution and contract lineage                    | implemented | SQLite schema, immutable snapshots, execution reconstruction tests                                                                                                                                    |
-| Typed score-optional governance                   | implemented | deterministic hard-gate policy and invalid/inconclusive handling                                                                                                                                      |
-| Binding, probe, lease, and delayed observation    | implemented | allowlisted read-only registry, idempotent scheduler, retry tests                                                                                                                                     |
-| Version aggregation and attribution               | implemented | version/contract grouping with contributing and excluded execution ids                                                                                                                                |
-| Candidate, replay, promotion, rejection, rollback | implemented | immutable candidate plus digest, provenance, and holdout promotion gates                                                                                                                              |
-| Runtime automatic replacement and observation     | implemented | atomic active-file replacement, version bump, live registry reload, post-rewrite confirmation, and automatic restore                                                                                  |
-| Corpus, adapter, reports, and mutation tests      | implemented | fixture/AppWorld contracts, JSON/Markdown/JUnit bundles, seven mutation operators                                                                                                                     |
-| Real-LLM smoke                                    | validated   | Codex `gpt-5.4`, experiment `exp_bb0b251ffcac4a31b891fc38d7b2ba70`, 2/2 valid trials                                                                                                                  |
-| Official third-party Skill fixtures               | validated   | three source-matched pairings; real-LLM experiments `exp_201b12aea1cd48e5a82045c5ee08912d`, `exp_c32e364a8d634db99cf1c4adcf7beb6d`, `exp_a147935a24ff4435a33ec6bd478c4816`                            |
-| Real AppWorld 20-to-30-task hidden-holdout pilot  | partial     | 30-task manifest verified; three-task live slice `exp_94665e2d31a44989809640a76ab481b3` validated candidate 6/6, parent 5/6, and killed no-op mutation 6/6; full 30-task release bundle still pending |
-| Production shadow/canary delayed-outcome pilot    | pending     | requires a bounded real integration and rollback policy                                                                                                                                               |
+| Capability                                        | Status      | Evidence                                                                                                                                                                                                                                        |
+| ------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Execution and contract lineage                    | implemented | SQLite schema, immutable snapshots, execution reconstruction tests                                                                                                                                                                              |
+| Typed score-optional governance                   | implemented | deterministic hard-gate policy and invalid/inconclusive handling                                                                                                                                                                                |
+| Binding, probe, lease, and delayed observation    | implemented | allowlisted read-only registry, idempotent scheduler, retry tests                                                                                                                                                                               |
+| Version aggregation and attribution               | implemented | version/contract grouping with contributing and excluded execution ids                                                                                                                                                                          |
+| Candidate, replay, promotion, rejection, rollback | implemented | immutable candidate plus digest, provenance, and holdout promotion gates                                                                                                                                                                        |
+| Runtime automatic replacement and observation     | implemented | atomic active-file replacement, version bump, live registry reload, post-rewrite confirmation, and automatic restore                                                                                                                            |
+| Corpus, adapter, reports, and mutation tests      | implemented | fixture/AppWorld contracts, JSON/Markdown/JUnit bundles, seven mutation operators                                                                                                                                                               |
+| Real-LLM smoke                                    | validated   | Codex `gpt-5.4`, experiment `exp_bb0b251ffcac4a31b891fc38d7b2ba70`, 2/2 valid trials                                                                                                                                                            |
+| Official third-party Skill fixtures               | validated   | three source-matched pairings; real-LLM experiments `exp_201b12aea1cd48e5a82045c5ee08912d`, `exp_c32e364a8d634db99cf1c4adcf7beb6d`, `exp_a147935a24ff4435a33ec6bd478c4816`                                                                      |
+| Real AppWorld 30-task V4 release validation       | completed   | development `exp_1636f1d0fadc40c19d8428680c450643` rejected the candidate; holdout `exp_39baa4b7312c4b3a837e2fe9c9a7812a` was inconclusive and replay failed; see [the release report](../../references/appworld-30-task-release-validation.md) |
+| Production shadow/canary delayed-outcome pilot    | pending     | reserved for a future candidate that first passes V4, with bounded exposure and rollback policy                                                                                                                                                 |
 
 The fixture smokes use deterministic state/output evaluators; the model does not judge its
 own result. The AppWorld track uses AppWorld's database-state evaluator and requires an
@@ -702,7 +703,7 @@ Acceptance:
   tasks, contracts, and evaluator revisions; model nondeterminism remains visible as
   repeated trials rather than being hidden.
 
-Current evidence (2026-07-15):
+Current evidence (2026-07-16):
 
 - `examples/evaluation/official-skills.yaml` approves three official Skills only through
   `examples/evaluation/official-skills-fixtures.yaml`; all three one-trial real-LLM fixture
@@ -743,7 +744,24 @@ Current evidence (2026-07-15):
   killed 6/6 by `appworld_state_evaluator`. Five budget-exhausted trials were recorded as
   invalid and excluded. Replay independently returned `promotable: true`; JSON, Markdown,
   JUnit, trial, trace, and replay artifacts are stored under the experiment artifact
-  directory. This closes the three-task pilot, not the pending 30-task release run.
+  directory. This closed the three-task candidate-generation pilot.
+- Full development experiment `exp_1636f1d0fadc40c19d8428680c450643`
+  collected complete paired evidence for all 15 development tasks. The parent passed
+  36/45 valid repetitions and the candidate passed 32/45, so governance rejected the
+  candidate after a four-pass regression. Fourteen additional trials were invalid:
+  12 budget exhaustion and two external connection failures.
+- Full source-disjoint holdout experiment `exp_39baa4b7312c4b3a837e2fe9c9a7812a`
+  completed the remaining 15 tasks. The candidate improved by eight passes on the 10
+  fully paired tasks, but five tasks lacked complete paired evidence, 50 trials exhausted
+  execution budgets, and replay found authoritative candidate failures. Governance
+  therefore remained inconclusive and non-promotable.
+- The formal runs exposed cancellation-resistant provider streams and interrupted-batch
+  recovery as real reliability gaps. Model turns and whole trials now have hard
+  wall-clock cutoffs, and an immutable experiment can resume stored task/variant/trial
+  rows without duplication. Full metrics and task-level evidence are recorded in
+  [the AppWorld 30-task release report](../../references/appworld-30-task-release-validation.md).
+- No production shadow or canary was started. V5 remains reserved for a future candidate
+  that first passes the complete V4 corpus and replay gate.
 
 ### Phase 7: Advanced measurement and assisted discovery
 

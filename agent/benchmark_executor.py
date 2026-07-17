@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
+import threading
 from typing import Any
 
 from agent.llm import LLMClient
@@ -31,6 +33,49 @@ class BenchmarkProviderTimeout(TimeoutError):
 
 
 _JSON_RE = re.compile(r"\{[\s\S]*\}", re.MULTILINE)
+
+
+async def complete_with_tools_hard_timeout(
+    llm: LLMClient,
+    messages: list[dict[str, Any]],
+    tools: list[Any],
+    *,
+    timeout: float,
+    temperature: float,
+) -> Any:
+    """Run one tool-using model turn behind a hard wall-clock timeout."""
+
+    loop = asyncio.get_running_loop()
+    result = loop.create_future()
+
+    def settle(value: Any = None, error: BaseException | None = None) -> None:
+        if result.done():
+            return
+        if error is not None:
+            result.set_exception(error)
+        else:
+            result.set_result(value)
+
+    def publish(value: Any = None, error: BaseException | None = None) -> None:
+        if loop.is_closed():
+            return
+        try:
+            loop.call_soon_threadsafe(settle, value, error)
+        except RuntimeError:
+            pass
+
+    def worker() -> None:
+        try:
+            completion = asyncio.run(
+                llm.complete_with_tools(messages, tools, temperature=temperature)
+            )
+        except BaseException as exc:
+            publish(error=exc)
+        else:
+            publish(value=completion)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return await asyncio.wait_for(result, timeout=timeout)
 
 
 class LiveLLMBenchmarkExecutor:
